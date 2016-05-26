@@ -9,6 +9,7 @@ queueTag                = "queue:tag:awaiting-rna-fold-for-shuffled-0:members"
 sequenceTag             = "CDS:taxid:%d:protid:%s:computed:cds-shuffled-seq"
 computationResultTag    = "CDS:taxid:%d:protid:%s:computed:rna-fold-for-shuffled-0:energy"
 
+
 r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
 
 
