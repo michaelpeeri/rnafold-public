@@ -1,3 +1,21 @@
+% Shuffle a CDS sequence while maintaing translation and codon frequencies.
+% This function maximizes the number of replacements, by avoiding cases in which a codon is replaced by an identical codon.
+%
+% Explanation:
+% Each AA is handled in sequence, with replacements done between the different codons used to encode it.
+% The problem can be formalized as a graph, with each codon instance (encoding the current AA) represented as a node and each potential
+% replacement as an edge. Edges exist therefore between a node and all nodes representing instance of other codons. This kind of graph
+% is called a Complete multi-partite graph (multi-partite because it contains several classes of nodes with no edges within the same
+% group; and complete because all edges to other groups exist). In this formalization, we are looking for (one of) the maximum-cardinality
+% matching.
+% The algorithm here is similar to (but not the same) as the one developed in this reference:
+% David Sitton - Maximum Matchings in Complete Multipartite Graphs
+% http://math.furman.edu/~mwoodard/fuejum/content/1996/1996paper2.pdf
+% In my version, all possible replacements are done between the two most frequent codons (for the current AA), and this is repeated as
+% long as possible replacements remain. The intuition behind choosing the most frequent codons for the first replacement (this is a
+% greedy heuristic) is that these are the most constrained groups (because there are no edges inside a group, the largest group is the
+% hardest to find matches for. A codon from a small group can be replaced with most other codons).
+%
 function newcds=shuffleCDS(cds, geneticCode)
   % TODO: use each sequence's genetic code
   % TODO: special handling for stop codons ?

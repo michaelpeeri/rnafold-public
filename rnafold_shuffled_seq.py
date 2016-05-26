@@ -1,10 +1,16 @@
+# Worker process for the shuffled sequences queue
+# Read sequences queued for processing, do the processing for each, and store the result in the sequence's entry
 import redis
 import RNA
 import config
 
+# Configuration
+queueTag                = "queue:tag:awaiting-rna-fold-for-shuffled-0:members"
+sequenceTag             = "CDS:taxid:%d:protid:%s:computed:cds-shuffled-seq"
+computationResultTag    = "CDS:taxid:%d:protid:%s:computed:rna-fold-for-shuffled-0:energy"
+
 r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
 
-queueTag = "queue:tag:awaiting-rna-fold-for-shuffled-0:members"
 
 class XException(object):
     pass
@@ -12,26 +18,31 @@ class XException(object):
 while(True):
     try:
         itemToProcess = None
-        # Remove an item from the queue, and mark it as "at-risk"
+        # Remove an item from the queue.
+        # Note: Failed sequences (i.e. those removed from the queue but not process successfully) will be requeued using
+        # the requeue_sequences scripts.
         itemToProcess = r.lpop(queueTag)
         if( itemToProcess is None):
             print("No more items to process...")
             break
 
+        # Each entry in the queue is in the format "taxid:protid"
         print("Processing item %s..." % itemToProcess)
         taxId, protId = itemToProcess.split(":")
         taxId = int(taxId)
 
-        seq = r.get("CDS:taxid:%d:protid:%s:computed:cds-shuffled-seq" % (taxId, protId))
+        # Get the shuffled sequence for this entry
+        seq = r.get(sequenceTag % (taxId, protId))
+        # Calculate the RNA folding energy. This is the computation-heavy part.
         strct, energy = RNA.fold(seq)
-        print("%d:%s --> %f" % (taxId, protId, energy))
-        r.set("CDS:taxid:%d:protid:%s:computed:rna-fold-for-shuffled-0:energy" % (taxId, protId), energy)
 
-        #r.srem(atRiskTag, itemToProcess)
+        # Store the calculation result
+        print("%d:%s --> %f" % (taxId, protId, energy))
+        r.set(computationResultTag % (taxId, protId), energy)
 
     except XException:
         print(str(Exception))
         break
 
-
 print("Done!")
+# No more items in the queue; exit...
