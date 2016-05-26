@@ -1,3 +1,7 @@
+# Command-line args: <taxId> <fastaFile>
+# Read a fasta file containing the shuffled versions of the CDS for a given species;
+# Store the shuffled sequences in the record of each protein.
+#
 import sys
 import redis
 from Bio import SeqIO
@@ -24,17 +28,18 @@ for record in SeqIO.parse(f, "fasta"):
     assert(proteinId not in visitedProteinIds)
     visitedProteinIds.add(proteinId)
 
+    # Skip sequences that don't have an existing entry
     if( not r.exists("CDS:taxid:%d:protid:%s:seq" % (taxId, proteinId))):
         notFoundCount += 1
         print("Warning: Couldn't find existing entry for protein %s" % proteinId)
         continue
 
+    # Skip entries that have a length different than the shuffled length
     cdsLength = r.strlen("CDS:taxid:%d:protid:%s:seq" % (taxId, proteinId))
     if( len(record.seq) != cdsLength ):
         skippedCount += 1
         print("Warning: Found entry for protein %d, but the original CDS length (%d) is different than the shuffled CDS length (%d)" % (proteinId, len(record.seq), cdsLength))
         continue
-
 
     # Store the shuffled CDS sequence
     r.set('CDS:taxid:%d:protid:%s:computed:cds-shuffled-seq' % (taxId, proteinId), record.seq)

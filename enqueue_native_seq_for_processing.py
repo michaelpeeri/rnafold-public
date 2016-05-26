@@ -1,9 +1,12 @@
 # Input: taxid
-# Enqueue all complete CDSs for a particular organism for a given processing task
-
+# Enqueue all complete CDSs for a particular organism into a processing queue
 import sys
 import redis
 import config
+
+# Configuration
+# Key name for this queue
+queueKey = "queue:tag:awaiting-rna-fold-0:members"
 
 r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
 
@@ -15,7 +18,7 @@ print("Procesing %d sequences for tax-id %d (%s)..."
 
 skipped = 0
 selected = 0
-queueKey = "queue:tag:awaiting-rna-fold-0:members"
+# Iterate over all CDS entries for this species
 for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
     # Filters
     # Skip partial CDSs
@@ -24,7 +27,7 @@ for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
         continue
 
     selected += 1
-    # Insert into the processing queue
+    # Insert entry into the processing queue
     r.rpush(queueKey, "%s:%s" % (taxIdForProcessing, protId))
 
 print("%d selected, %d skipped (%d total)" % (selected, skipped, selected+skipped))

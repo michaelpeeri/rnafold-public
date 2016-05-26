@@ -1,3 +1,6 @@
+# Extract the CDS sequences for a given species into fasta format (write to standard output)
+# Input: taxid
+#
 from __future__ import print_function
 import sys
 import redis
@@ -14,6 +17,7 @@ taxIdForProcessing = int(sys.argv[1])
 
 skipped = 0
 selected = 0
+# Iterate over all CDS entries for this taxId
 for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
     # Filters
     # Skip partial CDSs
@@ -22,7 +26,7 @@ for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
         continue
 
     selected += 1
-    # Insert into the processing queue
+    # Extract the CDS sequence; write in fasta format to standard output
     cds = r.get("CDS:taxid:%d:protid:%s:seq" % (taxIdForProcessing, protId))
     record = SeqRecord(Seq(cds, NucleotideAlphabet), id=protId)
     print(record.format("fasta"), end='')

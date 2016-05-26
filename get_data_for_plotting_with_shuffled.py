@@ -1,13 +1,17 @@
-# Input: taxid
-# Enqueue all complete CDSs for a particular organism for a given processing task
-
+# Extract data (from redis) to create RNA energy plot for native CDS fold energy and shuffled CDS fold energy
+# Use plot_rnafold_energy_vs_cds_length.r to create plot.
 import sys
 import redis
 import config
 
+# Configuration
+# Species (taxIds) for inclusion
+taxIdsForProcessing = [3055, 556484]
+
+
 r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
 
-taxIdsForProcessing = [3055, 556484]
+
 
 for taxIdForProcessing in taxIdsForProcessing:
     #print("#Procesing %d sequences for tax-id %d (%s)..."
@@ -24,19 +28,24 @@ for taxIdForProcessing in taxIdsForProcessing:
             skipped += 1
             continue
 
+        # Skip entries missing the native folding energy
         if(not r.exists("CDS:taxid:%d:protid:%s:computed:rna-fold-0:energy" % (taxIdForProcessing, protId))):
             skipped += 1
             continue
 
+        # Skip entries missing the shuffled folding energy
         if(not r.exists("CDS:taxid:%d:protid:%s:computed:rna-fold-for-shuffled-0:energy" % (taxIdForProcessing, protId))):
             skipped += 1
             continue
 
         selected += 1
 
+        # Read field values
         cdsLength = int(r.strlen("CDS:taxid:%d:protid:%s:seq" % (taxIdForProcessing, protId)))
         foldEnergy = float(r.get("CDS:taxid:%d:protid:%s:computed:rna-fold-0:energy" % (taxIdForProcessing, protId)))
         foldEnergySuffled = float(r.get("CDS:taxid:%d:protid:%s:computed:rna-fold-for-shuffled-0:energy" % (taxIdForProcessing, protId)))
+
+        # Write all data for this protein in CSV format
         print("%d,%s,%d,%f,%f" % (taxIdForProcessing, protId, cdsLength, foldEnergy, foldEnergySuffled))
 
         #print("#%d selected, %d skipped (%d total)" % (selected, skipped, selected+skipped))
