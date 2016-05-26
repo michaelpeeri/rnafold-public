@@ -39,15 +39,9 @@ while(True):
         print("%d:%s --> %f" % (taxId, protId, energy))
         r.set(computationResultTag % (taxId, protId), energy)
 
-        r.srem(atRiskTag, itemToProcess)
 
     except XException:
         print(str(Exception))
         break
-
-
-atRiskCount = r.scard(atRiskTag)
-if( atRiskCount > 0 ):
-    print("WARNING: at-risk queue contains %d items!" % atRiskCount)
 
 print("Done!")
