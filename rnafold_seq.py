@@ -1,4 +1,4 @@
-# Worker process for the shuffled sequences queue
+# Worker process for the CDS sequences queue
 # Read sequences queued for processing, do the processing for each, and store the result in the sequence's entry
 import redis
 import RNA
