@@ -54,8 +54,8 @@ function newcds=shuffleCDS(cds, geneticCode)
     lenInCodons = size(cdsCodons,1);
     codonOccurrences = cell2mat(cellfun(@(x) all(cdsCodons==repmat(x, lenInCodons,1),2), aaCodons, 'UniformOutput', false));
     codonNumOccurrences = sum(codonOccurrences,1);
-    % Sort the codons by occurrence count
 
+    % Helper function to find 'count' random positions in which a certain codon occurs
     function indices = getRandomCodonPositions(codonIdx, count)
       %disp(sprintf('-- getRandomCodonPositions(%d,%d)', codonIdx, count));
       allIndicesForCodon = find(codonOccurrences(:,codonIdx));
@@ -66,13 +66,16 @@ function newcds=shuffleCDS(cds, geneticCode)
     end
 
 
+    % Main loop - perform codon shuffles (for codons encoding for the current AA) as long as possible
     while(true)
       %disp('Sorting...');
+      % Get the number of occurrences for each codon encoding for the current AA.
+      % B = Counts; I = Indices
       [B I] = sort(codonNumOccurrences, 'descend');
       %disp(B);
       %disp(I);
 
-      disp(codonNumOccurrences);
+      Disp(codonNumOccurrences);
       topCounts = B(1:2);
       topCodons = I(1:2);
       %disp(topCodons);
