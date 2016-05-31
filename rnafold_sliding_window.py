@@ -60,11 +60,11 @@ while(True):
             # Store the calculation result
             #print("%d:%s --> %f" % (taxId, protId, energy))
             r.lpush(computationResultTag % (taxId, protId), energy)
-            print("(%d,%d) -> %f" % (start, start+windowWidth, energy))
+            #print("(%d,%d) -> %f" % (start, start+windowWidth, energy))
         
         # Verify the number of results we stored matches the number of windows
-        print(r.llen(computationResultTag % (taxId, protId)))
-        print(len(seq)-windowWidth+1)
+        #print(r.llen(computationResultTag % (taxId, protId)))
+        #print(len(seq)-windowWidth+1)
         assert(r.llen(computationResultTag % (taxId, protId)) == len(seq) - windowWidth + 1)
 
 
