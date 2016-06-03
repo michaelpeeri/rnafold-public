@@ -5,7 +5,7 @@ function []=shuffleFasta(filename,geneticCode)
   biofile = BioIndexedFile('FASTA', filename);
   numSequences = biofile.NumEntries;
 
-  outfile = [filename '.shuffled.fna'];
+  outfile = [filename '.shuffled.v2.fna'];
 
   for i=1:numSequences
     entry = biofile.read([i]);
