@@ -82,7 +82,7 @@ for taxIdForProcessing in species:
 
         shuffledSeqIds = map(int, r.lrange(shuffledSeqIdsKey % (taxIdForProcessing, protId), 0, -1))
 
-        anyWindowsSelected = False
+        anySeriesSelected = False
         print(shuffledSeqIds)
         for idx, currentSeqId in enumerate(shuffledSeqIds):
             # Count the number of window results stored for this series (in the current sequence)
