@@ -3,3 +3,7 @@
 host = "127.0.0.1"
 port = 6379
 db = 0
+
+
+mysql_host_connection = 'mysql://rnafold:rnafold@localhost/rnafold'
+
