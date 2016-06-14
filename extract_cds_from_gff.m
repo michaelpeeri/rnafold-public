@@ -1,5 +1,5 @@
 
-function [] = process_genome(fromEntry,toEntry)
+function [] = extract_cds_from_gff(fromEntry,toEntry)
   % Configuration
   %filesToProcess = struct('path',{},'geneticcode',{}, 'id',{});
   %filesToProcess(1).id = 'Chlamydomonas reinhardtii';
@@ -15,9 +15,10 @@ function [] = process_genome(fromEntry,toEntry)
   %gffFile = '~/rnafold/data/GCF_000002595.1_v3.0_genomic.gff';
   %species = 'Chlamydomonas reinhardtii';
   %geneticCode = 1;
-  genomeFile = '~/rnafold/data/GCF_000150955.2_ASM15095v2_genomic.fna';
-  gffFile = '~/rnafold/data/GCF_000150955.2_ASM15095v2_genomic.gff';
-  species = 'Phaeodactylum tricornutum CCAP 1055/1';
+  genomeFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/S288C_reference_sequence_R64-2-1_20150113.fsa';
+  %gffFile = '~/rnafold/data/GCF_000150955.2_ASM15095v2_genomic.gff';
+  gffFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/saccharomyces_cerevisiae_R64-2-1_20150113.gff';
+  species = 'Saccharomyces cerevisiae'
   genomeSeqs = BioIndexedFile('fasta', genomeFile);
   geneticCode = 1;  % ref: http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=556484
 
@@ -27,6 +28,7 @@ function [] = process_genome(fromEntry,toEntry)
 
   % return substring from genoming sequence
   function seq = getGenomeSubsequence(id, from, to, strand)
+    disp(id);
     entry = fastaread(getEntryByKey(genomeSeqs, {id}));
     seq = entry.Sequence(from:to);
     if( strand=='-')
@@ -102,8 +104,19 @@ function [] = process_genome(fromEntry,toEntry)
     %disp(CDS);
     atts = parseCDSattributs(CDS.Attributes);
 
+    if(~isfield(atts, 'ID'))
+      if(isfield(atts, 'Name'))
+        atts.ID = atts.Name;
+      end
+    end
+    assert(isfield(CDS, 'Strand') || isfield(CDS, 'dummy'));
+    assert(isfield(CDS, 'Start')  || isfield(CDS, 'dummy'));
+    assert(isfield(CDS, 'Stop')   || isfield(CDS, 'dummy'));
+
+    %disp(CDS);
+
     % Get the sequence for this CDS
-    if(~isfield(CDS, 'dummy'))
+    if( ~isfield(CDS, 'dummy'))
       newseq = getGenomeSubsequence(CDS.Reference, CDS.Start, CDS.Stop, CDS.Strand);
     else
       newseq = '';
@@ -119,6 +132,19 @@ function [] = process_genome(fromEntry,toEntry)
       disp(length(sequence));
       disp(numExons);
 
+      % Skip CDS that are not marked as 'Verified'
+      % Todo - make this configurable, so it works with organisms other than S. cer.
+      %
+      %if( isfield(atts, 'orf_classification') && strcmpi(atts.orf_classification , 'Verified'))
+      if( ~isfield(atts, 'orf_classification') )
+        disp('Skipping unverfied orf.');
+        return;
+      end
+      if( ~strcmpi(atts.orf_classification, 'Verified'))
+        disp('Skipping unverfied orf.');
+        return;
+      end
+
       if(~firstEntry)
         fprintf(results, '  ,');
       else
@@ -131,6 +157,9 @@ function [] = process_genome(fromEntry,toEntry)
       if(isfield(atts, 'transl_table'))
         currGeneticCode = geneticcode(str2num(atts.transl_table));
         disp(['Overriding genetic code: ' atts.transl_table]);
+      elseif( strcmpi(CDS.Reference, 'chrmt'))
+        currGeneticCode = geneticcode(3); % Yeast mitochondrial
+        disp(['Overriding genetic code: ' 3]);
       else
         currGeneticCode = geneticcode(geneticCode);
       end
@@ -173,7 +202,13 @@ function [] = process_genome(fromEntry,toEntry)
       % Continuation
       numExons = numExons+1;
     end
-    sequence = [sequence newseq];
+    if( ~isfield(CDS, 'dummy'))
+      if( CDS.Strand=='+')
+        sequence = [sequence newseq];
+      else
+        sequence = [newseq sequence];
+      end
+    end
     prevatts = atts;
     prevCDS = CDS;
   end
