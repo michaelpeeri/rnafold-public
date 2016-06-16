@@ -22,7 +22,14 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
   genomeSeqs = BioIndexedFile('fasta', genomeFile);
   geneticCode = 1;  % ref: http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=556484
 
+  % Results fasta file
+  resultsFasta = sprintf('~/rnafold/results_%d_%d.cds_only.fna', fromEntry, toEntry);
+  if( size(dir(resultsFasta),1) == 1)
+    disp(sprintf('Warning: overwriting fasta results file %s', resultsFasta));
+    delete(resultsFasta);
+  end
 
+  % Results json file
   results = fopen(sprintf('~/rnafold/results_%d_%d.json',fromEntry,toEntry), 'w');
   fprintf(results, '{\n "Species":"%s",\n "geneticCode":%d,\n "genomeFile":"%s",\n "gffFile":"%s",\n "script":"%s",\n "time":"%s",\n "CDSlist":[\n', species, geneticCode, genomeFile, gffFile, mfilename('fullpath'), datestr(now()));
 
@@ -137,11 +144,14 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
       %
       %if( isfield(atts, 'orf_classification') && strcmpi(atts.orf_classification , 'Verified'))
       if( ~isfield(atts, 'orf_classification') )
-        disp('Skipping unverfied orf.');
+        disp('Skipping unclassified ORF');
         return;
       end
-      if( ~strcmpi(atts.orf_classification, 'Verified'))
-        disp('Skipping unverfied orf.');
+      if( ~strcmpi(atts.orf_classification, 'Verified') && ~strcmpi(atts.orf_classification, 'Uncharacterized') )
+        if( ~strcmpi(atts.orf_classification, 'Dubious' ) )
+          disp(['WARNING - unexpected orf_classification found - ' atts.orf_classification]);
+        end
+        disp('Skipping ORF characterized as ''Dubious''');
         return;
       end
 
@@ -153,6 +163,14 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
       attsJson = strjoin(cellfun(@(k,v) sprintf('"%s":%s',k,formatCell(v)), fieldnames(atts), struct2cell(atts), 'UniformOutput', false), ', ');
       fprintf(results, '{\n  "id":"%s",\n  "CDS":"%s",\n  "numExons":%d,\n  "length_nt":%d,\n  "attributes":{%s},\n  "reference":"%s",\n  "strand":"%s"\n  }\n', atts.ID, sequence, numExons, length(sequence), attsJson, CDS.Reference, CDS.Strand);
 
+      % Also write CDS sequences in fasta format
+      shortProtId = atts.ID;
+      % strip the `_CDS` suffix (if present)
+      suffixPos = strfind(shortProtId, '_CDS');
+      if( suffixPos > 0 )
+        shortProtId = shortProtId(1:suffixPos-1);
+      end
+      fastawrite(resultsFasta, shortProtId, sequence);
 
       if(isfield(atts, 'transl_table'))
         currGeneticCode = geneticcode(str2num(atts.transl_table));
