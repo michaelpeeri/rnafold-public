@@ -6,6 +6,37 @@ import config
 db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False)
 connection = db.connect()
 
+
+#######################################################
+# Table definitions for non-ORM use
+#######################################################
+
+md = MetaData()
+sequences = Table("sequences", md,
+                  Column("id", Integer, primary_key=True),
+                  Column("sequence", Text),
+                  Column("alphabet", SmallInteger),
+                  Column("taxid", Integer),
+                  Column("source", Integer))
+
+sequence_series = Table("sequence_series", md,
+                        Column("sequence_id", Integer, primary_key=True),
+                        Column("value", Float),
+                        Column("source", Integer, primary_key=True),
+                        Column("ext_index", SmallInteger, primary_key=True),
+                        Column("index", Integer, primary_key=True))
+
+sequence_series2 = Table("sequence_series2", md,
+                        Column("sequence_id", Integer, primary_key=True),
+                        Column("content", Text),
+                        Column("source", Integer, primary_key=True),
+                        Column("ext_index", SmallInteger, primary_key=True))
+
+
+#######################################################
+# Table definitions for ORM use
+#######################################################
+
 Base = declarative_base()
 
 class Sequence(Base):
@@ -16,20 +47,6 @@ class Sequence(Base):
     taxid = Column(Integer)
     source = Column(Integer)
 
-md = MetaData()
-sequences = Table("sequences", md,
-                  Column("id", Integer, primary_key=True),
-                  Column("sequence", Text),
-                  Column("alphabet", SmallInteger),
-                  Column("taxid", Integer),
-                  Column("source", Integer))
-sequence_series = Table("sequence_series", md,
-                        Column("sequence_id", Integer, primary_key=True),
-                        Column("value", Float),
-                        Column("source", Integer, primary_key=True),
-                        Column("ext_index", SmallInteger, primary_key=True),
-                        Column("index", Integer, primary_key=True))
-
 class SequenceSeries(Base):
     __tablename__ = "sequence_series"
     sequence_id = Column(Integer, primary_key=True)
@@ -37,6 +54,14 @@ class SequenceSeries(Base):
     source = Column(Integer, primary_key=True)
     ext_index = Column(SmallInteger, primary_key=True)
     index = Column(Integer, primary_key=True)
+
+class SequenceSeries2(Base):
+    __tablename__ = "sequence_series"
+    sequence_id = Column(Integer, primary_key=True)
+    content = Column(Text)
+    source = Column(Integer, primary_key=True)
+    ext_index = Column(SmallInteger, primary_key=True)
+
 
 
 Session = sessionmaker(bind=db)
@@ -52,4 +77,5 @@ class Sources:
     Computed = 2
     ShuffleCDSv2 = 10
     RNAfoldEnergy_SlidingWindow40 = 102
+    RNAfoldEnergy_SlidingWindow40_v2 = 103
     
