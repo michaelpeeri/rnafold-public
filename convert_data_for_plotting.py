@@ -6,8 +6,12 @@ import sys
 import redis
 import numpy
 from math import sqrt
+import numpy as np
 from scipy import stats
 from scipy.stats import norm
+import matplotlib
+matplotlib.use("cairo")
+import matplotlib.pyplot as plt
 import config
 import mysql_rnafold as db
 from sqlalchemy import sql
@@ -24,11 +28,14 @@ seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 cdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
 shuffledSeqIdsKey = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-v2"
 partialCDSKey = "CDS:taxid:%d:protid:%s:partial"
+debugMode = True
 
 # Connect to redis (source DB)
 r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
 # Connect to MySQL (destination DB)
 session = db.Session()
+#db.db.echo = True
+
 
 
 skipped = 0
@@ -43,6 +50,27 @@ selected = 0
 #                    )) ).scalar()
 
 
+def checkWindows(windows):
+    if( not debugMode ): return
+
+    lastIndex = -1
+    for vals in windows:
+        currIndex = vals[1]
+        assert( currIndex == lastIndex + 1 )
+        lastIndex = currIndex
+    assert(lastIndex <= calculationWidth-1)
+
+xaxis = np.arange(0,200,1)
+def plotCdsMFE(identifier, windows):
+
+    fig = plt.figure()
+    plt.plot(xaxis, windows)
+    plt.xlabel('window start (nt, from cds)')
+    plt.ylabel('MFE')
+    plt.grid(True)
+    plt.savefig("mfe_40nt_cds_%s.png" % identifier )
+    plt.close(fig)
+
 statsLines = []
 
 for taxIdForProcessing in species:
@@ -51,8 +79,8 @@ for taxIdForProcessing in species:
     cdsStats = []
     shuffledStats = []
     for i in range(calculationWidth):
-        cdsStats.append( runningstats.RunningStats() )
-        shuffledStats.append( runningstats.RunningStats() )
+        cdsStats.append( runningstats.RunningStats(debug=True) )
+        shuffledStats.append( runningstats.RunningStats(debug=True) )
         
     for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
         # Filters
@@ -84,19 +112,26 @@ for taxIdForProcessing in species:
 
 
         # get main seq
-        straightWindows = db.connection.execute( sql.select(( db.sequence_series.c.value,)).select_from(db.sequence_series).where(
+        straightWindows = db.connection.execute( sql.select(( db.sequence_series.c.value, db.sequence_series.c.index)).select_from(db.sequence_series).where(
                 sql.and_(
                     db.sequence_series.c.sequence_id==straightCdsSeqId,
                     db.sequence_series.c.source==seriesSourceNumber,
-                    db.sequence_series.c.ext_index==0
+                    db.sequence_series.c.ext_index==0,
+                    db.sequence_series.c.index < calculationWidth
                     )).order_by(sql.asc(db.sequence_series.c.index))).fetchall()
         # returns array of 1-tupples
-        if(len(straightWindows) < requiredNumWindows):
+        if(len(straightWindows) < calculationWidth):
             skipped +=1
             continue
+
         # Save the first N running windows calculated for this protein
         straightWindows = straightWindows[:calculationWidth]
         # straightWindows is a 200-array of 1-tuples (i.e. the MFE values for each window)
+        #
+        # Make sure the number
+        checkWindows(straightWindows)
+        print(straightWindows)
+
 
         # get shuffled seqs
         shuffledSeqIds = map(int, r.lrange(shuffledSeqIdsKey % (taxIdForProcessing, protId), 0, -1))
@@ -106,18 +141,27 @@ for taxIdForProcessing in species:
         for idx, currentSeqId in enumerate(shuffledSeqIds):
             # Count the number of window results stored for this series (in the current sequence)
 
-            shuffledWindows = db.connection.execute( sql.select(( db.sequence_series.c.value,)).select_from(db.sequence_series).where(
+            shuffledWindows = db.connection.execute( sql.select(( db.sequence_series.c.value, db.sequence_series.c.index)).select_from(db.sequence_series).where(
                     sql.and_(
                         db.sequence_series.c.sequence_id==currentSeqId,
                         db.sequence_series.c.source==seriesSourceNumber,
-                        db.sequence_series.c.ext_index==0
+                        db.sequence_series.c.ext_index==0,
+                        db.sequence_series.c.index < calculationWidth
                         )).order_by(sql.asc(db.sequence_series.c.index))).fetchall()
             # returns array of 1-tupples
-            if(len(shuffledWindows) < requiredNumWindows):
+            if(len(shuffledWindows) < calculationWidth):
                 continue
 
             # Save the first N running windows calculated for this protein
-            fullSeries.append( shuffledWindows[:calculationWidth] )
+            shuffledWindows = shuffledWindows[:calculationWidth]
+            checkWindows(shuffledWindows)
+
+            fullSeries.append( shuffledWindows )
+
+
+
+        # Disable plotting
+        #plotCdsMFE( protId, straightWindows )
 
         if( len(fullSeries) < 10 ):
             skipped += 1
@@ -143,7 +187,9 @@ for taxIdForProcessing in species:
                 break
 
             z = (vs - sMean) / sStd ################################
-            a.append(z)
+            #a.append(z)
+            # Testing - store the original window energy (not z-score)
+            a.append(vs)
 
         if( len(a) != calculationWidth):
             skipped += 1
@@ -166,8 +212,12 @@ for taxIdForProcessing in species:
         print("%d,%s,%s" % (taxIdForProcessing, protId, ",".join(map(lambda x: "%.4g"%x, a))))
 
         # Display status messages
-        if( selected % 500 == 499 ):
-            print("#Processed %d sequences (%d skipped)" % (selected, skipped) )
+        #if( selected % 500 == 499 ):
+        #    print("#Processed %d sequences (%d skipped)" % (selected, skipped) )
+
+        # DEBUG ONLY
+        #if( selected > 1005 ):
+        #    break
 
     # Finished processing all CDSs for this species
 
@@ -191,14 +241,18 @@ for taxIdForProcessing in species:
         else:
             prev = curr
     print("#shuffledStats elements contain %d items" % curr)
-    
-    out = ["#" + str(taxIdForProcessing)]
-    for i in range(calculationWidth):
-        compositeZ = (cdsStats[i].mean() - shuffledStats[i].mean()) / shuffledStats[i].stdev()
-        out.append("%.3g" % compositeZ)
-    statsLines.append( ",".join(out) )
+
+    # Generate stats line (unless there are too few results)
+    if( cdsStats[0].count() >= 1000 and shuffledStats[0].count() >= 1000 ):
+        out = ["#" + str(taxIdForProcessing)]
+        for i in range(calculationWidth):
+            compositeZ = (cdsStats[i].mean() - shuffledStats[i].mean()) / shuffledStats[i].stdev()
+            out.append("%.3g" % compositeZ)
+        statsLines.append( ",".join(out) )
+    else:
+        print("Warning: Skipping stats-line for species %d, because there aren't enough result..." % taxIdForProcessing)
 
 
-print("Done - processed %d sequences." % selected)
+print("Done - processed %d sequences (skipped %d sequences)." % (selected, skipped))
 for l in statsLines:
     print(l)
