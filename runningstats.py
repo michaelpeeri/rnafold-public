@@ -3,7 +3,11 @@
 # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
 from math import sqrt
 from random import uniform
+import numpy as np    # Required for testing only
 
+# Configuration
+debugApproximationErrorThreshold = 0.01
+debugExactErrorThreshold = 1e-9
 
 class RunningStats_alt(object):
     def __init__(self):
@@ -46,27 +50,49 @@ class RunningStats_alt(object):
 
 
 class RunningStats(object):
-    def __init__(self):
+    def __init__(self, debug=False):
+        self._debug = debug
         self.clear()
 
     def clear(self):
         self._n = 0;
         self._mean = 0.0
         self._m2 = 0.0
+        self._min = 0.0
+        self._max = 0.0
+        if( self._debug ):
+            self._samples = []
 
     def push(self, x):
         self._n += 1;
         x = float(x)
-        
+        # Update mean, var
         delta = x - self._mean
         self._mean += delta / self._n
         self._m2 += delta * (x - self._mean)
 
+        # Update min, max
+        if( self._n == 1):
+            self._min = x
+            self._max = x
+        else:
+            if( x > self._max):
+                self._max = x
+            if( x < self._min):
+                self._min = x
+        
+        if( self._debug ):
+            self._samples.append(x)
+
     def count(self):
+        if( self._debug ):
+            assert(len(self._samples)==self._n )
         return self._n
 
     def mean(self):
         if( self._n > 0 ):
+            if( self._debug ):
+                assert( abs( self._mean - np.mean(self._samples) ) < debugExactErrorThreshold )
             return self._mean
         else:
             raise Exception("Can't return the mean of 0 numbers")
@@ -74,14 +100,37 @@ class RunningStats(object):
     def variance(self):
         if( self._n > 1):
             if( self._n >= 1000 ):
-                return self._m2 / (self._n - 1)
+                var = self._m2 / (self._n - 1)
+                if( self._debug ):
+                    ref = np.var(self._samples)
+                    relError = abs(var-ref)/ref
+                    if( relError >= debugApproximationErrorThreshold ):
+                        print("ERROR: Estimated (on-line) variance value (%.6g) deviates from true value (%.6g). N=%d" % (var, ref, self._n))
+                    assert( relError < debugApproximationErrorThreshold )
+                return var
             else:
-                raise Exception("Refusing to return estimated variance for N<1000. Use exact non-streaming calculation.")
+                raise Exception("Refusing to return estimated variance for N<1000 (N=%d). Use exact non-streaming calculation." % (self._n,))
         else:
             return float('nan')
 
     def stdev(self):
         return sqrt(self.variance())
+
+    def min(self):
+        if( self._n > 0 ):
+            if( self._debug ):
+                assert(abs(self._min - np.min(self._samples)) < debugExactErrorThreshold )
+            return self._min
+        else:
+            return float('nan')
+
+    def max(self):
+        if( self._n > 0 ):
+            if( self._debug ):
+                assert(abs(self._max - np.max(self._samples)) < debugExactErrorThreshold )
+            return self._max
+        else:
+            return float('nan')
 
 
 def ref_mean_std(vals):
@@ -112,9 +161,9 @@ def test():
 
     testOk = True
 
-    if( abs(test_mean - ref_mean) > 1e-8 ):
+    if( abs(test_mean - ref_mean) > debugExactErrorThreshold ):
         testOk = False
-    if( abs((test_std - ref_std) / ref_std) > 0.01 ):
+    if( abs((test_std - ref_std) / ref_std) > debugApproximationErrorThreshold ):
         testOk = False
     
     if( not testOk ):
