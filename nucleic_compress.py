@@ -236,10 +236,16 @@ def test_all():
     test("n"*100)
     test("acgt"*25)
 
+    # Test on random sequences of varying length
+    for i in range(1, 100):
+        for j in range(100):
+            test(randseq(i))
 
-    for i in range(10):
+    # Test on some random sequences
+    for i in range(1000):
         test(randseq(5000))
 
+    # Exhaustively test all sequences of length N (1>= N >= 11)
     for n in range(1,12):
         print("-"*50)
         total = 5**n
@@ -264,7 +270,4 @@ if __name__=="__main__":
 
 
 
-
-for i in range(1, 100):
-    test(randseq(i))
 

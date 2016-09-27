@@ -133,6 +133,57 @@ class RunningStats(object):
             return float('nan')
 
 
+class OfflineStats(object):
+    def __init__(self, debug=False):
+        self.clear()
+
+    def clear(self):
+        self._min = 0.0
+        self._max = 0.0
+        self._samples = []
+
+    def push(self, x):
+        if( len(self._samples)==0 ):
+            self._min = x
+            self._max = x
+        else:
+            if( x < self._min ):
+                self._min = x
+            elif( x > self._max ):
+                self._max = x
+
+        self._samples.append(x)
+
+    def count(self):
+        return len(self._samples)
+
+    def mean(self):
+        if( len(self._samples) > 0 ):
+            return np.mean(self._samples)
+        else:
+            raise Exception("Can't return the mean of 0 numbers")
+    
+    def variance(self):
+        if( len(self._samples) > 1):
+            return np.var(self._samples)
+        else:
+            return float('nan')
+
+    def stdev(self):
+        return sqrt(self.variance())
+
+    def min(self):
+        if( len(self._samples) > 0 ):
+            return self._min
+        else:
+            return float('nan')
+
+    def max(self):
+        if( len(self._samples) > 0 ):
+            return self._max
+        else:
+            return float('nan')
+
 def ref_mean_std(vals):
     N = len(vals)
     sumX = float(sum(vals))
