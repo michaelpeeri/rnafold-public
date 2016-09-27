@@ -11,11 +11,13 @@
 import sys
 import codecs
 from random import randint
-import redis
+#import redis
 import config
 import mysql_rnafold as db
-from sqlalchemy import sql
-from sqlalchemy.sql.expression import func
+#from sqlalchemy import sql
+#from sqlalchemy.sql.expression import func
+from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, SpeciesCDSSource, numItemsInQueue
+
 
 # command-line arguments
 species = map(int, sys.argv[1].split(","))
@@ -25,30 +27,33 @@ if( computationTag.find(':') != -1 ): raise Exception("computation tag cannot co
 randomFraction = int(sys.argv[3])
 
 # Configuration
-queueKey = "queue:tag:awaiting-%s:members" % computationTag
-nativeCdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
-seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
+#queueKey = "queue:tag:awaiting-%s:members" % computationTag
+#nativeCdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
+#seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 windowWidth = 40
+numWindows = 150
 seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
+expectedNumberOfShuffles = 50
 # TODO: Add support for step-size >1
 
 # Establish DB connections
-r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
-session = db.Session()
+#r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
+#session = db.Session()
 
 skipped = 0
 selected = 0
 alreadyCompleted = 0
+totalMissingResults = 0
 
 for taxIdForProcessing in species:
     print("Procesing %d sequences for tax-id %d (%s)..."
-          % (r.scard("species:taxid:%d:CDS" % taxIdForProcessing),
+          % (countSpeciesCDS(taxIdForProcessing),
              taxIdForProcessing,
-             r.get("species:taxid:%d:name" % taxIdForProcessing)))
+             getSpeciesName(taxIdForProcessing)))
 
     # Iterate over all CDS entries for this species
-    for protId in r.sscan_iter("species:taxid:%d:CDS" % taxIdForProcessing):
-        protId = codecs.decode(protId)
+    for protId in SpeciesCDSSource(taxIdForProcessing):
+        #protId = codecs.decode(protId)
         # Filtering
 
         # Only process 1/N of the sequences, selected randomly (N=randomFraction)
@@ -58,19 +63,20 @@ for taxIdForProcessing in species:
             continue
 
         # Skip sequences with partial CDS annotations
-        if(r.exists("CDS:taxid:%d:protid:%s:partial" % (taxIdForProcessing, protId))):
-            skipped += 1
-            continue
+        #if(r.exists("CDS:taxid:%d:protid:%s:partial" % (taxIdForProcessing, protId))):
+        #    skipped += 1
+        #    continue
 
-        if( not r.exists(nativeCdsSeqIdKey % (taxIdForProcessing, protId)) ):
-            skipped +=1
-            continue
+        #if( not r.exists(nativeCdsSeqIdKey % (taxIdForProcessing, protId)) ):
+        #    skipped +=1
+        #    continue
 
-        seqLength = r.get(seqLengthKey % (taxIdForProcessing, protId))
+        cds = CDSHelper(taxIdForProcessing, protId)
+
+        seqLength = cds.length()
         if( not seqLength is None ):
             # Skip sequences with length <40nt (window width)
-            seqLength = int(seqLength)
-            if(seqLength < windowWidth ):
+            if(seqLength < windowWidth + numWindows - 1 ):
                 skipped += 1
                 continue
         else:
@@ -78,27 +84,24 @@ for taxIdForProcessing in species:
             skipped += 1
             continue
 
-        requiredNumWindows = seqLength - windowWidth + 1
+        existingResults = cds.checkCalculationResult( seriesSourceNumber, range(-1, expectedNumberOfShuffles) )
+        assert(len(existingResults) == expectedNumberOfShuffles + 1 )
+        
+        missingResults = 0
 
-        cdsSeqId = int(r.get(nativeCdsSeqIdKey % (taxIdForProcessing, protId)))
+        for shuffleId, resultOk in enumerate(existingResults):
+            if not resultOk:
+                cds.enqueueForProcessing(computationTag, shuffleId)
+                missingResults += 1
 
-        # Count the number of window results stored for this series (in the current sequence)
-        windowCount = db.connection.execute( sql.select(( sql.func.count('*'),)).select_from(db.sequence_series).where(
-                sql.and_(
-                    db.sequence_series.c.sequence_id==cdsSeqId,
-                    db.sequence_series.c.source==seriesSourceNumber,
-                    db.sequence_series.c.ext_index==0
-                    )) ).scalar()
-            # 
-        if( windowCount < requiredNumWindows ):
-            # enqueue this sequence for processing
-            # Note: all windows will be computed (even if partial results exist)
-            #print("%d:%s:%d" % (taxIdForProcessing, protId, currentSeqId))
-            r.rpush(queueKey, "%d:%s:%d" % (taxIdForProcessing, protId, cdsSeqId))
-            selected += 1
-        else:
-            alreadyCompleted += 1
+        if missingResults:
+            print("%s: enqueued %d additional results" % (protId, missingResults))
+            totalMissingResults += missingResults    
+                
+        #    selected += 1
+        #else:
+        #    alreadyCompleted += 1
 
-
-print("%d selected, %d skipped, %d already completed (%d total)" % (selected, skipped, alreadyCompleted, selected+skipped))
-print("queue contains %d items" % r.llen(queueKey))
+print("Added %d additional calculations" % totalMissingResults)
+print("%d sequences selected, %d skipped, %d already completed (%d total)" % (selected, skipped, alreadyCompleted, selected+skipped))
+print("queue contains %d items" % numItemsInQueue(computationTag))

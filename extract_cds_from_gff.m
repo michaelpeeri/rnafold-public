@@ -14,11 +14,14 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
   %genomeFile = '~/rnafold/data/GCF_000002595.1_v3.0_genomic.fna';
   %gffFile = '~/rnafold/data/GCF_000002595.1_v3.0_genomic.gff';
   %species = 'Chlamydomonas reinhardtii';
+  genomeFile = '~/rnafold/data/JGI/PhytozomeV11/Creinhardtii/assembly//Creinhardtii_281_v5.0.fa';
+  gffFile =    '~/rnafold/data/JGI/PhytozomeV11/Creinhardtii/annotation/Creinhardtii_281_v5.5.gene.gff3';
+  species = 'Chlamydomonas reinhardtii';
   %geneticCode = 1;
-  genomeFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/S288C_reference_sequence_R64-2-1_20150113.fsa';
+  %genomeFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/S288C_reference_sequence_R64-2-1_20150113.fsa';
   %gffFile = '~/rnafold/data/GCF_000150955.2_ASM15095v2_genomic.gff';
-  gffFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/saccharomyces_cerevisiae_R64-2-1_20150113.gff';
-  species = 'Saccharomyces cerevisiae'
+  %gffFile = '~/rnafold/data/S288C_reference_genome_R64-2-1_20150113/saccharomyces_cerevisiae_R64-2-1_20150113.gff';
+  %species = 'Saccharomyces cerevisiae'
   genomeSeqs = BioIndexedFile('fasta', genomeFile);
   geneticCode = 1;  % ref: http://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=556484
 
@@ -35,7 +38,7 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
 
   % return substring from genoming sequence
   function seq = getGenomeSubsequence(id, from, to, strand)
-    disp(id);
+    %disp(id);
     entry = fastaread(getEntryByKey(genomeSeqs, {id}));
     seq = entry.Sequence(from:to);
     if( strand=='-')
@@ -116,6 +119,11 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
         atts.ID = atts.Name;
       end
     end
+    % Remove trailing .N (e.g., ID.1, ID.2, ID.3), used in CDS identifiers in recent JGI GFF3s.
+    pos = regexp(atts.ID, '[.]\d+$');
+    if( pos )
+      atts.ID = atts.ID(1:pos-1);
+    end
     assert(isfield(CDS, 'Strand') || isfield(CDS, 'dummy'));
     assert(isfield(CDS, 'Start')  || isfield(CDS, 'dummy'));
     assert(isfield(CDS, 'Stop')   || isfield(CDS, 'dummy'));
@@ -135,25 +143,27 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
       disp(atts.ID);
       disp(CDS);
       disp(atts);
-      disp(sequence);
+      %disp(sequence);
       disp(length(sequence));
       disp(numExons);
+
+      isPartialCDS = isfield(atts, 'partial') && strcmpi(atts.partial, 'true');
 
       % Skip CDS that are not marked as 'Verified'
       % Todo - make this configurable, so it works with organisms other than S. cer.
       %
       %if( isfield(atts, 'orf_classification') && strcmpi(atts.orf_classification , 'Verified'))
-      if( ~isfield(atts, 'orf_classification') )
-        disp('Skipping unclassified ORF');
-        return;
-      end
-      if( ~strcmpi(atts.orf_classification, 'Verified') && ~strcmpi(atts.orf_classification, 'Uncharacterized') )
-        if( ~strcmpi(atts.orf_classification, 'Dubious' ) )
-          disp(['WARNING - unexpected orf_classification found - ' atts.orf_classification]);
-        end
-        disp('Skipping ORF characterized as ''Dubious''');
-        return;
-      end
+      %if( ~isfield(atts, 'orf_classification') )
+      %  disp('Skipping unclassified ORF');
+      %  return;
+      %end
+      %if( ~strcmpi(atts.orf_classification, 'Verified') && ~strcmpi(atts.orf_classification, 'Uncharacterized') )
+      %  if( ~strcmpi(atts.orf_classification, 'Dubious' ) )
+      %    disp(['WARNING - unexpected orf_classification found - ' atts.orf_classification]);
+      %  end
+      %  disp('Skipping ORF characterized as ''Dubious''');
+      %  return;
+      %end
 
       if(~firstEntry)
         fprintf(results, '  ,');
@@ -161,16 +171,6 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
         fprintf(results, '  ');
       end
       attsJson = strjoin(cellfun(@(k,v) sprintf('"%s":%s',k,formatCell(v)), fieldnames(atts), struct2cell(atts), 'UniformOutput', false), ', ');
-      fprintf(results, '{\n  "id":"%s",\n  "CDS":"%s",\n  "numExons":%d,\n  "length_nt":%d,\n  "attributes":{%s},\n  "reference":"%s",\n  "strand":"%s"\n  }\n', atts.ID, sequence, numExons, length(sequence), attsJson, CDS.Reference, CDS.Strand);
-
-      % Also write CDS sequences in fasta format
-      shortProtId = atts.ID;
-      % strip the `_CDS` suffix (if present)
-      suffixPos = strfind(shortProtId, '_CDS');
-      if( suffixPos > 0 )
-        shortProtId = shortProtId(1:suffixPos-1);
-      end
-      fastawrite(resultsFasta, shortProtId, sequence);
 
       if(isfield(atts, 'transl_table'))
         currGeneticCode = geneticcode(str2num(atts.transl_table));
@@ -184,18 +184,27 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
 
       translation = nt2aa(sequence, 'GeneticCode', currGeneticCode, 'ACGTOnly', false);
       numStopCodons = sum(translation=='*');
-      disp(translation);
+      %disp(translation);
 
 
       % Do sanity tests
       assert(length(sequence)>3);
       %assert(mod(length(sequence),3)==0);  % TODO - This doesn't work for partial CDSs - why?
-      isPartialCDS = isfield(atts, 'partial') && strcmpi(atts.partial, 'true');
       if(~isPartialCDS)
         assert(mod(length(sequence),3)==0);
         if(~isfield(atts, 'transl_except'))
           assert(any(strcmpi(currGeneticCode.Starts, sequence(1:3)))) % Is the first a codon a start-codon?
-          %assert(strcmpi(sequence(1:3), 'atg'));
+          if(numStopCodons==0)
+            disp(sprintf('Warning: no stop-codon found in entry %s', atts.ID));
+            disp(sequence);
+            disp(translation);
+            return;  % Skip this sequence
+          end
+          if(numStopCodons>1)
+            disp(sprintf('Error: More than one stop-codon found in entry %s', atts.ID));
+            disp(sequence);
+            disp(translation);
+          end
           assert(numStopCodons==1); % A complete CDS must contain a stop codon (and it must be the last codon - see below)
         end
       end
@@ -206,6 +215,23 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
           assert(translation(length(translation))=='*'); % if a stop codon exists, it must be the last codon
         end
       end
+
+
+
+      % Write the output in json format
+      fprintf(results, '{\n  "id":"%s",\n  "CDS":"%s",\n  "numExons":%d,\n  "length_nt":%d,\n  "attributes":{%s},\n  "reference":"%s",\n  "strand":"%s"\n  }\n', atts.ID, sequence, numExons, length(sequence), attsJson, CDS.Reference, CDS.Strand);
+      % Also write CDS sequences in fasta format
+      shortProtId = atts.ID;
+      % strip the `_CDS` suffix (if present)
+      suffixPos = strfind(shortProtId, '_CDS');
+      if( suffixPos > 0 )
+        shortProtId = shortProtId(1:suffixPos-1);
+      end
+
+      if( ~isPartialCDS)
+        fastawrite(resultsFasta, shortProtId, sequence);
+      end
+
     end
 
     if( ~strcmp(atts.ID, prevatts.ID) && length(prevatts.ID)>0) % is this CDS not a continuations of the previous gene?
@@ -221,11 +247,11 @@ function [] = extract_cds_from_gff(fromEntry,toEntry)
       numExons = numExons+1;
     end
     if( ~isfield(CDS, 'dummy'))
-      if( CDS.Strand=='+')
+      %if( CDS.Strand=='+')
         sequence = [sequence newseq];
-      else
-        sequence = [newseq sequence];
-      end
+      %else
+      %  sequence = [newseq sequence];
+      %end
     end
     prevatts = atts;
     prevCDS = CDS;
