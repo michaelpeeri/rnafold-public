@@ -4,6 +4,7 @@ from random import choice
 import numpy as np
 import pandas as pd
 import matplotlib
+from scipy.stats import norm, pearsonr, spearmanr, linregress
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
@@ -39,6 +40,20 @@ def plotXY(xvals, yvals, _labels, groups):
     colors, labels = assignColors(groups)
     #print(colors, labels)
 
+    # Linear correlation and factors
+    pearson = pearsonr(xvals,yvals)
+    spearman = spearmanr(xvals,yvals)
+    l = linregress(xvals,yvals)
+
+    abline_x = np.arange(0.25, 0.85, 0.1)
+    abline_y = abline_x * l.slope + l.intercept
+    plt.plot(abline_x, abline_y)
+
+    # plot the linear approximation
+    plt.annotate(s="pearson r: %1.3f (p<%g)"  % (pearson[0], pearson[1]),                xy=(0.25, -0.72), fontsize=6 )
+    plt.annotate(s="spearman r: %1.3f (p<%g)" % (spearman.correlation, spearman.pvalue), xy=(0.25, -0.80), fontsize=6 )
+
+    # Species scatter-plot
     for label in sorted(set(labels)):
         xdata = []
         ydata = []
@@ -50,10 +65,10 @@ def plotXY(xvals, yvals, _labels, groups):
                 color = _c
         if( xdata ):
             #print(xdata, ydata)
-            plt.scatter(xdata, ydata, c=color, label=label, s=80)
+            plt.scatter(xdata, ydata, c=color, label=label, s=50)
 
     for x,y,l in zip(xvals, yvals, _labels):
-        plt.annotate(l, (x-0.006, y+0.02))
+        plt.annotate(l, (x-0.006, y+0.02), fontsize=4)
 
 
     # plt.annotate('', xy=(0.60, 0.4), xycoords='data',
@@ -72,7 +87,6 @@ def plotXY(xvals, yvals, _labels, groups):
 
     #axis = ax.new_floating_axis(0,-1)
     #axis.label.set_text("Weaker")
-
 
     plt.xlabel('GC% near CDS start')
     plt.ylabel('Delta LMFE (Native - Shuffled)')
@@ -97,10 +111,10 @@ def plotXY_2(xvals, yvals, _labels, groups):
                 color = _c
         if( xdata ):
             #print(xdata, ydata)
-            plt.scatter(xdata, ydata, c=color, label=label, s=80)
+            plt.scatter(xdata, ydata, c=color, label=label, s=50)
 
     for x,y,l in zip(xvals, yvals, _labels):
-        plt.annotate(l, (x-0.006, y+0.02))
+        plt.annotate(l, (x-0.006, y+0.02), fontsize=4)
 
     plt.xlabel('GC% near CDS start')
     plt.ylabel('Native LMFE')
@@ -130,14 +144,14 @@ def plotXY_3(xvals, yvals1, yvals2, _labels, groups):
                 color = _c
         if( xdata ):
             #print(xdata, ydata)
-            ax1.scatter(xdata, ydata1, c=color, label=label, s=80)
-            ax2.scatter(xdata, ydata2, c=color, label=label, s=80)
+            ax1.scatter(xdata, ydata1, c=color, label=label, s=50)
+            ax2.scatter(xdata, ydata2, c=color, label=label, s=50)
             #plt.scatter(xdata, ydata, c=color, label=label, s=80)
 
     for x,y1,y2,l in zip(xvals, yvals1, yvals2, _labels):
         #plt.annotate(l, (x-0.006, y+0.02))
-        ax1.annotate(l, (x-0.006, y1+0.02))
-        ax2.annotate(l, (x-0.006, y2+0.02))
+        ax1.annotate(l, (x-0.006, y1+0.02), fontsize=4)
+        ax2.annotate(l, (x-0.006, y2+0.02), fontsize=4)
 
     plt.xlabel('GC% near CDS start')
     ax1.set_ylabel('Native LMFE')
@@ -148,14 +162,15 @@ def plotXY_3(xvals, yvals1, yvals2, _labels, groups):
     plt.savefig("scatter_xy_split.svg")
     plt.close(fig)
 
+xdata = []
+ydata = []
+ydata_nativeonly = []
+ydata_shuffledonly = []
+labels = []
+groups = []
+filesUsed = 0
 
 for h5 in files:
-    xdata = []
-    ydata = []
-    ydata_nativeonly = []
-    ydata_shuffledonly = []
-    labels = []
-    groups = []
     with pd.io.pytables.HDFStore(h5) as store:
         for key in store.keys():
             if key[:4] != "/df_":
@@ -167,6 +182,7 @@ for h5 in files:
             df = store[key]
 
             print(taxName)
+            filesUsed += 1
 
             meanGC = np.mean(df.gc)
             xdata.append(meanGC)
@@ -185,9 +201,10 @@ for h5 in files:
             #groups.append( choice(('Bacteria', 'Archaea', 'Fungi', 'Plants')) )
             groups.append( data_helpers.getSpeciesTaxonomicGroup(taxId) )
 
-    plotXY(xdata, ydata, labels, groups)
-    plotXY_2(xdata, ydata_shuffledonly, labels, groups)
-    plotXY_3(xdata, ydata_nativeonly, ydata_shuffledonly, labels, groups)
+plotXY(xdata, ydata, labels, groups)
+plotXY_2(xdata, ydata_shuffledonly, labels, groups)
+plotXY_3(xdata, ydata_nativeonly, ydata_shuffledonly, labels, groups)
+print("%d files included" % filesUsed)
 
             
 
