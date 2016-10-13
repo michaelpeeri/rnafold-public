@@ -383,7 +383,7 @@ for taxIdForProcessing in species:
         if(rl()):
             print("# %s - %d records included, %d records skipped" % (datetime.now().isoformat(), selected, skipped))
             if( nativeProfile[0].count() > 1005 and rl2()):
-                printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile )
+                printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile, medianGCContent )
         
         selected += 1
         alreadyCompleted += 1
