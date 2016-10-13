@@ -9,9 +9,9 @@ from math import sqrt
 import numpy as np
 from scipy import stats
 from scipy.stats import norm
-import matplotlib
-matplotlib.use("cairo")
-import matplotlib.pyplot as plt
+#import matplotlib
+#matplotlib.use("cairo")
+#import matplotlib.pyplot as plt
 import config
 import mysql_rnafold as db
 from sqlalchemy import sql
@@ -31,7 +31,7 @@ partialCDSKey = "CDS:taxid:%d:protid:%s:partial"
 debugMode = True
 
 # Connect to redis (source DB)
-r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
+r = redis.StrictRedis(host=config.host, port=config.port, db=config.db, password=config.password)
 # Connect to MySQL (destination DB)
 session = db.Session()
 #db.db.echo = True
@@ -60,16 +60,16 @@ def checkWindows(windows):
         lastIndex = currIndex
     assert(lastIndex <= calculationWidth-1)
 
-xaxis = np.arange(0,200,1)
-def plotCdsMFE(identifier, windows):
-
-    fig = plt.figure()
-    plt.plot(xaxis, windows)
-    plt.xlabel('window start (nt, from cds)')
-    plt.ylabel('MFE')
-    plt.grid(True)
-    plt.savefig("mfe_40nt_cds_%s.png" % identifier )
-    plt.close(fig)
+#xaxis = np.arange(0,200,1)
+#def plotCdsMFE(identifier, windows):
+#
+#    fig = plt.figure()
+#    plt.plot(xaxis, windows)
+#    plt.xlabel('window start (nt, from cds)')
+#    plt.ylabel('MFE')
+#    plt.grid(True)
+#    plt.savefig("mfe_40nt_cds_%s.png" % identifier )
+#    plt.close(fig)
 
 statsLines = []
 
