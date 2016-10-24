@@ -43,6 +43,7 @@ windowWidth = 40
 seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
 numWindows = 150
 numShuffledGroups = 50
+requiredNumShuffledGroups = 25
 #computationTag = "rna-fold-window-40-0"
 # TODO: Add support for step-size >1
 
@@ -291,19 +292,6 @@ for taxIdForProcessing in species:
 
     # Iterate over all CDS entries for this species
     for protId in SpeciesCDSSource(taxIdForProcessing):
-        #protId = codecs.decode(protId)
-        # Filtering
-
-
-        # Skip sequences with partial CDS annotations
-        #if(r.exists("CDS:taxid:%d:protid:%s:partial" % (taxIdForProcessing, protId))):
-        #    skipped += 1
-        #    continue
-
-        #if( not r.exists(nativeCdsSeqIdKey % (taxIdForProcessing, protId)) ):
-        #    skipped +=1
-        #    continue
-
         cds = CDSHelper(taxIdForProcessing, protId)
 
         seqLength = cds.length()
@@ -332,7 +320,7 @@ for taxIdForProcessing in species:
             if shuffledIds[n] in computed:
                 computedShufflesCount += 1
 
-        if( computedShufflesCount<numShuffledGroups-5 or (not cdsSeqId in computed) ):
+        if( computedShufflesCount<requiredNumShuffledGroups or (not cdsSeqId in computed) ):
             print("%s - found only %d groups, skipping" % (protId, computedShufflesCount))
             skipped += 1
             continue
@@ -352,14 +340,15 @@ for taxIdForProcessing in species:
         #print(GCProfile[i].mean())
 
         results = cds.getCalculationResult2( seriesSourceNumber, range(-1,numShuffledGroups) )
-        if( results is None or len(results) < numShuffledGroups - 5):
+
+        if( results is None or len(filter(lambda x: not x is None, results)) < requiredNumShuffledGroups ):
             print("Not enough results found for %s" % protId)
             skipped += 1
             continue
 
         for shuffleId, content in zip(range(-1,numShuffledGroups), results):
             if( content is None ):
-                print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
+                #print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
                 continue
             data = json.loads(content.replace('id=', '"id":').replace('seq-crc=', '"seq-crc":').replace('MFE-profile=','"MFE-profile":').replace('MeanMFE=','"Mean-MFE":'))
             # Make sure we are seeing the correct record
@@ -370,6 +359,19 @@ for taxIdForProcessing in species:
 
             profile = data["MFE-profile"]
 
+            # Check all values are non-positive
+            # Note: The energy values reaches 0.0 at some points (although I would've thought it should always be negative), so I ignore such cases.
+            numNonNegativeResults = len(filter(lambda x: x >= 0.0, profile))
+            if( numNonNegativeResults > 0 ):
+                print("Error: %d stored values are not negative for taxId=%d, protId=%s, shuffleId=%d" % (numNonNegativeResults, taxIdForProcessing, protId, shuffleId))
+                if( numNonNegativeResults > 30 ):
+                    print(profile)
+                    if(shuffleId >= 0):
+                        print(cds.getShuffledSeq(shuffleId))
+                    else:
+                        print(cds.sequence())
+                assert(len(filter(lambda x: x > 0.0, profile)) == 0) # Positive results aren't valid
+                
             if(shuffleId<0):
                 for i in range(numWindows):
                     assert(profile[i] <= 0.0)
