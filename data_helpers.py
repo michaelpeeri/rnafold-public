@@ -5,7 +5,9 @@ import sys
 import time
 import datetime
 import gzip
+import json
 from socket import gethostname
+from collections import Iterable
 from os import getpid
 from cStringIO import StringIO
 #import re
@@ -275,35 +277,47 @@ class CDSHelper(object):
         return decoded
 
 
-    def getCalculationResult2(self, calculationId, shuffleIds):
+    """
+    Return existing calculation results, for the specified calculationId, belonging to the specified shuffleIds
+    Output: array of results, indexed by calculation-Id.
+            i.e.,
+            out = cds.getCalculationResult2(myCalcId, (-1, 0, 5))
+            # out = [result_for_minus_1, result_for_0, None, None, None, None, result_for_5]
+            # out[0] = result_for_minus_1
+            # out[6] = result_for_5
+            # out[n+1] = result_for_n
 
+            Missing results will have value None.
+
+            Results will be uncompressed. In addition, if parseAsJson==True, results will be decoded as JSON.
+    """
+    def getCalculationResult2(self, calculationId, shuffleIds, parseAsJson=False):
+        assert(shuffleIds >= -1)
         cdsSeqId = self.seqId()
         allSeqIds = self.shuffledSeqIds()
 
         def shuffleIdToSeqId(i):
             if i<0:
                 return cdsSeqId
+            elif i >= len(allSeqIds):
+                return None
             else:
                 return allSeqIds[i]
-            
-        requestedSeqIds = map(shuffleIdToSeqId, shuffleIds)
 
+        # Create a list of sequence-ids for the requested shuffle-ids
+        requestedSeqIds = filter( lambda x: not x is None, map(shuffleIdToSeqId, shuffleIds) )
+
+        # Get the all result records
         results = db.connection.execute( sql.select(( db.sequence_series2.c.content, db.sequence_series2.c.sequence_id)).select_from(db.sequence_series2).where(
                 sql.and_(
                     db.sequence_series2.c.source==calculationId,
                     db.sequence_series2.c.sequence_id.in_(requestedSeqIds)
-                    )) )
+                    )).order_by(db.sequence_series2.c.sequence_id) )
         if( results.rowcount < len(shuffleIds) ):
             print("Warning: some results were not found for taxid=%d, protid=%s." % (self._taxId, self._protId))
-            #return None
-
-        if( (results.rowcount < len(shuffleIds) - 5) or (results.rowcount < 10) ):
-            print("Warning: Too many results were missing for taxid=%d, protid=%s." % (self._taxId, self._protId))
-            return None
-
         records = results.fetchall()
 
-        out = [None]*len(shuffleIds)
+        out = [None]*len(shuffleIds) # return results as an array (not a map!)
 
         sequenceIdToPos = dict( zip( requestedSeqIds, range(len(shuffleIds)) ) )
         
@@ -319,6 +333,19 @@ class CDSHelper(object):
             f.close()
 
             out[ sequenceIdToPos[currSeqId] ] = decoded
+
+        if( parseAsJson ):
+            out2 = []
+            for encoded in out:
+                if( encoded is None ):
+                    #print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
+                    decoded = None
+                else:
+                    # Cover for silly JSON formatting error in an early version
+                    decoded = json.loads(encoded.replace('id=', '"id":').replace('seq-crc=', '"seq-crc":').replace('MFE-profile=','"MFE-profile":').replace('MeanMFE=','"Mean-MFE":'))
+                    del encoded
+                out2.append(decoded)
+            out = out2
 
         return out
 
@@ -354,16 +381,32 @@ class CDSHelper(object):
         return out
             
             
-
-    def enqueueForProcessing(self, computationTag, shuffleId=-1):
+    """
+    Enqueue the following items, as a single work item.
+    shuffleId may be a single shuffleId (in the range -1..(n-1)), or a sequence of shuffleIds
+    """
+    def enqueueForProcessing(self, computationTag, shuffleId=-1, lastWindowStart=None, windowStep=None):
         queueKey = queueItemsKey % computationTag
-        seqId = None
-        if( shuffleId < 0 ):
-            seqId = self.seqId()
-        else:
-            seqId = self.getShuffledSeqId( shuffleId )
 
-        queueItem = "%d:%s:%d:%d" % (self._taxId, self._protId, seqId, shuffleId)
+        if( not isinstance(shuffleId, Iterable)):
+            shuffleId = (shuffleId,)
+
+        if( not shuffleId): # No shuffle-ids to enqueue
+            print("Warning: enqueueForProcessing() called with no shuffle-ids to add...")
+            return
+
+        seqIds = []
+        for sid in shuffleId:
+            if( sid < 0 ):
+                seqIds.append( self.seqId() )
+            else:
+                seqIds.append( self.getShuffledSeqId( sid ) )
+
+        optionalParams = ""
+        if( lastWindowStart is not None and windowStep is not None):
+            optionalParams = "/%d/%d" % (lastWindowStart, windowStep)
+
+        queueItem = "%d/%s/%s/%s%s" % (self._taxId, self._protId, ",".join(map(str, seqIds)), ",".join(map(str, shuffleId)), optionalParams) # Separator changed to '/' as a work-around for protein-ids containing ':'...
         #print(queueItem)
         
         r.rpush(queueKey, queueItem)
@@ -442,14 +485,29 @@ def calcCrc(seq):
     return crc32(str(seq).lower()) & 0xffffffff
 
 
-def getAllComputedSeqs(calculationId):
+def getAllComputedSeqsForSpecies(calculationId, taxId):
+    # First, collect all sequence-ids for the given species. This manual filtering by species is much faster than simply fetching all computation results...
+    print("Collecting sequence ids for taxid=%d..." % taxId)
+    sequenceIdsForTaxid = set()
+    for protId in SpeciesCDSSource(taxId):
+        cds = CDSHelper(taxId, protId)
+
+        newIds = set()
+        newIds.add(cds.seqId())
+        newIds.update(cds.shuffledSeqIds() )
+        sequenceIdsForTaxid |= newIds
+    
+    print("Fetching results for %d sequences..." % len(sequenceIdsForTaxid))
     calculated = db.connection.execute( sql.select(( db.sequence_series2.c.sequence_id,)).select_from(db.sequence_series2).where(
                 sql.and_(
                     db.sequence_series2.c.source==calculationId,
+                    db.sequence_series2.c.sequence_id.in_(sequenceIdsForTaxid)
                     )) ).fetchall()
-    out = set()
-    for x in calculated:
-        out.add(x[0])
+    print("Converting data...")
+    out = set([x[0] for x in calculated])
+    # TODO - How to optimize this?
+    #for x in calculated:
+    #    out.add(x[0])
 
     return out
 

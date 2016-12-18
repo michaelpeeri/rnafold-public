@@ -5,12 +5,13 @@ import os
 import subprocess
 import re
 import gzip
+import json
 from time import sleep
 from datetime import datetime, timedelta
 import mysql_rnafold as db
-from data_helpers import CDSHelper, RateLimit, countSpeciesCDS, calcCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted
+from data_helpers import CDSHelper, countSpeciesCDS, calcCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted
 from runningstats import RunningStats
- 
+from rate_limit import RateLimit 
 
 # Command-line arguments
 computationTag = sys.argv[1]
@@ -60,95 +61,164 @@ print("My worker-key is: %s" % myWorkerKey )
 
 updateJobStatus_ItemCompleted( myWorkerKey )
 
+def round4(x):
+    if x is None:
+        return None
+    else:
+        return round(x,4)
 
-with gzip.open('worker_%s_%d' % (subprocess.check_output('hostname')[:-1], os.getpid()), 'wb') as f:
+with gzip.open('worker_%s_%d_log.gz' % (subprocess.check_output('hostname')[:-1], os.getpid()), 'wb') as f:
     for itemToProcess in QueueSource(computationTag):
-        taxId, protId, seqId, shuffleId = itemToProcess.split(":")
-        taxId = int(taxId)
-        seqId = int(seqId)
-        shuffleId = int(shuffleId)
+        parts = []
+        if( itemToProcess.find('/') == -1 ):
+            parts = itemToProcess.split(":")
+        else:
+            parts = itemToProcess.split("/")
 
+        # Mandatory fields
+        taxId, protId, seqId_, shuffleIds_ = parts[:4]
+        taxId = int(taxId)
+        seqIds = set(map(int, seqId_.split(",")))
+        requestedShuffleIds = map(int, shuffleIds_.split(","))
+        assert(len(requestedShuffleIds) < 50 ) # Maximum number of shuffle-ids allowed to be combined into a single work record
+
+        # Optional fields
+        lastWindowStart = 150
+        windowStep = 1
+        if( len(parts)>4 ):
+            lastWindowStart = int(parts[4])
+            #assert(lastWindowStart >= 150)
+            windowStep = int(parts[5])
+            assert(windowStep > 0 and windowStep <= 30)
+
+        # We will process all listed shuffle-ids for the following protein record
         cds = CDSHelper( taxId, protId )
 
-        seq = None
-        annotatedSeqId = None
-        # Get the sequence for this entry
-        if( shuffleId < 0 ):
-            seq = cds.sequence()
-            annotatedSeqId = cds.seqId()
-        else:
-            seq = cds.getShuffledSeq(shuffleId)
-            annotatedSeqId = cds.getShuffledSeqId(shuffleId)
-
-        if( annotatedSeqId != seqId ):
-            print("Error: SeqId specified in queue item %s does not match annotated seq-id %d" % (itemToProcess, annotatedSeqId))
+        if( cds.length() < windowWidth ):
+            f.write("Refusing to process item %s because the sequence length (%d nt) is less than the window size (%d nt)" % (itemToProcess, cds.length(), windowWidth))
             continue
 
-        expectedSeqLength = cds.length()
-        if( not expectedSeqLength is None ):
-            if( expectedSeqLength != len(seq) ):
-                print("taxid=%d, protid=%s, seqid=%d - unexpected length %d (expected: %d)" % (taxId, protId, seqId, len(seq), expectedSeqLength) )
+        # Create a list of the windows we need to calculate for this CDS
+        requestedWindowStarts = list(range(0, min(lastWindowStart, cds.length()-windowWidth-1), windowStep ))
+        assert(len(requestedWindowStarts) > 0)
+
+        # First, read available results (for all shuffle-ids) in JSON format
+        # Array is indexed by shuffle-id, so results not requested will be represented by None
+        #existingResults = cds.getCalculationResult2( seriesSourceNumber, requestedShuffleIds, True )
+        #assert(len(existingResults) >= len(requestedShuffleIds))
+        #existingResults = [None] * (max(requestedShuffleIds)+1)
+        #print(existingResults)
+
+        # Check for which of the required shuffle-ids there are values missing
+        shuffleIdsToProcess = {}
+
+        # (TODO - complete and test this)
+        #
+        #for n, r in enumerate(existingResults):
+        #    alreadyProcessedWindowStarts = set( [i for i,x in enumerate(r["MFE-profile"] ) if x is not None] ) # Get the indices (=window starts) of all non-None values
+        #    missingWindows = requestedWindowStarts - alreadyProcessedWindows # Are there any requested windows that are not already computed?
+        #    if( missingWindows ): 
+        #        shuffleIdsToProcess[n-1] = missingWindows
+        #if( not shuffleIdsToProcess):
+        #    f.write("All requested shuffle-ids in %s seems to have already been processed. Skipping..." % (itemToProcess,))
+        #    continue
+        #f.write("DEBUG: shuffleIdsToProcess: %s" % shuffleIdsToProcess)
+
+        # (For now, assume all records are missing...)
+        #
+        # Initialize records for missing results
+        for shuffleId in requestedShuffleIds:
+            shuffleIdsToProcess[shuffleId] = { "id": "%s/%s/%d" % (taxId, protId, shuffleId), "seq-crc": None, "MFE-profile": [], "MeanMFE": None, "v": 2 }
+
+        print(shuffleIdsToProcess)
+        
+        # Load the sequences of all shuffle-ids we need to work on
+        # TODO - combine loading of multiple sequences into one DB operation
+
+        for shuffleId, record in shuffleIdsToProcess.iteritems():
+            seq = None
+            annotatedSeqId = None
+            # Get the sequence for this entry
+            if( shuffleId < 0 ):
+                seq = cds.sequence()
+                annotatedSeqId = cds.seqId()
+            else:
+                seq = cds.getShuffledSeq(shuffleId)
+                annotatedSeqId = cds.getShuffledSeqId(shuffleId)
+
+            if( annotatedSeqId not in seqIds ):
+                f.write("Error: SeqId specified in queue item %s does not match annotated seq-id %d" % (itemToProcess, annotatedSeqId))
                 continue
 
-        if( len(seq) < windowWidth ):
-            # Sequence is shorter than required window; skip
-            continue
+            expectedSeqLength = cds.length()
+            if( not expectedSeqLength is None ):
+                if( expectedSeqLength != len(seq) ):
+                    f.write("taxid=%d, protid=%s, seqid=%d - unexpected length %d (expected: %d)" % (taxId, protId, seqId, len(seq), expectedSeqLength) )
+                    continue
 
-        # Each entry in the queue is in the format "taxid:protid:shuffleid"
-        print("Processing item %s (length=%d, %d windows)..." % (itemToProcess, len(seq), len(seq) - windowWidth + 1))
+            if( len(seq) < windowWidth ):
+                # Sequence is shorter than required window; skip
+                f.write("Warning: skipping sequence because it is shorter than the requested window...")
+                continue
+            
+            f.write("Processing item %s, shuffle=%d (length=%d, %d windows)..." % (itemToProcess, shuffleId, len(seq), len(requestedWindowStarts)))
 
-        # TODO - Remove any old value stored in this key?
+            # TODO - Remove any old value stored in this key?
 
-        if( cds.isCalculationDone( seriesSourceNumber, shuffleId )):
-            # Sufficient data seems to exist. Skip...
-            print("Item %s appears to be already completed, skipping..." % itemToProcess)
-            continue
+            # Skip this for now
+            # This will be made redundant by completing the "updating" implementation
+            #
+            #if( cds.isCalculationDone( seriesSourceNumber, shuffleId )):
+            #    # Sufficient data seems to exist. Skip...
+            #    f.write("Item %s appears to be already completed, skipping..." % itemToProcess)
+            #    continue
 
-        print(seq[:50])
+            f.write(seq[:50])
 
-        MFEProfile = []
-        stats = RunningStats()
+            MFEprofile = record["MFE-profile"]
 
-        l = 0
+            # Make sure the profile array contains enough entries for all new windows (and possibly, if windows are non-contiguous, entries between them that we are not going to compute right now)
+            if( len(MFEprofile) < requestedWindowStarts[-1] ):
+                entriesToAdd = requestedWindowStarts[-1] - len(MFEprofile) + 1
+                MFEprofile.extend( [None] * entriesToAdd )
+            assert(len(MFEprofile) >= requestedWindowStarts[-1] )
+                
+            stats = RunningStats()
+            stats.extend([x for x in MFEprofile if x is not None])
 
-        for start in range(len(seq)-windowWidth+1):
-            fragment = seq[start:(start+windowWidth)]
-            assert(len(fragment)==windowWidth)
+            for start in requestedWindowStarts:
+                fragment = seq[start:(start+windowWidth)]
+                assert(len(fragment)==windowWidth)
 
-            # Calculate the RNA folding energy. This is the computation-heavy part.
-            #strct, energy = RNA.fold(fragment)
-            energy = RNAfold_direct(fragment)
-            assert(energy <= 0.0)
+                # Calculate the RNA folding energy. This is the computation-heavy part.
+                #strct, energy = RNA.fold(fragment)
+                energy = RNAfold_direct(fragment)
+                assert(energy <= 0.0)
 
-            # Store the calculation result
-            #print("%d:%s --> %f" % (taxId, protId, energy))
+                # Store the calculation result
+                #print("%d:%s --> %f" % (taxId, protId, energy))
 
-            stats.push(energy)
-            MFEProfile.append(energy)
-            l += 1
-            if( l>150 ):
-                break
+                stats.push(energy)
+                MFEprofile[start] = energy
 
-        # Format
-        crc = calcCrc(seq)
-        result = """{id="%s",seq-crc=%d,MFE-profile=[%s],MeanMFE=%.6g}""" % (itemToProcess, crc, ",".join(map(lambda x: "%.3g" % x, MFEProfile)), stats.mean())
-        print(result[:100])
-        print(len(result))
+            # Format
+            crc = calcCrc(seq)
+            #result = """{"id":"%s","seq-crc":%d,"MFE-profile":[%s],"MeanMFE":%.6g,v:2}""" % (itemToProcess, crc, ",".join(map(lambda x: "%.3g" % x, MFEprofile)), stats.mean())
+            record["seq-crc"] = crc
+            record["MFE-profile"] = [round4(x) for x in MFEprofile] # Round items down to save space (these are not exact numbers anyway)
+            record["MeanMFE"] = stats.mean()
+            result = json.dumps(record)
+            
+            f.write(result)
+            f.write("\n")
 
-        cds.saveCalculationResult2( seriesSourceNumber, result, seqId )
+            cds.saveCalculationResult2( seriesSourceNumber, result, annotatedSeqId )
 
         updateJobStatus_ItemCompleted( myWorkerKey, taxId )
 
         if( not runUntil is None):
             if( runUntil.isExpired() ):
-                print("Time limit reached, exiting...")
+                f.write("Time limit reached, exiting...")
                 break
-        
-        
-        # Verify the number of results we stored matches the number of windows
-        #print(r.llen(computationResultTag % (taxId, protId)))
-        #print(len(seq)-windowWidth+1)
-        #assert(r.llen(computationResultTag % (taxId, protId)) == len(seq) - windowWidth + 1)
 
-
-print("Done!")
+    f.write("Done!")

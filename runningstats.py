@@ -54,6 +54,10 @@ class RunningStats(object):
         self._debug = debug
         self.clear()
 
+    def extend(self, items):
+        for item in items:
+            self.push(item)
+
     def clear(self):
         self._n = 0;
         self._mean = 0.0

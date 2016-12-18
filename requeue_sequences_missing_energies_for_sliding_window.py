@@ -10,6 +10,7 @@
 # TODO: Add support for step-size >1
 import sys
 import codecs
+import argparse
 from random import randint
 #import redis
 import config
@@ -18,22 +19,46 @@ import mysql_rnafold as db
 #from sqlalchemy.sql.expression import func
 from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, SpeciesCDSSource, numItemsInQueue
 
+def parseList(conversion=str):
+    def convert(values):
+        return map(conversion, values.split(","))
+    return convert
+
+argsParser = argparse.ArgumentParser()
+argsParser.add_argument("--species", type=parseList(int), required=True)
+argsParser.add_argument("--computation-tag", default="rna-fold-window-40-0")
+argsParser.add_argument("--random-fraction", type=int, default=1)
+argsParser.add_argument("--window-step", type=int, default=10)
+argsParser.add_argument("--from-shuffle", type=int, default=-1)
+argsParser.add_argument("--to-shuffle", type=int, default=20)
+#argsParser.add_argument("--gff")
+#argsParser.add_argument("--variant", type=parseOption(set(("yeastgenome","NCBI","Ensembl")), "variant"))
+#argsParser.add_argument("--output-gene-ids")
+#argsParser.add_argument("--areas", type=parseList(int))
+#argsParser.add_argument("--transl-table", type=int)
+#argsParser.add_argument("--alt-protein-ids", type=parseOption(set(("locus_tag",)), "alt-protein-id"))
+args = argsParser.parse_args()
+
 
 # command-line arguments
-species = map(int, sys.argv[1].split(","))
-computationTag = sys.argv[2]
+species = args.species
+computationTag = args.computation_tag
 if( computationTag.find(':') != -1 ): raise Exception("computation tag cannot contain ':' (should be compatible with redis key names)")
 # e.g. rna-fold-0
-randomFraction = int(sys.argv[3])
+randomFraction = args.random_fraction
+windowStep = args.window_step
+
 
 # Configuration
 #queueKey = "queue:tag:awaiting-%s:members" % computationTag
 #nativeCdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
 #seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 windowWidth = 40
-numWindows = 150
+lastWindowStart = 2000
 seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
-expectedNumberOfShuffles = 50
+expectedNumberOfShuffles = 20
+fromShuffle = args.from_shuffle
+toShuffle = args.to_shuffle
 # TODO: Add support for step-size >1
 
 # Establish DB connections
@@ -74,29 +99,44 @@ for taxIdForProcessing in species:
         cds = CDSHelper(taxIdForProcessing, protId)
 
         seqLength = cds.length()
-        if( not seqLength is None ):
-            # Skip sequences with length <40nt (window width)
-            if(seqLength < windowWidth + numWindows - 1 ):
-                skipped += 1
-                continue
-        else:
+        if seqLength is None:
             print("Warning: Could not find CDS length entry for taxid=%d, protid=%s" % (taxIdForProcessing, protId) )
             skipped += 1
             continue
 
-        existingResults = cds.checkCalculationResult( seriesSourceNumber, range(-1, expectedNumberOfShuffles) )
-        assert(len(existingResults) == expectedNumberOfShuffles + 1 )
-        
-        missingResults = 0
+        assert( seqLength > 3 )
+        # Skip sequences with length <40nt (window width)
+        if(seqLength < windowWidth + 1 ):
+            skipped += 1
+            continue
 
+        #requiredShuffles = [-1] + list(range(0, min(seqLength, lastWindowStart), windowStep))
+
+        requiredShuffles = range(fromShuffle, toShuffle)
+
+
+        #existingResults = cds.checkCalculationResult( seriesSourceNumber, range(-1, expectedNumberOfShuffles) )
+        existingResults = None
+        try:
+            existingResults = cds.checkCalculationResult( seriesSourceNumber, requiredShuffles )
+        except IndexError as e:
+            print("Missing sequences for %s, skipping..." % protId)
+            skipped += 1
+            continue 
+        #assert(len(existingResults) == expectedNumberOfShuffles + 1 )
+        
+        pendingShuffles = []
         for shuffleId, resultOk in enumerate(existingResults):
             if not resultOk:
-                cds.enqueueForProcessing(computationTag, shuffleId)
-                missingResults += 1
+                pendingShuffles.append( shuffleId-1 )
 
-        if missingResults:
-            print("%s: enqueued %d additional results" % (protId, missingResults))
-            totalMissingResults += missingResults    
+        if(pendingShuffles):
+            lastwin = min( lastWindowStart, seqLength-windowWidth-1)
+            lastwin -= lastwin%windowStep
+            cds.enqueueForProcessing(computationTag, pendingShuffles, lastwin, windowStep)
+
+            print("%s: enqueued %d additional results" % (protId, len(pendingShuffles)))
+            totalMissingResults += len(pendingShuffles)
                 
         #    selected += 1
         #else:
