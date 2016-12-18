@@ -48,12 +48,12 @@ except Exception as e:
 #######################################################
 
 md = MetaData()
-sequences = Table("sequences", md,
-                  Column("id", Integer, primary_key=True),
-                  Column("sequence", Text),
-                  Column("alphabet", SmallInteger),
-                  Column("taxid", Integer),
-                  Column("source", Integer))
+# sequences = Table("sequences", md,
+#                   Column("id", Integer, primary_key=True),
+#                   Column("sequence", Text),
+#                   Column("alphabet", SmallInteger),
+#                   Column("taxid", Integer),
+#                   Column("source", Integer))
 
 sequences2 = Table("sequences2", md,
                   Column("id", Integer, primary_key=True),
@@ -61,12 +61,12 @@ sequences2 = Table("sequences2", md,
                   Column("sequence", BLOB),
                   Column("source", Integer))
 
-sequence_series = Table("sequence_series", md,
-                        Column("sequence_id", Integer, primary_key=True),
-                        Column("value", Float),
-                        Column("source", Integer, primary_key=True),
-                        Column("ext_index", SmallInteger, primary_key=True),
-                        Column("index", Integer, primary_key=True))
+# sequence_series = Table("sequence_series", md,
+#                         Column("sequence_id", Integer, primary_key=True),
+#                         Column("value", Float),
+#                         Column("source", Integer, primary_key=True),
+#                         Column("ext_index", SmallInteger, primary_key=True),
+#                         Column("index", Integer, primary_key=True))
 
 sequence_series2 = Table("sequence_series2", md,
                         Column("sequence_id", Integer, primary_key=True),
@@ -75,19 +75,29 @@ sequence_series2 = Table("sequence_series2", md,
                         Column("ext_index", Integer))
 
 
+sequence_floats2 = Table("sequence_floats2", md,
+                         Column("sequence_id", Integer, primary_key=True),
+                         Column("value", Float),
+                         Column("source", Integer, primary_key=True))
+
+sequence_integers2 = Table("sequence_integers2", md,
+                       Column("sequence_id", Integer, primary_key=True),
+                       Column("value", Integer),
+                       Column("source", Integer, primary_key=True))
+
 #######################################################
 # Table definitions for ORM use
 #######################################################
 
 Base = declarative_base()
 
-class Sequence(Base):
-    __tablename__ = "sequences"
-    id = Column(Integer, primary_key=True)
-    sequence = Column(Text)
-    alphabet = Column(SmallInteger)
-    taxid = Column(Integer)
-    source = Column(Integer)
+# class Sequence(Base):
+#     __tablename__ = "sequences"
+#     id = Column(Integer, primary_key=True)
+#     sequence = Column(Text)
+#     alphabet = Column(SmallInteger)
+#     taxid = Column(Integer)
+#     source = Column(Integer)
 
 class Sequence2(Base):
     __tablename__ = "sequences2"
@@ -96,13 +106,13 @@ class Sequence2(Base):
     sequence = Column(BLOB)
     source = Column(Integer)
 
-class SequenceSeries(Base):
-    __tablename__ = "sequence_series"
-    sequence_id = Column(Integer, primary_key=True)
-    value = Column(Float)
-    source = Column(Integer, primary_key=True)
-    ext_index = Column(SmallInteger, primary_key=True)
-    index = Column(Integer, primary_key=True)
+# class SequenceSeries(Base):
+#     __tablename__ = "sequence_series"
+#     sequence_id = Column(Integer, primary_key=True)
+#     value = Column(Float)
+#     source = Column(Integer, primary_key=True)
+#     ext_index = Column(SmallInteger, primary_key=True)
+#     index = Column(Integer, primary_key=True)
 
 class SequenceSeries2(Base):
     __tablename__ = "sequence_series2"
@@ -111,6 +121,18 @@ class SequenceSeries2(Base):
     source = Column(Integer, primary_key=True)
     ext_index = Column(Integer)
 
+
+class SequenceFloats2(Base):
+    __tablename__ = "sequence_floats2"
+    sequence_id = Column(Integer, primary_key=True)
+    value = Column(Float)
+    source = Column(Integer, primary_key=True)
+
+class SequenceIntegers2(Base):
+    __tablename__ = "sequence_integers2"
+    sequence_id = Column(Integer, primary_key=True)
+    value = Column(Integer)
+    source = Column(Integer, primary_key=True)
 
 
 Session = sessionmaker(bind=db)
@@ -126,6 +148,14 @@ class Sources:
     External = 1 # imported sequence
     Computed = 2
     ShuffleCDSv2 = 10
-    RNAfoldEnergy_SlidingWindow40 = 102
-    RNAfoldEnergy_SlidingWindow40_v2 = 103
+    RNAfoldEnergy_SlidingWindow40_v2 = 102
+    RNAfoldEnergy_SlidingWindow40_v2_alt = 103
+    CDS_length_nt = 201
+    PA_paxdb_single_assay_or_weighted_average = 202
+    GC_content_all_CDS = 203
+    GC_content_codon_pos_1 = 204
+    GC_content_codon_pos_2 = 205
+    GC_content_codon_pos_3 = 206
+    MFE_mean_window_40nt_estimated = 207
+    
     
