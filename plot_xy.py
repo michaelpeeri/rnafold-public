@@ -4,7 +4,7 @@ from random import choice
 import numpy as np
 import pandas as pd
 import matplotlib
-from scipy.stats import norm, pearsonr, spearmanr, linregress
+from scipy.stats import norm, pearsonr, spearmanr, kendalltau, linregress
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
@@ -18,7 +18,7 @@ def getTaxName(taxId):
 
 def assignColors(data):
     assignment = {}
-    availColors = ('red', 'blue', 'green', 'yellow', 'cyan')
+    availColors = ('red', 'blue', 'white', 'green', 'yellow', 'cyan', 'grey')
     pos = 0
     for item in set(data):
         assignment[item] = availColors[pos]
@@ -41,17 +41,22 @@ def plotXY(xvals, yvals, _labels, groups):
     #print(colors, labels)
 
     # Linear correlation and factors
-    pearson = pearsonr(xvals,yvals)
-    spearman = spearmanr(xvals,yvals)
-    l = linregress(xvals,yvals)
+    pearson = pearsonr(xvals, yvals)
+    spearman = spearmanr(xvals, yvals)
+    kendall = kendalltau(xvals, yvals)
+    l = linregress(xvals, yvals)
 
     abline_x = np.arange(0.25, 0.85, 0.1)
     abline_y = abline_x * l.slope + l.intercept
     plt.plot(abline_x, abline_y)
 
     # plot the linear approximation
-    plt.annotate(s="pearson r: %1.3f (p<%g)"  % (pearson[0], pearson[1]),                xy=(0.25, -0.72), fontsize=6 )
-    plt.annotate(s="spearman r: %1.3f (p<%g)" % (spearman.correlation, spearman.pvalue), xy=(0.25, -0.80), fontsize=6 )
+    plt.annotate(s="Pearson r: %1.3f (p<%g)"  % (pearson[0], pearson[1]),                 xy=(0.25, -0.60),  fontsize=6 )
+    plt.annotate(s="Pearson r^2: %1.3f"  % (pearson[0]**2,),                              xy=(0.25, -0.68),  fontsize=6 )
+    plt.annotate(s="Spearman r: %1.3f (p<%g)" % (spearman.correlation, spearman.pvalue),  xy=(0.25, -0.76),  fontsize=6 )
+    plt.annotate(s="Kendall's tau: %1.3f (p<%g)" % (kendall.correlation, kendall.pvalue), xy=(0.25, -0.84),  fontsize=6 )
+    plt.annotate(s="n= %d"  % len(yvals),                                                 xy=(0.25, -0.92),  fontsize=6 )
+
 
     # Species scatter-plot
     for label in sorted(set(labels)):
@@ -65,10 +70,11 @@ def plotXY(xvals, yvals, _labels, groups):
                 color = _c
         if( xdata ):
             #print(xdata, ydata)
-            plt.scatter(xdata, ydata, c=color, label=label, s=50)
+            plt.scatter(xdata, ydata, c=color, label=label, s=40)
 
     for x,y,l in zip(xvals, yvals, _labels):
-        plt.annotate(l, (x-0.006, y+0.02), fontsize=4)
+        label = l[:4]
+        plt.annotate(label, (x-0.006, y+0.02), fontsize=4)
 
 
     # plt.annotate('', xy=(0.60, 0.4), xycoords='data',
@@ -88,6 +94,7 @@ def plotXY(xvals, yvals, _labels, groups):
     #axis = ax.new_floating_axis(0,-1)
     #axis.label.set_text("Weaker")
 
+    
     plt.xlabel('GC% near CDS start')
     plt.ylabel('Delta LMFE (Native - Shuffled)')
     plt.grid(True)

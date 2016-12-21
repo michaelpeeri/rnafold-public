@@ -11,11 +11,11 @@
 import sys
 import codecs
 from random import randint
+from math import floor
 import json
 from datetime import datetime
 from collections import Counter
 from bz2 import BZ2File
-#import redis
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -24,7 +24,7 @@ import mysql_rnafold as db
 import matplotlib
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
-from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqs
+from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqsForSpecies
 from runningstats import RunningStats, OfflineStats
 from rate_limit import RateLimit
 
@@ -44,8 +44,8 @@ species = map(int, sys.argv[1].split(","))
 windowWidth = 40
 seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
 numWindows = 150
-numShuffledGroups = 50
-requiredNumShuffledGroups = 25
+numShuffledGroups = 20
+requiredNumShuffledGroups = 20
 #computationTag = "rna-fold-window-40-0"
 # TODO: Add support for step-size >1
 
@@ -56,9 +56,6 @@ requiredNumShuffledGroups = 25
 
 rl = RateLimit(60)
 rl2 = RateLimit(300)
-
-computed = getAllComputedSeqs(seriesSourceNumber)
-print("Collecting data from %d computation results..." % len(computed))
 
 
 #match = {}
@@ -232,7 +229,7 @@ def printOutput(taxId, nativeProfile, shuffleProfiles, GCProfile, medianGCConten
     
     store.flush()
 
-refGamma = stats.gamma(a=13.5) # Test reference distribution
+#refGamma = stats.gamma(a=13.5) # Test reference distribution
 
 def calcGCcontent(cdsSequence):
     #windowWidth = 40
@@ -274,18 +271,30 @@ for taxIdForProcessing in species:
              taxIdForProcessing,
              getSpeciesName(taxIdForProcessing)))
 
-    fskew = open('skew_taxid_%d.csv' % taxIdForProcessing, 'w')
-    fskewpval = open('skewpval_taxid_%d.csv' % taxIdForProcessing, 'w')
-    fnorm = open('norm_taxid_%d.csv' % taxIdForProcessing, 'w')
-    fnormpval = open('normpval_taxid_%d.csv' % taxIdForProcessing, 'w')
-    fshapiro = open('shapiro_taxid_%d.csv' % taxIdForProcessing, 'w')
-    fshapiropval = open('shapiropval_taxid_%d.csv' % taxIdForProcessing, 'w')
-    #fanderson = open('anderson_taxid_%d.csv', % taxIdForProcessing, 'w')
-    #fandersonpval = open('andersonpval_taxid_%d.csv', % taxIdForProcessing, 'w')
-    fkurtosis = open('kurtosis_taxid_%d.csv' % taxIdForProcessing, 'w')
-    frefgamma = open('refgamma_taxid_%d.csv' % taxIdForProcessing, 'w')
-    frawdata = BZ2File('rawdata_taxid_%d.csv.bz2' % taxIdForProcessing, 'w', 2048)
+    computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing)
+    print("Collecting data from %d computation results..." % len(computed))
+
+
+
+    #fskew = open('skew_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #fskewpval = open('skewpval_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #fnorm = open('norm_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #fnormpval = open('normpval_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #fshapiro = open('shapiro_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #fshapiropval = open('shapiropval_taxid_%d.csv' % taxIdForProcessing, 'w')
+    ##fanderson = open('anderson_taxid_%d.csv', % taxIdForProcessing, 'w')
+    ##fandersonpval = open('andersonpval_taxid_%d.csv', % taxIdForProcessing, 'w')
+    #fkurtosis = open('kurtosis_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #frefgamma = open('refgamma_taxid_%d.csv' % taxIdForProcessing, 'w')
+    #frawdata = BZ2File('rawdata_taxid_%d.csv.bz2' % taxIdForProcessing, 'w', 2048)
+    fdebug_zeros_scores = BZ2File('zeros_taxid_%d.csv.bz2' % taxIdForProcessing, 'w', 2048)
+    fdebug_zeros_fasta = BZ2File('zeros_taxid_%d.fna.bz2' % taxIdForProcessing, 'w', 2048)
     
+    fdebug_sample_scores = BZ2File('sample_taxid_%d.csv.bz2' % taxIdForProcessing, 'w', 2048)
+    fdebug_sample_fasta = BZ2File('sample_taxid_%d.fna.bz2' % taxIdForProcessing, 'w', 2048)
+
+    fwilcoxon_dist = BZ2File('wilcoxon_taxid_%d.csv.bz2' % taxIdForProcessing, 'w', 2048)
+
     
     skipped = 0
     selected = 0
@@ -335,7 +344,7 @@ for taxIdForProcessing in species:
                 computedShufflesCount += 1
 
         if( computedShufflesCount<requiredNumShuffledGroups or (not cdsSeqId in computed) ):
-            print("%s - found only %d groups, skipping" % (protId, computedShufflesCount))
+            #print("%s - found only %d groups, skipping" % (protId, computedShufflesCount))
             skipped += 1
             continue
 
@@ -353,7 +362,7 @@ for taxIdForProcessing in species:
 
         #print(GCProfile[i].mean())
 
-        results = cds.getCalculationResult2( seriesSourceNumber, range(-1,numShuffledGroups) )
+        results = cds.getCalculationResult2( seriesSourceNumber, range(-1,numShuffledGroups), True )
         del cds
 
         if( results is None or len(filter(lambda x: not x is None, results)) < requiredNumShuffledGroups ):
@@ -364,14 +373,18 @@ for taxIdForProcessing in species:
         shuffles = pd.Index(range(len(results)-1))
         df = pd.DataFrame(index=shuffles, columns=range(151))  # TODO - set the profile lengths according to the data...
 
-        for shuffleId, content in zip(range(-1,numShuffledGroups), results):
-            if( content is None ):
+        for shuffleId, data in zip(range(-1,numShuffledGroups), results):
+            if( data is None ):
                 #print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
                 continue
-            data = json.loads(content.replace('id=', '"id":').replace('seq-crc=', '"seq-crc":').replace('MFE-profile=','"MFE-profile":').replace('MeanMFE=','"Mean-MFE":'))
-            del content
+
             # Make sure we are seeing the correct record
-            recordIdentifier = data["id"].split(":")
+            recordIdentifier = None
+            if( data["id"].find('/') == -1 ):
+                recordIdentifier = data["id"].split(":")
+            else:
+                recordIdentifier = data["id"].split("/")
+            
             assert(int(recordIdentifier[0]) == taxIdForProcessing)
             assert(recordIdentifier[1] == protId )
             assert(int(recordIdentifier[3]) == shuffleId )
@@ -384,16 +397,25 @@ for taxIdForProcessing in species:
 
             # Check all values are non-positive
             # Note: The energy values reaches 0.0 at some points (although I would've thought it should always be negative), so I ignore such cases.
-            # numNonNegativeResults = len(filter(lambda x: x >= 0.0, profile))
-            # if( numNonNegativeResults > 0 ):
-            #     print("Error: %d stored values are not negative for taxId=%d, protId=%s, shuffleId=%d" % (numNonNegativeResults, taxIdForProcessing, protId, shuffleId))
-            #     if( numNonNegativeResults > 30 ):
-            #         print(profile)
-            #         if(shuffleId >= 0):
-            #             print(cds.getShuffledSeq(shuffleId))
-            #         else:
-            #             print(cds.sequence())
-            #     assert(len(filter(lambda x: x > 0.0, profile)) == 0) # Positive results aren't valid
+            numNonNegativeResults = len(filter(lambda x: x >= 0.0, profile))
+            if( numNonNegativeResults > 0 and shuffleId == -1):  # Ignore shuffled seqs for now (concentrate on native seqs)
+                #print("Warning: %d stored values are not negative for taxId=%d, protId=%s, shuffleId=%d" % (numNonNegativeResults, taxIdForProcessing, protId, shuffleId))
+                if( numNonNegativeResults > 15 ):
+                    #print(profile)
+                    #if(shuffleId >= 0):
+                    #    print(cds.getShuffledSeq(shuffleId))
+                    #else:
+                    #    print(cds.sequence())
+                    
+                    # TODO - consider changing to use proper csv and fasta output...
+                    fdebug_zeros_scores.write(",".join( ["%s_%s" % (taxIdForProcessing, protId)] + list(map( lambda x: "%.3g"%x, profile ))) )
+                    fdebug_zeros_scores.write("\n")
+                    #
+                    fdebug_zeros_fasta.write(">%s_%s\n" % (taxIdForProcessing, protId))
+                    fdebug_zeros_fasta.write(cdsSequence)
+                    fdebug_zeros_fasta.write("\n")
+                    
+                assert(len(filter(lambda x: x > 0.0, profile)) == 0) # Positive results aren't valid
                 
             if(shuffleId<0):
                 for i in range(numWindows):
@@ -403,16 +425,16 @@ for taxIdForProcessing in species:
                 for i in range(numWindows):
                     assert(profile[i] <= 0.0)
                     shuffleProfiles[shuffleId][i].push( profile[i] )
-            del profile
+            #del profile
 
-        skew = []
-        skewpval = []
-        norm = []
-        normpval = []
-        shapiro = []
-        shapiropval = []
-        kurtosis = []
-        refgamma = []
+        #skew = []
+        #skewpval = []
+        #norm = []
+        #normpval = []
+        #shapiro = []
+        #shapiropval = []
+        #kurtosis = []
+        #refgamma = []
 
         
         #anderson = []
@@ -420,67 +442,106 @@ for taxIdForProcessing in species:
         
         for i in range(150):
             s = df[i]
+
+            # window is ready
+            
             if(s.var() == 0):
                 print("Skipping %d" % i)
-                for a in (skew, skewpval, norm, normpval, shapiro, shapiropval, kurtosis):
-                    a.append(None)
+                #for a in (skew, skewpval, norm, normpval, shapiro, shapiropval, kurtosis):
+                #    a.append(None)
                 continue
 
-            if( len(s) != 50 ):
-                print("Error: %d elements found, skipping" % len(s))
+            if( len(s) < requiredNumShuffledGroups ):
+                print("Error: only %d elements found, skipping" % len(s))
                 continue
+
+            #fittedDist = stats.gamma.fit( -s, floc=0.0 )
+
             
-            skewtest = None
-            normaltest = None
-            shapirotest = None
-            kurtosisval = None
-            refgammaval = None
-            try:
-                skewtest = stats.skewtest(s)
-                normaltest = stats.normaltest(s)
-                shapirotest = stats.shapiro(s)
-                kurtosisval = stats.kurtosis(s)
-                refgammaval = stats.kstest(-1.0*np.array(s, dtype=np.dtype('float32')), 
-                                           refGamma.cdf).pvalue
-                #andersontest = stats.anderson(s)
-            except Exception as e:
-                print(e)
-                print("While processing: ")
-                print(protId)
-                print(",".join(map(lambda x: "%.4g" % x, s)))
-                raise
+            #skewtest = None
+            #normaltest = None
+            #shapirotest = None
+            #kurtosisval = None
+            #refgammaval = None
+            #try:
+            #    skewtest = stats.skewtest(s)
+            #    normaltest = stats.normaltest(s)
+            #    shapirotest = stats.shapiro(s)
+            #    kurtosisval = stats.kurtosis(s)
+            #    refgammaval = stats.kstest(-1.0*np.array(s, dtype=np.dtype('float32')), 
+            #                               refGamma.cdf).pvalue
+            #    #andersontest = stats.anderson(s)
+            #except Exception as e:
+            #    print(e)
+            #    print("While processing: ")
+            #    print(protId)
+            #    print(",".join(map(lambda x: "%.4g" % x, s)))
+            #    raise
             
-            skew.append(skewtest.statistic)
-            skewpval.append(skewtest.pvalue)
-            norm.append(normaltest.statistic)
-            normpval.append(normaltest.pvalue)
-            shapiro.append(shapirotest[0])
-            shapiropval.append(shapirotest[1])
-            kurtosis.append(kurtosisval)
-            refgamma.append(refgammaval)
+            #skew.append(skewtest.statistic)
+            #skewpval.append(skewtest.pvalue)
+            #norm.append(normaltest.statistic)
+            #normpval.append(normaltest.pvalue)
+            #shapiro.append(shapirotest[0])
+            #shapiropval.append(shapirotest[1])
+            #kurtosis.append(kurtosisval)
+            #refgamma.append(refgammaval)
 
-            frawdata.write("%s,%d,%s\n" % (protId, i, ','.join(map(lambda x: "%.4g"%x, s))))
-            #anderson.append(shapirotest.statistic)
-            #andersonpval.append(shapirotest.pvalue)
+            #frawdata.write("%s,%d,%s\n" % (protId, i, ','.join(map(lambda x: "%.4g"%x, s))))
+            ##anderson.append(shapirotest.statistic)
+            ##andersonpval.append(shapirotest.pvalue)
 
 
-        fskew.write("%s,%s\n" % (protId, ','.join(map(str, skew))))
-        fskewpval.write("%s,%s\n" % (protId, ','.join(map(str, skewpval))))
-        fnorm.write("%s,%s\n" % (protId, ','.join(map(str, norm))))
-        fnormpval.write("%s,%s\n" % (protId, ','.join(map(str, normpval))))
-        fshapiro.write("%s,%s\n" % (protId, ','.join(map(str, shapiro))))
-        fshapiropval.write("%s,%s\n" % (protId, ','.join(map(str, shapiropval))))
-        fkurtosis.write("%s,%s\n" % (protId, ','.join(map(str, kurtosis))))
-        frefgamma.write("%s,%s\n" % (protId, ','.join(map(str, refgamma))))
-        
+        #fskew.write("%s,%s\n" % (protId, ','.join(map(str, skew))))
+        #fskewpval.write("%s,%s\n" % (protId, ','.join(map(str, skewpval))))
+        #fnorm.write("%s,%s\n" % (protId, ','.join(map(str, norm))))
+        #fnormpval.write("%s,%s\n" % (protId, ','.join(map(str, normpval))))
+        #fshapiro.write("%s,%s\n" % (protId, ','.join(map(str, shapiro))))
+        #fshapiropval.write("%s,%s\n" % (protId, ','.join(map(str, shapiropval))))
+        #fkurtosis.write("%s,%s\n" % (protId, ','.join(map(str, kurtosis))))
+        #frefgamma.write("%s,%s\n" % (protId, ','.join(map(str, refgamma))))
+
+        # Perform Wilcoxon signed-rank test
+        #print("DF: ", df.shape)  # (20,151)
+        #print("s: ", s.shape)    # (20,)
+        #print("u: ", df.iloc[1,:].shape) # (151,)
+        #print("mean(u): ", df.mean(axis=0).shape)
+        #print(np.array(profile).shape) #(151,)
+
+
+        # Method 1 -- Wilcoxon, native vs. mean(shuffled), window step=1nt, per gene
+        meanOfShufflesProfileForW = df.mean(axis=0)
+        nativeProfileForW = np.array(profile)
+        assert(meanOfShufflesProfileForW.shape == nativeProfileForW.shape)
+
+        wilx1 = stats.wilcoxon(nativeProfileForW, meanOfShufflesProfileForW)
+        #print(wilx)
+        #fwilcoxon_dist.write("%s,%.4g,%.3g\n" % (protId, wilx1.statistic, wilx1.pvalue))
+
+
+        # Method 2 -- Wilcoxon, native vs. shuffled, window step=30nt, per gene
+        startPositions = [int(floor(i*29.9)) for i in range(6)] # 0-based; Use 29.9 to force the last window to 150 (vs. 151); TODO - Change this...
+        assert(len(startPositions)==6)
+        assert(np.all(np.array([(startPositions[i+1]-startPositions[i]) >= 29 for i in range(5)])))
+        shuffleScores = df.iloc[:,startPositions]
+        assert(shuffleScores.shape == (20,len(startPositions)))
+        #
+        assert(nativeProfileForW.shape == (151,))
+        nativeProfiles = nativeProfileForW.take(startPositions)
+        assert(nativeProfiles.shape == (len(startPositions),))
+
+        x = nativeProfiles - shuffleScores
+        assert(x.shape == (20,len(startPositions)))
+        wilx2 = stats.wilcoxon( x.unstack().values )
+        fwilcoxon_dist.write("%s,%.4g,%.3g,%.4g,%.3g,%.3g,%.3g,%.3g\n" % (protId, wilx1.statistic, wilx1.pvalue, wilx2.statistic, wilx2.pvalue, np.median(nativeProfiles), np.mean( gcContent ), np.median(x.unstack().values) ) )
         
         if(rl()):
             print("# %s - %d records included, %d records skipped" % (datetime.now().isoformat(), selected, skipped))
             if( nativeProfile[0].count() > 1005 and rl2()):
                 printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile, medianGCContent )
                 
-        for f in (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis):
-            f.flush()
+            #for f in (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis):
+            #    f.flush()
         
         selected += 1
         alreadyCompleted += 1
@@ -495,5 +556,5 @@ for taxIdForProcessing in species:
     printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile, medianGCContent)
 
     
-    for f in (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis, frawdata):
+    for f in (fdebug_zeros_scores, fdebug_zeros_fasta, fdebug_sample_scores, fdebug_sample_fasta, fwilcoxon_dist): # (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis, frawdata):
         f.close()
