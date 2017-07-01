@@ -19,39 +19,142 @@ from bz2 import BZ2File
 import numpy as np
 import pandas as pd
 from scipy import stats
-import config
-import mysql_rnafold as db
+import argparse
 import matplotlib
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
-from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqsForSpecies
+import config
+import mysql_rnafold as db
+from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqsForSpecies, splitLongSequenceIdentifier, decompressSeriesRecord, decodeJsonSeriesRecord
 from runningstats import RunningStats, OfflineStats
 from rate_limit import RateLimit
 
 
-
-# command-line arguments
-species = map(int, sys.argv[1].split(","))
-#computationTag = sys.argv[2]
-#if( computationTag.find(':') != -1 ): raise Exception("computation tag cannot contain ':' (should be compatible with redis key names)")
-# e.g. rna-fold-0
-#randomFraction = int(sys.argv[3])
 
 # Configuration
 #queueKey = "queue:tag:awaiting-%s:members" % computationTag
 #nativeCdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
 #seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 windowWidth = 40
-seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
-numWindows = 150
-numShuffledGroups = 20
-requiredNumShuffledGroups = 20
+seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40_v2
+#numWindows = args.profile.NumProfileElements
+numShuffledGroups = 20           # Maximum number of shuffles to be examined
+requiredNumShuffledGroups = 20   # Minimum number of shuffles to be required
 #computationTag = "rna-fold-window-40-0"
-# TODO: Add support for step-size >1
 
-# Establish DB connections
-#r = redis.StrictRedis(host=config.host, port=config.port, db=config.db)
-#session = db.Session()
+
+
+class ProfileSpec(object):
+    def __init__(self, profileArgs=args.profile):
+        self._profileSpan = profileArgs[0]
+        self._profileStep = profileArgs[1]
+        self._profileReference = profileArgs[2]
+        assert(self._profileReference=="begin" or self._profileReference=="end")
+        self._numProfileElements = None
+        self._profileId = "%d:%d:%s" % (self._profileSpan, self._profileStep, self._profileReference)
+        
+        self._cdsLength = None
+
+    def __repr__(self):
+        return "ProfileSpec(ProfileSpan=%d, ProfileStep=%d, ProfileReference='%s', NumProfileElements=%d, ProfileId='%s')" % (self._profileSpan, self._profileStep, self._profileReference, self._numProfileElements, self._profileId)
+
+    def __str__(self):
+        return self.__repr__()
+
+    def profileSpan(self):
+        return self._profileSpan
+    
+    def profileStep(self):
+        return self._profileStep
+    
+    def profileReference(self):
+        return self._profileReference
+    
+    def profileId(self):
+        return self._profileId
+
+    
+    # def AllElements(self):
+    #     if self.ProfileReference=="begin":
+    #         return range(0, self.ProfileSpan, self.ProfileStep)
+    #     else:
+    #         raise Exception("Not impl.")
+        
+    """
+    Length of the CDS in symbols (AAs)
+    (This can be repeatedly set when processing a new CDS)
+    """
+    def setCDSLength(self, newCDSLength):
+        self._cdsLength = newCDSLength
+        self._profileLength = None  # make sure the profile length is also set
+
+    def cdsLength(self):
+        assert(not self._cdsLength is None)
+        return self._cdsLength
+    
+    """
+    Number of windows in the current profile (whether already computed or not), i.e. the profile length
+    This should equal min(ProfileLength-windowWidth-1, numWindows) / profileStep.
+    However, we are having the caller set this value instead of calculating it, since our purpose is to read existing profiles.
+    """
+    def setNumProfileWindows(self, newProfileLength):
+        self._profileLength = newProfileLength
+        expectedProfileLength = (min(profileSpan, self._cdsLength) - windowWidth - 1 ) / self._profileStep
+        if( abs( self._profileLength - expectedProfileLength ) > 2 ):
+            print("Warning: expected profile length (%d) different than actual profile length (%d)" % (expectedProfileLength, self._profileLength))
+        
+    def numProfileWindows(self):
+        assert(not self._profileLength is None)
+        return self._profileLength
+
+    def profileStarts(self):
+        if( self._profileReference == 'begin' ):
+            return range(0, self._profileLength, self._profileStep)
+        else:
+            raise Exception("Unsupported profile reference '%s'" % self._profileReference)
+
+
+def parseList(conversion=str):
+    def convert(values):
+        return map(conversion, values.split(","))
+    return convert
+    
+def parseProfileSpec():
+    def convert(value):
+        o = value.split(':')
+        assert(len(o)==3)
+        
+        o[0] = int(o[0])
+        assert(o[0]>0)
+        
+        o[1] = int(o[1])
+        assert(o[1]>0)
+        
+        assert(o[2]=="begin" or o[2]=="end")
+        
+        return ProfileSpec(o[0], o[1], o[2])
+    return convert
+
+argsParser = argparse.ArgumentParser()
+argsParser.add_argument("--taxid", type=parseList(int))
+argsParser.add_argument("--profile", type=parseProfileSpec())
+#argsParser.add_argument("--variant", type=parseOption(set(("yeastgenome", "NCBI")), "variant"))
+#argsParser.add_argument("--type", type=parseOption(set(("cds", "shuffle", "fixCDSkey")), "sequence type"))
+#argsParser.add_argument("--dry-run", action="store_true", default=False)
+#argsParser.add_argument("--output-fasta")
+#argsParser.add_argument("--gene-ids-file")
+#argsParser.add_argument("--alt-protein-ids", type=parseOption(set(("locus_tag",)), "alt-protein-id"))
+#argsParser.add_argument("--headers-from-another-fasta")
+args = argsParser.parse_args()
+profileInfo = ProfileDef()  # Initialize profileSpec based on the command-line args
+
+
+# command-line arguments
+species = args.taxid
+#computationTag = sys.argv[2]
+#if( computationTag.find(':') != -1 ): raise Exception("computation tag cannot contain ':' (should be compatible with redis key names)")
+# e.g. rna-fold-0
+#randomFraction = int(sys.argv[3])
 
 
 rl = RateLimit(60)
@@ -84,8 +187,6 @@ def addMargins(x0, x1, margin=0.1):
 
     return (y0,y1)
     
-        
-
 
 # xaxis = np.arange(0,150,1)
 # def plotProfile_(taxId, native, shuffle):
@@ -116,7 +217,7 @@ def plotProfile(taxId, data):
 
     #plt.title(getSpeciesName(taxId))
 
-    plt.xlabel('Position (nt, window start, from cds)')
+    plt.xlabel('Position (nt, window start, from cds %s)' % args.profile.ProfileReference)
 
     ax1.set_title("Mean LFE for %s" % getSpeciesName(taxId))
     ax1.set_ylabel('Mean LFE')
@@ -130,8 +231,9 @@ def plotProfile(taxId, data):
     ax2.grid(True)
 
 
-    plt.savefig("mfe_40nt_cds_%s.pdf" % getSpeciesFileName(taxId) )
-    plt.savefig("mfe_40nt_cds_%s.svg" % getSpeciesFileName(taxId) )
+    profileId = str(args.profile.ProfileId).replace(':', '-')
+    plt.savefig("mfe_40nt_cds_%s_%s.pdf" % (profileId, getSpeciesFileName(taxId)) )
+    plt.savefig("mfe_40nt_cds_%s_%s.svg" % (profileId, getSpeciesFileName(taxId)) )
     plt.close(fig)
 
 
@@ -186,16 +288,16 @@ def printOutput(taxId, nativeProfile, shuffleProfiles, GCProfile, medianGCConten
     gcMean =        ["GCcontent_mean"]
 
     #build a "profile-of-profiles" for the shuffled groups
-    aggregateProfile = buildProfile(numWindows, "offline")
+    aggregateProfile = buildProfile(profileSpec.numProfileWindows(), "offline")
     for n in range(numShuffledGroups):
-        for i in range(numWindows):
+        for i in range(profileSpec.numProfileWindows()):
             if( shuffleProfiles[n][i].count() ):
                 aggregateProfile[i].push( shuffleProfiles[n][i].mean() )
 
     if( not nativeProfile[i].count() ):
         return
 
-    for i in range(numWindows):
+    for i in range(profileSpec.numProfileWindows()):
         nativeMean.append(    "%.4g" % nativeProfile[i].mean() )
         nativeStdev.append(   "%.4g" % nativeProfile[i].stdev() )
         nativeMin.append(     "%.3g" % nativeProfile[i].min() )
@@ -218,10 +320,12 @@ def printOutput(taxId, nativeProfile, shuffleProfiles, GCProfile, medianGCConten
     native = np.asarray(nativeMean[1:], dtype="float")
     shuffled = np.asarray(shuffledMean[1:], dtype="float")
     gc = np.asarray(gcMean[1:], dtype="float")
-    xrange = np.arange(1,151,1)
+    xrange = [x for x in args.profile.Elements() if x<profileInfo.cdsLength()]
     df = pd.DataFrame( { "native": native, "shuffled": shuffled, "gc": gc, "position": xrange}, index=xrange )
     plotProfile(taxId, df)
-    store["df_%d" % taxId] = df
+
+    # Store the profile. Since multiple profiles may be supported, the profile-id (e.g., '2000:10:begin') is stored with the data
+    store["df_%d_%s" % (taxId, args.profile.ProfileId)] = df
 
 
     plotGCContentHist( medianGCContent, taxId )
@@ -235,7 +339,7 @@ def calcGCcontent(cdsSequence):
     #windowWidth = 40
     #seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40
     #numWindows = 150
-    if( len(cdsSequence) < numWindows+windowWidth-1 ):
+    if( len(cdsSequence) < profileSpec.cdsLength() ):
         return
 
     out = []
@@ -244,7 +348,7 @@ def calcGCcontent(cdsSequence):
     #return out
     # DEBUG ONLY ##### DEBUG ONLY ##### DEBUG ONLY ##### DEBUG ONLY ##### DEBUG ONLY #
 
-    for start in range(numWindows):
+    for start in profileSpec.profileStarts():
         end = start+windowWidth
         fragment = cdsSequence[start:end]
         assert(len(fragment)==windowWidth)
@@ -261,7 +365,7 @@ def calcGCcontent(cdsSequence):
             print("Warning: no data for window %d" % start)
             return []
 
-    assert(len(out)==numWindows)
+    assert(len(out)==profileSpec.numProfileWindows())
     return out
 
 
@@ -271,7 +375,7 @@ for taxIdForProcessing in species:
              taxIdForProcessing,
              getSpeciesName(taxIdForProcessing)))
 
-    computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing)
+    computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing, numShuffledGroups)
     print("Collecting data from %d computation results..." % len(computed))
 
 
@@ -301,23 +405,27 @@ for taxIdForProcessing in species:
     alreadyCompleted = 0
 
     # build an average profile for the native proteins
-    nativeProfile = buildProfile(numWindows)
+    nativeProfile = None
 
     # build a average profiles for each of the shuffled groups
     shuffleProfiles = []
-    for i in range(numShuffledGroups):
-        shuffleProfiles.append( buildProfile(numWindows) )
-
-    # build an average profile for the GC content
-    GCProfile = buildProfile(numWindows)
 
     medianGCContent = []
+
+
+    ##
+    # Are the profiles computed for each sequence, or are they accumulated?
+    ##
+    
+    sdfasdfasdfasdfasdfasdfadsf asdfasd fasd afsdfsd3##@2
 
     # Iterate over all CDS entries for this species
     for protId in SpeciesCDSSource(taxIdForProcessing):
         cds = CDSHelper(taxIdForProcessing, protId)
 
         seqLength = cds.length()
+        profileInfo.setCDSLength(seqLength)
+        
         if( not seqLength is None ):
             # Skip sequences that are too short
             if(seqLength < numWindows + windowWidth + 1 ):
@@ -328,7 +436,7 @@ for taxIdForProcessing in species:
             skipped += 1
             continue
 
-        requiredNumWindows = seqLength - windowWidth + 1
+        #requiredNumWindows = seqLength - windowWidth + 1
 
         cdsSeqId = cds.seqId()
 
@@ -352,26 +460,24 @@ for taxIdForProcessing in species:
         #cdsResults = cds.getCalculationResult( seriesSourceNumber, -1 )
         #print(cdsResults[:20])
 
-        cdsSequence = cds.sequence()
-        gcContent = calcGCcontent(cdsSequence)
-        #print(gcContent)
-        if( len(gcContent) ):
-            for i in range(numWindows):  # Limit to 150; TODO - treat this generically?
-                GCProfile[i].push( gcContent[i] )
-                medianGCContent.append( np.median( gcContent ) )
+        # Get the computed results for this CDS
+        seqIds = [cds.seqId()]
+        seqIds.extend( cds.shuffledSeqIds() )
+        if( len(seqIds) > numShuffledGroups+1 ):
+            seqIds = seqIds[:numShuffledGroups+1]
+        results = [ computed.get(x) for x in seqIds ]
 
-        #print(GCProfile[i].mean())
 
-        results = cds.getCalculationResult2( seriesSourceNumber, range(-1,numShuffledGroups), True )
-        del cds
-
-        if( results is None or len(filter(lambda x: not x is None, results)) < requiredNumShuffledGroups ):
+        if( results is None or len([() for x in results if not x is None]) < requiredNumShuffledGroups ):
             print("Not enough results found for %s" % protId)
             skipped += 1
             continue
 
+        results = list(map(lambda x: decodeJsonSeriesRecord(decompressSeriesRecord(x)) if not x is None else None, results))
+        print(results)
+
         shuffles = pd.Index(range(len(results)-1))
-        df = pd.DataFrame(index=shuffles, columns=range(151))  # TODO - set the profile lengths according to the data...
+        df = pd.DataFrame(index=shuffles, columns=args.profile.Elements())  # TODO - set the profile lengths according to the data...
 
         for shuffleId, data in zip(range(-1,numShuffledGroups), results):
             if( data is None ):
@@ -379,21 +485,38 @@ for taxIdForProcessing in species:
                 continue
 
             # Make sure we are seeing the correct record
-            recordIdentifier = None
-            if( data["id"].find('/') == -1 ):
-                recordIdentifier = data["id"].split(":")
-            else:
-                recordIdentifier = data["id"].split("/")
+            recordIdentifier = splitLongSequenceIdentifier(data["id"])
+            print(recordIdentifier)
             
-            assert(int(recordIdentifier[0]) == taxIdForProcessing)
+            assert(recordIdentifier[0] == taxIdForProcessing)
             assert(recordIdentifier[1] == protId )
-            assert(int(recordIdentifier[3]) == shuffleId )
+            print("ShuffleIds: %d  %d" % (shuffleId, recordIdentifier[3]))
+            assert(recordIdentifier[3] == shuffleId )
 
             profile = data["MFE-profile"]  # MFE profile for all calculated positions in protId, shuffleId
+            if( nativeProfile is None ):
+                profileInfo.setNumProfileWindows(len(profile))
+                nativeProfile = buildProfile(profileSpec.numProfileWindows())
+
+                for i in range(numShuffledGroups):
+                    shuffleProfiles.append( buildProfile(profileSpec.numProfileWindows()) )
+
+                # build an average profile for the GC content
+                GCProfile = buildProfile(profileSpec.numProfileWindows())
+
+
             del data
 
             if( shuffleId>=0 ):
-                df.iloc[shuffleId,:] = profile
+                print(len(profile))
+                print(profile)
+                windows = args.profile.Elements()
+                print(len(windows))
+                windows = windows[:len(profile)]
+                print(len(windows))
+                print(windows)
+                print("CDSlen: %d" % profileInfo.cdsLength())
+                df.iloc[shuffleId,:] = [profile[i] for i in args.profile.Elements() if i<len(profile)]
 
             # Check all values are non-positive
             # Note: The energy values reaches 0.0 at some points (although I would've thought it should always be negative), so I ignore such cases.
@@ -416,16 +539,24 @@ for taxIdForProcessing in species:
                     fdebug_zeros_fasta.write("\n")
                     
                 assert(len(filter(lambda x: x > 0.0, profile)) == 0) # Positive results aren't valid
-                
+
+            # Add the window values for this sequence to the appropriate profile (native or shuffled)
             if(shuffleId<0):
-                for i in range(numWindows):
+                for n, i in enumerate(args.profile.Elements()):
+                    if i>=len(profile):
+                        break
+                    if profile[i] is None:
+                        continue
                     assert(profile[i] <= 0.0)
-                    nativeProfile[i].push( profile[i] )
+                    nativeProfile[n].push( profile[i] )
             else:
-                for i in range(numWindows):
+                for n, i in enumerate(args.profile.Elements()):
+                    if i>=len(profile):
+                        break
+                    if( profile[i] is None ):
+                        continue
                     assert(profile[i] <= 0.0)
-                    shuffleProfiles[shuffleId][i].push( profile[i] )
-            #del profile
+                    shuffleProfiles[shuffleId][n].push( profile[i] )
 
         #skew = []
         #skewpval = []
@@ -439,9 +570,9 @@ for taxIdForProcessing in species:
         
         #anderson = []
         #andersonpval = []
-        
-        for i in range(150):
-            s = df[i]
+
+        for n,i in enumerate(args.profile.Elements()):
+            s = df[n]
 
             # window is ready
             
@@ -509,6 +640,18 @@ for taxIdForProcessing in species:
         #print(np.array(profile).shape) #(151,)
 
 
+        # Update the GC profile
+        cdsSequence = cds.sequence()
+        gcContent = calcGCcontent(cdsSequence)
+        #print(gcContent)
+        if( len(gcContent) ):
+            for i in range(profileSpec.numProfileWindows()):  # Limit to 150; TODO - treat this generically?
+                GCProfile[i].push( gcContent[i] )
+                medianGCContent.append( np.median( gcContent ) )
+        del cds
+        
+
+        
         # Method 1 -- Wilcoxon, native vs. mean(shuffled), window step=1nt, per gene
         meanOfShufflesProfileForW = df.mean(axis=0)
         nativeProfileForW = np.array(profile)
@@ -526,7 +669,7 @@ for taxIdForProcessing in species:
         shuffleScores = df.iloc[:,startPositions]
         assert(shuffleScores.shape == (20,len(startPositions)))
         #
-        assert(nativeProfileForW.shape == (151,))
+        assert(nativeProfileForW.shape == (args.profile.NumProfileElements,))
         nativeProfiles = nativeProfileForW.take(startPositions)
         assert(nativeProfiles.shape == (len(startPositions),))
 
@@ -538,7 +681,7 @@ for taxIdForProcessing in species:
         if(rl()):
             print("# %s - %d records included, %d records skipped" % (datetime.now().isoformat(), selected, skipped))
             if( nativeProfile[0].count() > 1005 and rl2()):
-                printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile, medianGCContent )
+                printOutput(taxIdForProcessing, seqLength, nativeProfile, shuffleProfiles, GCProfile, medianGCContent )
                 
             #for f in (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis):
             #    f.flush()
@@ -553,7 +696,7 @@ for taxIdForProcessing in species:
     #print("queue contains %d items" % numItemsInQueue(computationTag))
 
     print("# Counts: native %d, shuffled %d" % (nativeProfile[0].count(), shuffleProfiles[0][0].count()))
-    printOutput(taxIdForProcessing, nativeProfile, shuffleProfiles, GCProfile, medianGCContent)
+    printOutput(taxIdForProcessing, seqLength, nativeProfile, shuffleProfiles, GCProfile, medianGCContent)
 
     
     for f in (fdebug_zeros_scores, fdebug_zeros_fasta, fdebug_sample_scores, fdebug_sample_fasta, fwilcoxon_dist): # (fskew, fskewpval, fnorm, fnormpval, fshapiro, fshapiropval, fkurtosis, frawdata):
