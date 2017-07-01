@@ -5,7 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import config
 
-db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False)
+db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False, echo_pool=True, pool_recycle=120)
 connection = None
 
 
@@ -13,7 +13,7 @@ def testHostAvailable(host, port):
     import socket
     s = None
     try:
-        s = socket.create_connection((host, 3306), 2.0)
+        s = socket.create_connection((host, port), 2.0)
         s.close()
         return True
     except socket.error as e:
@@ -25,8 +25,16 @@ def testHostAvailable(host, port):
 
 def getMysqlHostFromConnectionString(connString):
     from re import match
-    host = match("mysql://\w+:\w+@([a-zA-z0-9-._]+)/\w+", connString).group(1)
-    port = 3306
+    result = match("mysql([^:]+)?://\w+:\w+@([a-zA-z0-9-._]+)(:[0-9]+)?/\w+", connString)
+    host = result.group(2)
+    portMatch = result.group(3)
+    
+    if (not portMatch):
+        port = 3306
+    else:
+        assert(portMatch[0]==":")
+        port = int(portMatch[1:])
+        
     return (host, port)
 
 connectionInfo = getMysqlHostFromConnectionString(config.mysql_host_connection)
@@ -73,6 +81,13 @@ sequence_series2 = Table("sequence_series2", md,
                         Column("content", BLOB),
                         Column("source", Integer, primary_key=True),
                         Column("ext_index", Integer))
+
+sequence_series2_updates = Table("sequence_series2_updates", md,
+                         Column("dummy_id", Integer, primary_key=True),
+                         Column("sequence_id", Integer),
+                         Column("content", BLOB),
+                         Column("source", Integer),
+                         Column("ext_index", Integer))
 
 
 sequence_floats2 = Table("sequence_floats2", md,
@@ -121,6 +136,14 @@ class SequenceSeries2(Base):
     source = Column(Integer, primary_key=True)
     ext_index = Column(Integer)
 
+class SequenceSeries2Updates(Base):
+    __tablename__ = "sequence_series2_updates"
+    dummy_id = Column(Integer, primary_key=True)
+    sequence_id = Column(Integer)
+    content = Column(BLOB)
+    source = Column(Integer)
+    ext_index = Column(Integer)
+
 
 class SequenceFloats2(Base):
     __tablename__ = "sequence_floats2"
@@ -147,7 +170,8 @@ class Alphabets:
 class Sources:
     External = 1 # imported sequence
     Computed = 2
-    ShuffleCDSv2 = 10
+    ShuffleCDSv2_matlab = 10
+    ShuffleCDSv2_python = 11
     RNAfoldEnergy_SlidingWindow40_v2 = 102
     RNAfoldEnergy_SlidingWindow40_v2_alt = 103
     CDS_length_nt = 201
