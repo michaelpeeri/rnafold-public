@@ -3,12 +3,18 @@
 # 
 from collections import Counter
 import argparse
+from hashlib import md5
 from data_helpers import seriesUpdatesSource, splitLongSequenceIdentifier
 from rate_limit import RateLimit
+import mysql_rnafold as db
+from sqlalchemy import sql
+from sqlalchemy.sql.expression import func
 
 
 argsParser = argparse.ArgumentParser()
 argsParser.add_argument("--verbose", type=int, default=0)
+argsParser.add_argument("--groupSize", type=int, default=800)
+argsParser.add_argument("--find-duplicates", type=bool, default=False)
 args = argsParser.parse_args()
 
 
@@ -26,6 +32,7 @@ class ErrorTypes:
     UpdateProfileIsIdentical = 7
     SeqCRCchanged = 8
     IdentifiterInsideRecordChanged = 9
+    ConflictingOrDuplicateUpdateRecords = 10
 
 err = Counter()
 recordsByTaxId = Counter()
@@ -35,12 +42,105 @@ badOriginalRecords = set()
 def extractRecordId(longIdentifier):
     return longIdentifier.split(":")
 
+def duplicatePairsSource():
+    #select A.dummy_id as idA, B.dummy_id as idB, A.sequence_id, length(A.content), length(B.content)
+    #from sequence_series2_updates A, sequence_series2_updates B
+    #where A.dummy_id<B.dummy_id
+    #and A.sequence_id=B.sequence_id
+    #and A.source=B.source
+    #limit 10;
+
+    A = db.sequence_series2_updates.alias(name="A")
+    B = db.sequence_series2_updates.alias(name="B")
+
+    maxIndex = db.connection.execute( sql.select((func.max(A.c.dummy_id),)) ).fetchone()[0]
+    if maxIndex is None:
+        print("No updates found")
+        return
+    
+    print("Total update records: %d" % maxIndex)
+    #maxIndex = 4949
+    groupSize = args.groupSize
+    
+
+    total = 0
+    for fromId in range(0, maxIndex, groupSize):
+        q = sql.select(( A.c.dummy_id, B.c.dummy_id, A.c.sequence_id, func.length(A.c.content), func.length(B.c.content) )).where(
+            sql.and_(
+                A.c.dummy_id < B.c.dummy_id,
+                A.c.sequence_id == B.c.sequence_id,
+                A.c.source == B.c.source,
+                sql.between(A.c.dummy_id, fromId, min(fromId+groupSize-1, maxIndex))
+            ))
+
+        print("Executing query for range(%d, %d)..." % (fromId, fromId+groupSize))
+        result = db.connection.execute( q )
+        pairRecords = result.fetchall()
+
+        for r in pairRecords:
+            yield r
+        
+        total += len(pairRecords)
+
+    print("Total: %d" % total)
+    
+
+"""
+Delete redundant records, i.e., those updating the same series (computation) for the same sequence
+"""
+def findDuplicateUpdates():
+    recordsToDelete = set()
+
+    # Iterate of all duplicate pairs, i.e., pairs of update records that apply to the same (sequence_id, source)
+    for (idA, idB, sequenceId, lengthA, lengthB) in duplicatePairsSource():
+        assert(idA < idB)
+
+        recordToDelete = None
+
+        # Try to delete the smaller record (by compressed byte size) - since we are about to destroy data, try to destroy the least
+        # if both records have the same size, delete the newest
+        # 
+        # Note: since any pair may be part of a larger group of duplicate records, this rule must define a strong ordering on the members of the
+        #       group. That way, only one member (the "largest" one) will be maintained after a single iteration.
+        #
+        if lengthA is None:
+            if lengthB is None:
+                recordToDelete = idB
+            else: # lengthA is None and lengthB is not None:
+                recordToDelete = idA
+        elif lengthB is None:
+            recordToDelete = idB
+        elif lengthA is None and lengthB is None:
+            recordToDelete = idB
+        elif lengthA > lengthB:
+            recordToDelete = idB
+        elif lengthB > lengthA:
+            recordToDelete = idA
+        else:
+            recordToDelete = idB
+
+        recordsToDelete.add(recordToDelete)
+    return recordsToDelete
+        
+
+        
+        
+if( args.find_duplicates ):
+    duplicates = findDuplicateUpdates()
+    print(len(duplicates))
+    duplicatesList = sorted(list(duplicates))
+    print(md5(str(duplicatesList)).hexdigest())
+    badUpdateRecords.update(duplicates)
+    if len(duplicates) > 0:
+        err[ErrorTypes.ConflictingOrDuplicateUpdateRecords] += len(duplicates)
+
+    
 for updates in seriesUpdatesSource(102, 500):
     total += len(updates)
 
     for updateRecord, originalRecord in updates:
         assert(len(updateRecord)==3)
-        assert(len(originalRecord)==2)
+        assert((originalRecord is None) or (len(originalRecord)==2))
 
         if( args.verbose>2 ):
             print("================================================================")
@@ -149,8 +249,13 @@ for updates in seriesUpdatesSource(102, 500):
     #    print("DEBUG: Stopped before end!")
     #    break
 
+
+
+    
 print(total)
 print(err)
+print(recordsByTaxId)
+
 print("-- To delete %d invalid records: --" % len(badUpdateRecords))
 print("use rnafold;")
 todelete = list(badUpdateRecords)
