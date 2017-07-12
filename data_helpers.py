@@ -410,6 +410,12 @@ class CDSHelper(object):
             else:
                 return allSeqIds[i]
 
+        def seqIdToShuffleId(i):
+            if i==cdsSeqId:
+                return -1
+            else:
+                return allSeqIds.index(i)
+
         # Create a list of sequence-ids for the requested shuffle-ids
         #requestedSeqIds = filter( lambda x: not x is None, map(shuffleIdToSeqId, shuffleIds) )
         requestedSeqIds = [y for y in [ shuffleIdToSeqId(x) for x in shuffleIds ] if not y is None]
@@ -427,11 +433,9 @@ class CDSHelper(object):
 
         print("Got %d results from db" % (len(records)))
 
-        out = [None]*(max(shuffleIds)+1) # return results as an array (not a map!)
+        out = dict( zip( shuffleIds, [None]*len(requestedSeqIds) ) )
 
-        sequenceIdToPos = dict( zip( requestedSeqIds, range(len(shuffleIds)) ) )
-        
-        for n, record in enumerate(records):
+        for record in records:
             compressed = record[0]
             currSeqId = record[1]
 
@@ -441,11 +445,11 @@ class CDSHelper(object):
             except Exception as e:
                 raise Exception("gzip format not recognized for sequence %d (taxId=%d, protId=%s)"  % (currSeqId, self._taxId, self._protId))
 
-            out[ sequenceIdToPos[currSeqId] ] = decoded
+            out[ seqIdToShuffleId(currSeqId) ] = decoded
 
         if( parseAsJson ):
-            out2 = []
-            for encoded in out:
+            out2 = {}
+            for shuffleId, encoded in out.items():
                 if( encoded is None ):
                     #print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
                     decoded = None
@@ -453,41 +457,12 @@ class CDSHelper(object):
                     # Cover for silly JSON formatting error in an early version
                     decoded = decodeJsonSeriesRecord(encoded)
                     del encoded
-                out2.append(decoded)
+                out2[shuffleId] = decoded
             out = out2
 
+        assert(len(out) == len(shuffleIds))
         return out
 
-
-    def checkCalculationResult(self, calculationId, shuffleIds):
-
-        cdsSeqId = self.seqId()
-        allSeqIds = self.shuffledSeqIds()
-
-        def shuffleIdToSeqId(i):
-            if i<0:
-                return cdsSeqId
-            else:
-                return allSeqIds[i]
-            
-        requestedSeqIds = map(shuffleIdToSeqId, shuffleIds)
-
-        results = db.connection.execute( sql.select(( db.sequence_series2.c.sequence_id,)).select_from(db.sequence_series2).where(
-                sql.and_(
-                    db.sequence_series2.c.source==calculationId,
-                    db.sequence_series2.c.sequence_id.in_(requestedSeqIds)
-                    )) )
-        records = results.fetchall()
-
-        out = [False]*len(shuffleIds)
-
-        sequenceIdToPos = dict( zip( requestedSeqIds, range(len(shuffleIds)) ) )
-        
-        for n, record in enumerate(records):
-            currSeqId = record[0]
-            out[ sequenceIdToPos[currSeqId] ] = True
-
-        return out
 
     """
     Get lists of CDS positions, for each requested shuffleId, that are missing calculated MFE values.
@@ -511,6 +486,7 @@ class CDSHelper(object):
         # Fetch the sequence-ids for the native and existing shuffles
         cdsSeqId = self.seqId()
         allSeqIds = self.shuffledSeqIds()
+
         #print("found %d shuffles" % len(allSeqIds))
 
         if not isinstance(windowsToCheck, Set):
@@ -547,7 +523,7 @@ class CDSHelper(object):
                     )) )
         allExistingSequenceIds = frozenset([x[0] for x in results.fetchall()])
         assert(len(allExistingSequenceIds) <= len(requestedSeqIds))
-        
+
         # returned value is an array, with items matching those requested in shuffleIds (which are not required to be in consecutive or in ascending order)
         out = [None]*len(shuffleIds)
 
@@ -556,6 +532,7 @@ class CDSHelper(object):
 
         # iterate over each returned result, i.e., the existing results for all requested shuffle-ids in this gene
         for n, record in enumerate(records):
+            #logging.warning("%d %s" % (n, record))
             currSeqId = record[0]
             compressed = record[1]
 
@@ -595,18 +572,35 @@ class CDSHelper(object):
             
 
         print("-----------")
+        #logging.warning("---------------------")
         # For items where the output value (matching item in out) is None, the are two cases:
         # 1) The random sequence might not exist; in this case, we will return None, and the sequence will need to be created
         # 2) The random seqeunce might already exists; in this case, we will return a list of all windows, since they are all missing and ready to be computed
         itemPositionsMissingResults = [i for i,x in enumerate(out) if x is None]
+        #logging.warning("shuffleIds: %s" % shuffleIds)
+        #logging.warning("itemPositions: %s" % itemPositionsMissingResults)
+        #logging.warning("allSeqIds: %s" % allSeqIds)
+        
         for pos in itemPositionsMissingResults:
+            #logging.warning("pos: %d" % pos)
             itemShuffleId = shuffleIds[pos]
+            if itemShuffleId == -1:
+                logging.warning("Skipping checking native CDS sequence")
+                out[pos] = frozenset(windowsToCheck)
+                continue   # we assume the native CDS sequence must already exist...
+            
+            #logging.warning("itemShuffleId: %d" % itemShuffleId)
             if( itemShuffleId < len(allSeqIds) ):
+                #logging.warning("*********(-1)************")
                 shuffleSequenceId = allSeqIds[itemShuffleId]
+                #logging.warning("shuffleSequenceId: %d" % shuffleSequenceId)
             else:
+                #logging.warning("*********(0)************")
                 continue # case 1) - nothing else needs to be done
 
+            #logging.warning("*********(1)************")
             if( shuffleSequenceId in allExistingSequenceIds ): # the randomized sequence for this shuffle-id already exists (although we found no results for it)
+                #logging.warning("*********(2)************")
                 out[pos] = frozenset(windowsToCheck) # case 2) - re-calculate all windows for this sequence
             else:
                 pass # case 1) - nothing else needs to be done
@@ -652,10 +646,11 @@ class CDSHelper(object):
         shuffledSeqIdsToDelete = shuffledSeqIds[lastItemToKeep:None]  # delete the range lastItemToKeep:end
 
         expectedDeletedRecords = len(shuffledSeqIdsToDelete)
-        print("Debug: Found %d records in redis; expecting to delete %d records from mysql" % (cdsRecordsBeforeDeleting, expectedDeletedRecords))
-
+        
         if not expectedDeletedRecords:
             return 0
+
+        print("Debug: Found %d records in redis; expecting to delete %d records from mysql" % (cdsRecordsBeforeDeleting, expectedDeletedRecords))
 
         result = db.connection.execute( db.sequences2.delete().where(
                     db.sequences2.c.id.in_(shuffledSeqIdsToDelete)
@@ -684,6 +679,9 @@ class CDSHelper(object):
     def dropNativeSeq(self):
         nativeSeqId = self.seqId()
 
+        if( nativeSeqId is None ):
+            raise Exception("No native seq defined")
+
         result = db.connection.execute( db.sequences2.delete().where(
                     db.sequences2.c.id == nativeSeqId
                     ) )
@@ -693,16 +691,29 @@ class CDSHelper(object):
         else:
             raise Exception("Failed to delete native seq with id %d (prot-id=%s)" % (nativeSeqId, self._protId))
 
-    def dropRecord(self):
+    def dropRecord(self, dropCDSKeys=False):
         keysToDelete = set()
+        
         # Collect the list of all values for this protein
-        for k in r.scan_iter(match='CDS:taxid:%d:protid:%s:*'%(self._taxId, self._protId) ):
-            keysToDelete.add(k)
-        # Delete all keys for this protein
-        for k in keysToDelete:
-            r.delete(k)
+        # Note: This is *really* slow
+        #       As an alternative, use matchCDSKeyNamesSource (see drop_species.py)
+        if( dropCDSKeys ):
+            for k in r.scan_iter(match='CDS:taxid:%d:protid:%s:*'%(self._taxId, self._protId) ):
+                keysToDelete.add(k)
+            # Delete all keys for this protein
+            for k in keysToDelete:
+                r.delete(k)
+
         # Delete the protId entry from the proteins set
         r.srem(speciesCDSList % self._taxId, self._protId)
+
+
+def matchCDSKeyNamesSource(taxId):
+    for k in r.scan_iter(match='CDS:taxid:%d:protid:*' % taxId ):
+        yield k
+
+
+
 
 """
 Get the number of items queued
@@ -823,7 +834,7 @@ def seriesUpdatesSource(calculationId, bulkSize=500):
 
             # Decode the original record
             # Decoded format: (sequence_id, content_record)
-            convertedOriginal = None
+            convertedOriginalRecord = None
             if( not matchingOriginal is None ):
                 convertedOriginalRecord = (matchingOriginal[0], decodeJsonSeriesRecord( decompressSeriesRecord( matchingOriginal[1] )) )
                 
@@ -1004,6 +1015,8 @@ class AddShuffledSequences(object):
 
     def addSequence(self, shuffleId, seq):
         # Store the shuffled CDS sequence
+
+        logging.info('compress seq: %s...' % seq[:15])
 
         # Compress the CDS sequence
         encodedCds = nucleic_compress.encode(seq)
