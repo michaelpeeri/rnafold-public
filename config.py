@@ -12,6 +12,10 @@ sqlite_base_path = "/home/michael/rnafold/data"
 def make_sqlite_host_connection(filename):
     return 'sqlite:///%s/%s.db' % (sqlite_base_path, filename)
 
+# data files
+base_data_dir    = "/home/michael/rnafold/data/"
+ensembl_data_dir = "/home/michael/rnafold/data/Ensembl/"
+
 # mysql
 mysql_host_connection = 'mysql://rnafold:--password--@ec2-54-234-142-88.compute-1.amazonaws.com/rnafold'
 

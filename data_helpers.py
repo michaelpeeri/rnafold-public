@@ -37,6 +37,10 @@ workerKeepAliveKey = "status:worker-keep-alive"
 jobStatusKey = "status:job:%s:progress"
 taxGroupKey = "species:taxid:%d:tax-group"
 speciesTranslationTableKey = "species:taxid:%d:genomic-transl-table"
+speciesPropertyValueKey = "species:taxid:%d:properties:%s"
+speciesPropertySourceKey = "species:taxid:%d:properties:%s:source"
+speciesTaxIdKey = "species:name:%s:taxid"
+
 
 # establish connections
 # metadata server (redis)
@@ -68,6 +72,16 @@ def QueueSource(queueTag):
             return
 
 """
+Yield all existing taxIds (in arbitrary order)
+"""
+def allSpeciesSource():
+    keysFilter = speciesCDSList.replace("%d", "*")
+
+    for key in r.keys(pattern=keysFilter):
+        fields = key.split(":")
+        yield int(fields[2])
+        
+"""
 Return the number of CDS records for a given taxid
 """
 def countSpeciesCDS(taxId):
@@ -88,9 +102,17 @@ def getSpeciesFileName(taxId):
     p = r.get("species:taxid:%d:name" % taxId).split(" ")
     return p[0][0] + p[1]
 
+"""
+Get a taxonomic group containing this taxId (the groups were chosen, rather arbitrarily, for plotting)
+
+TODO: Transition this to use NCBI data instead of the manually annotated values
+"""
 def getSpeciesTaxonomicGroup(taxId):
     return r.get(taxGroupKey % taxId)
 
+"""
+Get the nuclear translation table used for this genome
+"""
 def getSpeciesTranslationTable(taxId):
     return int(r.get(speciesTranslationTableKey % taxId))
 
@@ -876,11 +898,74 @@ def getAllNativeCDSsForSpecies(taxId, fraction=None, modulus=None):
 
     return out
 
-        
 
-def getAllComputedSeqsForSpecies(calculationId, taxId, maxShuffleId=100):
+def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
+    if( propName.find(":") != -1 ):
+        raise Exception("Invalid property name '%s'" % propName)
+
+    if (not overwrite) and r.exists(speciesPropertyValueKey  % (taxId, propName)):
+        return
+    
+    r.set(speciesPropertyValueKey  % (taxId, propName), propVal)
+    r.set(speciesPropertySourceKey % (taxId, propName), source)
+
+def getSpeciesProperty(taxId, propName):
+    propVal    = r.get(speciesPropertyValueKey % (taxId, propName))
+    propSource = r.get(speciesPropertySourceKey % (taxId, propName))
+    return (propVal, propSource)
+
+def getSpeciesTemperatureInfo(taxId):
+    tempCategoricalProp = getSpeciesProperty(taxId, 'temperature-range')
+    tempNumericalProp   = getSpeciesProperty(taxId, 'optimum-temperature')
+
+    syntheticCategory = None
+
+    if tempCategoricalProp[0] is None:
+        if not tempNumericalProp[0] is None:
+            tempVal = float(tempNumericalProp[0])
+
+
+            #Counter({'Mesophilic': 79, 'Hyperthermophilic': 20, 'Thermophilic': 13, 'Psychrophilic': 4, 'Unknown': 1})
+
+            if tempVal < 25.0:
+                assert(tempVal > -30.0)
+                syntheticCategory = 'Psychrophilic'
+
+            elif tempVal < 42.0:
+                syntheticCategory = 'Mesophilic'
+
+            elif tempVal < 70.0:
+                syntheticCategory = 'Thermophilic'
+
+            else:
+                assert(tempVal < 120.0)
+                syntheticCategory = 'Hyperthermophilic'
+
+            tempCategoricalProp = (syntheticCategory, 'FromOptimumTemperature')
+        else:
+            tempCategoricalProp = ('Unknown', 'Unknown')
+
+    return( tempNumericalProp, tempCategoricalProp) 
+            
+
+    
+
+def getGenomicGCContent(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "gc-content") # annotated by ncbi_entrez.py
+    
+    if not propVal is None:
+        return float(propVal)
+    else:
+        return None
+    
+
+def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100):
     # First, collect all sequence-ids for the given species. This manual filtering by species is much faster than simply fetching all computation results...
     #print("Collecting sequence ids for taxid=%d..." % taxId)
+
+    if type(calculationIds)==type(0):
+        calculationIds = (calculationIds,)
+        
     sequenceIdsForTaxid = set()
     for protId in SpeciesCDSSource(taxId):
         cds = CDSHelper(taxId, protId)
@@ -899,7 +984,7 @@ def getAllComputedSeqsForSpecies(calculationId, taxId, maxShuffleId=100):
     print("Fetching results for %d sequences..." % len(sequenceIdsForTaxid))
     calculated = db.connection.execute( sql.select(( db.sequence_series2.c.sequence_id, db.sequence_series2.c.content)).select_from(db.sequence_series2).where(
                 sql.and_(
-                    db.sequence_series2.c.source==calculationId,
+                    db.sequence_series2.c.source.in_(calculationIds),
                     db.sequence_series2.c.sequence_id.in_(sequenceIdsForTaxid)
                     )) ).fetchall()
     #print("Converting data...")

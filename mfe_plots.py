@@ -221,11 +221,51 @@ class CenterPreservingNormlizer(matplotlib.colors.Normalize):
         steepness = 15.0
         return 1/(1+np.exp(-steepness*(values-0.5)))
 
-def heatmaplotProfiles(data, yvar, corrData, _labels, group_func=None, order=None):
+
+def getProfileHeatmapTile(taxId, data, corrData, yrange):
+    if not taxId in data:
+        return None
+
+    assert(len(yrange)==2)
+    assert(yrange[0] < yrange[1])
+    
+    fig, ax = plt.subplots()
+
+    series = data[taxId]
+    cmapNormalizer = CenterPreservingNormlizer(yrange[0], yrange[1])
+
+    imdata = np.array(series)
+    imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
+
+    #ax.axis(xmin=series.index[0], xmax=series.index[-1])
+
+    ax.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
+
+    pos = list(ax.get_position().bounds)
+
+    #taxname = getSpeciesFileName(taxId)
+    #taxDescriptor = "%s.%s" % (taxname[0], taxname[1:9])
+    #fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
+
+    #ax.set_title(taxId)
+    ax.set_yticks(())
+    #ax.tick_params
+
+    tileFilename = "heatmap_profile_taxid_%d.svg" % taxId
+    plt.savefig(tileFilename, orientation='portrait', bbox_inches='tight')
+    #plt.savefig("heatmap_profile_taxid_%d.svg" % taxId, orientation='portrait')
+    plt.close(fig)
+
+    return tileFilename
+    
+    
+
+def heatmaplotProfiles(data, dummy1, corrData, dummy2, dummy3=None, order=None):
     fig, axes = plt.subplots(nrows=len(data), ncols=2, sharex='col') #, gridspec_kw={'width_ratios': [4,1]})
 
     keysInOrder = data.keys()[:]
-    keysInOrder.sort( key=lambda x:order(x) )
+    if not order is None:
+        keysInOrder.sort( key=lambda x:order(x) )
     #keysInOrder = data.keys()
     
     plt.grid(False)
@@ -285,7 +325,7 @@ def heatmaplotProfiles(data, yvar, corrData, _labels, group_func=None, order=Non
     del corrDataForPlotting['spearman_smfe_Fop_pval']
     orderdf = pd.DataFrame({'order':range(len(keysInOrder))}, index=keysInOrder)
     df2 = pd.merge(corrDataForPlotting, orderdf, left_index=True, right_index=True, how='inner')
-    df2.sort('order')
+    df2.sort_values(by=['order'])
     del df2['order']
 
     corrsHeatmap = sns.heatmap(df2, annot=True, fmt=".2g", ax=cbx)
@@ -295,6 +335,8 @@ def heatmaplotProfiles(data, yvar, corrData, _labels, group_func=None, order=Non
     plt.savefig("heatmap_profile_test.pdf", orientation='portrait')
     plt.savefig("heatmap_profile_test.svg", orientation='portrait')
     plt.close(fig)
+
+    return (-maxRange, maxRange)  # return the normalized range used
 
 
 def plotCorrelations(data, _labels, group_func=None, order=None):

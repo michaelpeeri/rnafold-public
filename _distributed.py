@@ -2,7 +2,7 @@ import json
 import re
 from hashlib import md5
 from struct import unpack
-from dask.distributed import Client
+from dask.distributed import Client, wait
 from distributed.diagnostics import progress
 
 schedulerConfig = None
@@ -67,5 +67,5 @@ if __name__=="__main__":
         testUniformShardKey(100)
     else:
         raise Exception("Unknown command '%s'" % sys.argv[1])
-    
+
     sys.exit(0)

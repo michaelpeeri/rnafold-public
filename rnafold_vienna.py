@@ -28,8 +28,13 @@ def RNAfold_direct(seq):
 """
 Parse the 2nd-ary structure string representation returned by vienna,
 e.g.: (((.....)))..........((.(((((...))))).)).'
+
+return pairs of indices of paired (hybridized) nucleotides.
+
+if cdsOffset is given, all coordinates will be offset by that length (used to convert coordinates from
+window-referenced to CDS-referenced, so structures from different windows can be combined).
 """
-def parseStructure(struct):
+def parseStructure(struct, cdsOffset=0):
     stack = []
 
     ret = []
@@ -42,7 +47,7 @@ def parseStructure(struct):
             assert(not opposingPos is None)
             assert(opposingPos < pos)  # this will obviously always be true...
             #print("%d-%d" % (opposingPos, pos))
-            ret.append( (opposingPos, pos) )
+            ret.append( (opposingPos+cdsOffset, pos+cdsOffset) )
         elif s=='.':
             pass
         else:
@@ -53,14 +58,14 @@ def parseStructure(struct):
     
     
 
-def RNAfoldWithStructure(seq):
+def RNAfoldWithStructure(seq, cdsOffset=0):
     out = subprocess.check_output("echo %s | %s --noPS" % (seq, vienna_rnafold_path), shell=True)
     match = reMFEScoreWithStructure.match(out)
     score = float(match.group(2))
     assert(score<=0.0)
 
     struct = match.group(1)
-    parsedPairs = parseStructure(struct)
+    parsedPairs = parseStructure(struct, cdsOffset)
 
     return (parsedPairs, score)
     

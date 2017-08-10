@@ -12,16 +12,16 @@ import sys
 import codecs
 import argparse
 from random import randint
-#import redis
+import logging
+import traceback
 import config
 import mysql_rnafold as db
-#from sqlalchemy import sql
-#from sqlalchemy.sql.expression import func
 from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, SpeciesCDSSource, numItemsInQueue
 import _distributed
 import dask
 from store_new_shuffles import storeNewShuffles
 from rnafold_sliding_window import calculateMissingWindowsForSequence
+import notify_pushover
 
 scheduler = _distributed.open()
 
@@ -39,6 +39,8 @@ argsParser.add_argument("--random-fraction", type=int, default=1)
 argsParser.add_argument("--window-step", type=int, default=10)
 argsParser.add_argument("--from-shuffle", type=int, default=-1)
 argsParser.add_argument("--to-shuffle", type=int, default=20)
+argsParser.add_argument("--insert-sequences-only", type=bool, default=False)
+argsParser.add_argument("--completion-notification", type=bool, default=False)
 args = argsParser.parse_args()
 
 # command-line arguments
@@ -83,6 +85,7 @@ for taxIdForProcessing in species:
     # Iterate over all CDS entries for this species
     # TODO - preloading all sequences and results should optimize this
     for protId in SpeciesCDSSource(taxIdForProcessing):
+
         #protId = codecs.decode(protId)
         # Filtering
 
@@ -124,11 +127,14 @@ for taxIdForProcessing in species:
         try:
             missingResults = cds.checkCalculationResultWithWindows( seriesSourceNumber, requiredShuffles, requiredWindows )
         except IndexError as e:
-            print("Missing sequences for %s, skipping..." % protId)
+            msg = "Missing sequences for %s, skipping..." % protId
+            print(msg)
+            logging.error(msg)
+            logging.error(str(e))
             skipped += 1
             continue
 
-        #print(missingResults)
+        logging.warning("missingResults: %s" % missingResults)
 
         shufflesWithMissingWindows = [requiredShuffles[n] for n,v in enumerate(missingResults) if v ] # get the indices (not shuffle-ids!) of existing shuffles with missing positions
         print("Existing shuffles with missing windows: %s" % shufflesWithMissingWindows)
@@ -160,6 +166,9 @@ for taxIdForProcessing in species:
 
             
 
+        if args.insert_sequences_only:
+            continue
+            
         lastwin = requiredWindows[-1]
         if(shufflesWithMissingWindows):
             #cds.enqueueForProcessing(computationTag, shufflesWithMissingWindows, lastwin, windowStep)#
@@ -206,8 +215,27 @@ futures = scheduler.compute(queuedDelayedCalls) # submit all delayed calculation
 _distributed.progress(futures) # wait for all calculations to complete
 print("\n")
 
-results = scheduler.gather(futures) # get the results of the completed calcualtions
+#results = scheduler.gather(futures) # get the results of the completed calcualtions
+results = []
+errorsCount = 0
+completedCount = 0
+for f in futures:
+    try:
+        r = scheduler.gather(f)
+        results.append(r)
+    except Exception as e:
+        results.append(e)
+        errorsCount += 1
+        
 print(results)
 # todo -- recover partial results when errors occur
+if( futures ):
+    print("%d tasks failed (%.3g%%)" % (errorsCount, float(errorsCount)/len(futures)*100))
 
 del scheduler # free connections?
+
+if args.completion_notification:
+    if len(species)==1:
+        notify_pushover.notify("Done processing %d genome" % len(species))
+    else:
+        notify_pushover.notify("Done processing %d genomes" % len(species))
