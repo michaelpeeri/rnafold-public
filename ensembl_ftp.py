@@ -30,8 +30,9 @@ def parseDirListingLine_returnFilenames(line):
     
 
 class EnsemblFTP(object):
-    def __init__(self, localDir, speciesDirName, release=36, subsection="bacteria_3_collection"):
+    def __init__(self, localDir, speciesDirName, release=36, section="bacteria", subsection=None):
         self._release = release
+        self._section = section
         self._subsection = subsection
         self._speciesDirName = speciesDirName
 
@@ -56,17 +57,18 @@ class EnsemblFTP(object):
     def getLocalFilename(self, remoteName):
         return "%s/%s" % (self._localDir, remoteName)
 
-    def getDirName(self, section="fasta", subdir=None):
+    def getDirName(self, category="fasta", subdir=None):
         #ftp.dir("/pub/bacteria/release-36/fasta/bacteria_3_collection/wolinella_succinogenes_dsm_1740", x)
+        #ftp.dir("/pub/protists/release-36/fasta/protists_stramenopiles1_collection/thalassiosira_oceanica_ccmp1005", x)
         if subdir is None:
-            return "/pub/bacteria/release-%d/%s/%s/%s/" % (self._release, section, self._subsection, self._speciesDirName)
+            return "/pub/%s/release-%d/%s/%s/%s/"    % (self._section, self._release, category, self._subsection, self._speciesDirName)
         else:
-            return "/pub/bacteria/release-%d/%s/%s/%s/%s/" % (self._release, section, self._subsection, self._speciesDirName, subdir)
+            return "/pub/%s/release-%d/%s/%s/%s/%s/" % (self._section, self._release, category, self._subsection, self._speciesDirName, subdir)
         
 
-    def listSpeciesItems(self, section="fasta", subdir=None):
+    def listSpeciesItems(self, category="fasta", subdir=None):
         names = LinesBuffer()
-        dirName = self.getDirName(section, subdir)
+        dirName = self.getDirName(category, subdir)
         
         self._ftp.dir(dirName, names)
                                                                  
@@ -224,7 +226,8 @@ def standaloneRun():
     argsParser.add_argument("--local-name", type=str, required=True)
     argsParser.add_argument("--remote-name", type=str, required=True)
     argsParser.add_argument("--release", type=int, default=36)
-    argsParser.add_argument("--subsection", type=str, default="bacteria_3_collection")
+    argsParser.add_argument("--section", type=str, default="bacteria")
+    argsParser.add_argument("--subsection", type=str)
     args = argsParser.parse_args()
 
 
@@ -233,7 +236,7 @@ def standaloneRun():
     #ftp://ftp.ensemblgenomes.org/pub/bacteria/release-36/gff3/bacteria_3_collection/wolinella_succinogenes_dsm_1740
 
     #f = EnsemblFTP("Wsuccinogenes", "wolinella_succinogenes_dsm_1740", release=36, subsection="bacteria_3_collection")
-    f = EnsemblFTP(args.local_name, args.remote_name, release=args.release, subsection=args.subsection)
+    f = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection)
     #f.fetchGenomeFiles()
     #f.fetchCDSFiles()
     #f.fetchGFF3Files()

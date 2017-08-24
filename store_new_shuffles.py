@@ -1,6 +1,7 @@
 import mysql_rnafold as db
 from data_helpers import CDSHelper, AddShuffledSequences
 from codon_randomization import SynonymousCodonPermutingRandomization
+import logging
 
     
 def storeRandomizedSequences(cds, seqs, shuffleIds):

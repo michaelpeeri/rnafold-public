@@ -29,14 +29,19 @@ def parseOption(possibleValues, name):
 argsParser = argparse.ArgumentParser()
 argsParser.add_argument("--taxid", type=int)
 argsParser.add_argument("--input")
-argsParser.add_argument("--variant", type=parseOption(set(("yeastgenome", "NCBI", "Ensembl")), "variant"))
+argsParser.add_argument("--variant", type=parseOption(set(("yeastgenome", "NCBI", "Ensembl", "JGI")), "variant"))
 argsParser.add_argument("--type", type=parseOption(set(("cds", "shuffle", "fixCDSkey")), "sequence type"))
 argsParser.add_argument("--dry-run", action="store_true", default=False)
 argsParser.add_argument("--output-fasta")
 argsParser.add_argument("--gene-ids-file")
 argsParser.add_argument("--alt-protein-ids", type=parseOption(set(("locus_tag",)), "alt-protein-id"))
 argsParser.add_argument("--headers-from-another-fasta")
+argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
 args = argsParser.parse_args()
+
+if( args.output_fasta ):
+    if( args.output_fasta == args.input ):
+        raise Exception("Fasta output file cannot match input file!")
 
 #if( len(sys.argv) < 5 ):
 #    print("Usage: %s <taxid> <fasta-file> <fasta-variant> <cds|shuffle>" % (sys.argv[0],))
@@ -72,7 +77,7 @@ regexLocusId = re.compile("([^.]+[.][^.]+)[.].*")
 if( sequenceType=="cds" ):
     seqSourceTag = db.Sources.External
 elif( sequenceType=="shuffle" ):
-    seqSourceTag = db.Sources.ShuffleCDSv2
+    seqSourceTag = db.Sources.ShuffleCDSv2_matlab
 elif( sequenceType=="fixCDSkey" ):
     seqSourceTag = None
 else:
@@ -137,6 +142,11 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
     if args.headers_from_another_fasta:
         record.description = headersFromAnotherFasta[record.id]
 
+    nonNucleotideChars = str(record.seq).translate(None, 'acgtACGT')
+    if nonNucleotideChars:
+        print("Skipping record %s, containing non-nucleotide or ambiguous symbols '%s'" % (record.id, nonNucleotideChars))
+        skippedCount +=1
+        continue
 
     # yeastgenome.org - skip suspected pseudo-genes
     if(args.variant=="yeastgenome" and record.description.find("Dubious ORF") != -1):
@@ -168,6 +178,7 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
     
     # Determine gene id
     proteinId = None
+    additionalProteinIds = set()
     altProteinId = None
     if(args.variant=="yeastgenome"):
         proteinId = record.id
@@ -221,15 +232,37 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
                 # Use the protein id, without the trailing transcript id.
                 # If this is not the first transcript for this protein-id, skip it.
                 proteinId = record.id[:-2]
+                additionalProteinIds.add(record.id) # also allow matching the full format (including the transcript-id) - some CDS files include it...
             else:
+                print("Skipping %s (secondary transcript)" % record.id )
                 skippedCount += 1
                 continue
         else:
             proteinId = record.id
 
+    elif(args.variant=="JGI"):
+        # Variant 1 (Phytozome, Mpus)
+        #  (gff3):  60050
+        #  (fasta): 60050
+        # Variant 2 (Phytozome, Dsal)
+        #  (gff3):  Dusal.1637s00001.1
+        #  (fasta): Dusal.1637s00001.1
+        # Variant 3:
+        #  (gff3):  jgi.p|Ostta1115_2|10314
+        #  (fasta): jgi|Ostta1115_2|10314|CE10313_131
+
+        proteinId = record.id
+        
+        if record.id.startswith("jgi|"):
+            parts = record.id.split('|')
+            parts[0] = 'jgi.p'                                 # add the '.p'
+            additionalProteinIds.add( '|'.join( parts[:3] ) )  # drop the suffix (parts[4])
+
     else:
         assert(False)
-    assert(len(proteinId)>2)
+
+    if not args.ignore_id_check:
+        assert(len(proteinId)>2)
 
     # Skip sequences that have non-standard translations
     if(args.variant=="NCBI"):
@@ -241,9 +274,11 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
     # If an inclusion list (white list) is defined, skip sequences missing from it
     if args.gene_ids_file:
         if( proteinId not in geneIdsToInclude):
-            print("Skipping %s (sequence %s)" % (proteinId, record.id))
-            skippedCount += 1
-            continue
+            # Also try the additional ids
+            if( not geneIdsToInclude.intersection( additionalProteinIds ) ):
+                print("Skipping %s (sequence %s, alternate ids=%s)" % (proteinId, record.id, list(additionalProteinIds)))
+                skippedCount += 1
+                continue
 
     print("Inserting %s (sequence %s)..." % (proteinId, record.id))
 
@@ -302,7 +337,7 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
         # Store the CDS checksum
         crc1 = getCrc(record.seq)
         r.set(cdsSeqChecksumKey % (taxId, proteinId), crc1)
-    elif( seqSourceTag == db.Sources.ShuffleCDSv2):
+    elif( seqSourceTag == db.Sources.ShuffleCDSv2_matlab):
         #
         # Add Shuffled CDS
         # 

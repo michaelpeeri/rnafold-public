@@ -6,14 +6,29 @@ from ensembl_ftp import EnsemblFTP
 from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList
 from config import ensembl_data_dir
 
-# ~/anaconda2/bin/python2 test_gff_extract_coding_genes.py --gff ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.36.gff3.gz --variant Ensembl --output-gene-ids ./data/Ensembl/coding_genes_list.Twhi.list --transl-table 11
+
+
+
+
+# ~/anaconda2/bin/python2 gff3_extract_coding_genes.py --gff ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.36.gff3.gz --variant Ensembl --output-gene-ids ./data/Ensembl/coding_genes_list.Twhi.list --transl-table 11
 def processGff3(gff3Filename, genesListFilename, args):
     print("Processing gff3 file...")
-    x = subprocess.check_output((sys.executable, "test_gff_extract_coding_genes.py",
-                                 "--gff", gff3Filename,
-                                 "--variant", "Ensembl",
-                                 "--output-gene-ids", genesListFilename,
-                                 "--transl-table", str(args.nuclear_genetic_code) ), shell=False)
+    output = []
+    try:
+        output = subprocess.check_output((sys.executable, "gff3_extract_coding_genes.py",
+                                          "--gff3", gff3Filename,
+                                          "--variant", args.variant, #"Ensembl",
+                                          "--output-gene-ids", genesListFilename,
+                                          "--transl-table", str(args.nuclear_genetic_code) ), shell=False)
+    except subprocess.CalledProcessError as e:
+        print(e)
+        print("--" * 20)
+        print("Process output: ")
+        print("--" * 20)
+        for line in output:
+            print(line)
+        print("--" * 20)
+        print(e)
 
 
 # ~/anaconda2/bin/python2 store_seqs_from_fasta.py --taxid 203267 --input ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.cds.all.fa.gz --variant Ensembl --type cds --output-fasta ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.cds.all.fa.gz.filtered.fna --gene-ids-file ./data/Ensembl/coding_genes_list.Twhi.list --dry-run
@@ -22,6 +37,14 @@ reEntryCountLine = re.compile("Processed (\d+) CDS entries")
 reTotalCountLine = re.compile("[(]out of \d+ CDS entries for this species[)]")
 reConnectionRecycling = re.compile(".*sqlalchemy.pool.QueuePool.*exceeded timeout; recycling")
 reSkippingAmbiguousSeq = re.compile("Skipping record (\S+), containing non-nucleotide or ambiguous symbols.*")
+
+#Skipping OEU05659.1 (sequence lcl|KV784598.1_cds_OEU05659.1_18098, alternate ids=[])
+reSkippingExcludedSeq = re.compile("Skipping (\S+) [(]sequence (\S+), alternate ids=[[][^]]*[]][)]")
+#Skipping pseudo-gene entry lcl|KV784402.1_cds_17051
+
+#"Skipping pseudo-gene entry (\S+)"
+reSkippingPseudoGene = re.compile("Skipping pseudo-gene entry (\S+)")
+
 reWarningEntriesSkipped = re.compile("Warning: (\d+) entries skipped and (\d+) entries not found")
 def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True):
     print("Reading CDS sequences file...")
@@ -29,12 +52,15 @@ def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True)
     arguments = (sys.executable, "store_seqs_from_fasta.py",
                  "--taxid", str(args.taxid),
                  "--input", cdsSequencesFilename,
-                 "--variant", "Ensembl",
+                 "--variant", args.variant,
                  "--type", "cds",
                  "--output-fasta", "%s.filtered.fna" % cdsSequencesFilename,
                  "--gene-ids-file", genesListFilename)
     if dryRun:
         arguments = arguments + ("--dry-run",)
+
+    if args.ignore_id_check:
+        arguments = arguments + ("--ignore-id-check",)
 
     report = subprocess.check_output(arguments, shell=False)
     
@@ -62,6 +88,16 @@ def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True)
             skippedGenes.append( reSkippingAmbiguousSeq.match(line).group(1) )
             print(line)
             continue
+
+        elif reSkippingExcludedSeq.match(line):
+            skippedGenes.append( reSkippingExcludedSeq.match(line).group(1) )
+            print(line)
+            continue
+
+        elif reSkippingPseudoGene.match(line):
+            skippedGenes.append( reSkippingPseudoGene.match(line).group(1) )
+            print(line)
+            continue
         
         elif reConnectionRecycling.match(line):
             continue
@@ -84,6 +120,7 @@ def ingestGenome(args):
 
     # Sanity test 1 -- genes list file doesn't already exists (if it does, short name may have been reused...)
     genesListFilename = "%s/coding_genes_list.%s.list" % (ensembl_data_dir, args.short_name)
+    print(genesListFilename)
     assert(not os.path.exists(genesListFilename))
 
     # Sanity test 2 -- this species doesn't already exist in the DB
@@ -95,16 +132,25 @@ def ingestGenome(args):
     
 
     # Sanity tests passed
+
+    genomefn = None
+    cdsfn = None
+    gff3fn = None
     
     # Step 1 - get files from Ensembl FTP
-    
-    ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, subsection=args.subsection)
-    (genomefn, cdsfn, gff3fn) = ftp.fetchAll()
-    ftp.close()
 
-    assert( os.path.exists(genomefn) and os.path.isfile(genomefn) )
-    assert( os.path.exists(cdsfn)    and os.path.isfile(cdsfn) )
-    assert( os.path.exists(gff3fn)   and os.path.isfile(gff3fn) )
+    if( args.variant == "Ensembl" and args.fetch_ftp_files ):
+    
+        ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection)
+        (genomefn, cdsfn, gff3fn) = ftp.fetchAll()
+        ftp.close()
+
+        assert( os.path.exists(genomefn) and os.path.isfile(genomefn) )
+        assert( os.path.exists(cdsfn)    and os.path.isfile(cdsfn) )
+        assert( os.path.exists(gff3fn)   and os.path.isfile(gff3fn) )
+    else:
+        gff3fn = args.gff3
+        cdsfn = args.cds
 
     # Step 2 - parse GFF3 file to yield list of acceptable CDS genes
     
@@ -117,6 +163,7 @@ def ingestGenome(args):
         raise Exception("Processing gff3 file only yielded %d results; aborting" % numGenesReturnedFromGff3)
     print("%d protein-coding genes found in gff3" % numGenesReturnedFromGff3)
 
+    
     # Step 3 - Add required annotations for this species to redis DB
     
     # TODO - add redis items here
@@ -147,6 +194,14 @@ def ingestGenome(args):
     
     return 0
 
+_knownBoolVals = {"true":True, "false":False}
+def parseBool(val):
+    _val = val.lower()
+    if _val in _knownBoolVals:
+        return _knownBoolVals[_val]
+    else:
+        raise Exception("Unknown bool value '%s'" % _val)
+    
 
 def standaloneRun():
     import argparse
@@ -154,15 +209,43 @@ def standaloneRun():
     
     argsParser = argparse.ArgumentParser()
     #argsParser.add_argument("--verbose", type=int, default=0)
-    argsParser.add_argument("--local-name", type=str, required=True)
-    argsParser.add_argument("--remote-name", type=str, required=True)
+    argsParser.add_argument("--local-name", type=str, required=False)
+    argsParser.add_argument("--remote-name", type=str, required=False)
     argsParser.add_argument("--release", type=int, default=36)
-    argsParser.add_argument("--subsection", type=str, default="bacteria_3_collection")
+    argsParser.add_argument("--section", type=str, default="bacteria")
+    argsParser.add_argument("--subsection", type=str, required=False)
     argsParser.add_argument("--nuclear-genetic-code", type=int, required=True)
     argsParser.add_argument("--taxid", type=int, required=True)
     argsParser.add_argument("--full-name", type=str, required=True)
     argsParser.add_argument("--short-name", type=str, required=True)
+    argsParser.add_argument("--variant", type=str, default="Ensembl")
+    argsParser.add_argument("--fetch-ftp-files", type=parseBool, default=True)
+    argsParser.add_argument("--gff3", type=str, required=False)
+    argsParser.add_argument("--cds", type=str, required=False)
+    argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
+    
     args = argsParser.parse_args()
+
+    print(args)
+
+    print(args.fetch_ftp_files)
+
+    if( args.fetch_ftp_files ):
+        if( (not args.local_name) or (not args.remote_name) ):
+            raise Exception("--remote-name and --local-name are required when --fetch-ftp-files=True")
+        
+        if( args.gff3 or args.cds ):
+            raise Exception("--gff3 and --cds are not supported when --fetch-ftp-files=True")
+        
+        if args.variant != "Ensembl":
+            raise Exception("Only --variant=Ensembl is supported with --fetch-ftp-files=True")
+    else:
+        if( args.local_name or args.remote_name ):
+            raise Exception("--remote-name and --local-name cannot be used when --fetch-ftp-files=False")
+        
+        if( (not args.gff3) or (not args.cds) ):
+            raise Exception("--gff3 and --cds are required when --fetch-ftp-files=False")
+        
 
     sys.exit(ingestGenome(args))
     
