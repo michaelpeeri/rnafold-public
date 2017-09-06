@@ -35,8 +35,9 @@ def createRandomizedSeqs(cds, newShuffleIds):
             raise
         
         assert((identity <= 1.0) and (identity > 0.0))
+        
         if(identity > 0.95):
-            raise Exception("Identity of randomized sequence is too high - %.3g%% (length=%d nt, total permutations=%.2g)" % (identity*100.0, len(newseq), totalPermutationsCount))
+            print("Warning: Identity of randomized sequence is high - %.3g%% (length=%d nt, total permutations=%.2g)" % (identity*100.0, len(newseq), totalPermutationsCount))
         
         if(totalPermutationsCount < 200):
             raise Exception("Low number of possible permutations %.2g (length=%d nt, identity=%.3g%%)" % (totalPermutationsCount, len(newseq), identity*100.0))
