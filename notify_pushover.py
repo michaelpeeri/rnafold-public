@@ -17,6 +17,11 @@ def notify(message):
     return (r.status_code, r.json())
 
 
+def defaultNotification():
+    from socket import gethostname
+    notify("Notification (%s)" % gethostname())
+
+
 if __name__=="__main__":
-    print(notify("test-9"))
+    defaultNotification()
     sys.exit(0)
