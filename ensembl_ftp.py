@@ -30,7 +30,7 @@ def parseDirListingLine_returnFilenames(line):
     
 
 class EnsemblFTP(object):
-    def __init__(self, localDir, speciesDirName, release=36, section="bacteria", subsection=None):
+    def __init__(self, localDir, speciesDirName, release=37, section="bacteria", subsection=None):
         self._release = release
         self._section = section
         self._subsection = subsection
