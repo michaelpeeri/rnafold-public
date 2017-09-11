@@ -211,7 +211,7 @@ def standaloneRun():
     #argsParser.add_argument("--verbose", type=int, default=0)
     argsParser.add_argument("--local-name", type=str, required=False)
     argsParser.add_argument("--remote-name", type=str, required=False)
-    argsParser.add_argument("--release", type=int, default=36)
+    argsParser.add_argument("--release", type=int, default=37)
     argsParser.add_argument("--section", type=str, default="bacteria")
     argsParser.add_argument("--subsection", type=str, required=False)
     argsParser.add_argument("--nuclear-genetic-code", type=int, required=True)
