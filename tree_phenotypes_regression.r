@@ -6,7 +6,6 @@ library("rredis")
 library("phylobase")
 library("ape")
 library("adephylo")
-#library("pGLS")
 
 
 #Ytrait="Profile.15"
@@ -157,8 +156,6 @@ print(sum(is.na(traits$Profile.15)))
 
 
 speciesWithMissingData <- row.names(traits[(is.na(traits[Xtrait]) | is.na(traits$GenomicGC)),])
-speciesWithoutData <- 
-
 
 
 #----------------------------------
