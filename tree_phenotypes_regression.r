@@ -166,7 +166,7 @@ speciesWithMissingData <- row.names(traits[(is.na(traits[Xtrait]) | is.na(traits
 #tree <- read.tree("nmicro_s6_pruned_with_taxids.nw")
 tree <- read.tree("test_tree.nw")  # TODO - verify this tree
 
-tree <- drop.tip( tree, c(c("470", "1280", "4932", "2850"), speciesWithMissingData) )
+tree <- drop.tip( tree, c(c("470", "1280", "4932", "2850"), speciesWithMissingData) ) # Filter species that will prevent analysis from being performed from the tree
 
 N <- nTips(tree)
 print(N)
