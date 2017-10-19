@@ -2,7 +2,7 @@ import re
 from collections import Counter
 import xml.etree.ElementTree as ET
 from ete3 import NCBITaxa, Tree, TreeStyle, NodeStyle, TextFace, faces, AttrFace, PhyloTree
-from Bio import Entrez, AlignIO
+from Bio import Entrez, AlignIO, Phylo
 from rate_limit import RateLimit
 from ncbi_taxa import ncbiTaxa
 from fuzzy_text_matching import sw
@@ -11,13 +11,14 @@ import pandas as pd
 
 
 # configuration
-nmicrobiol201648_s4 = "./data/nmicrobiol201648-s4.txt.fixed"
-nmicrobiol201648_s5 = "./data/nmicrobiol201648-s5.txt"    # =Alignment
-nmicrobiol201648_s6 = "./data/nmicrobiol201648-s6.txt"    # =Tree
-nmicrobiol201648_s8 = "./data/nmicrobiol201648-s8.txt"
-itol_newick         = "./data/itol_newick.txt"
-Entrez.email        = "mich1@post.tau.ac.il"
-unhandledXMLsFile   = "reference_tree.unhandled_xml.txt"
+nmicrobiol201648_s4             = "./data/nmicrobiol201648-s4.txt.fixed"
+nmicrobiol201648_s5             = "./data/nmicrobiol201648-s5.txt"    # =Alignment
+nmicrobiol201648_s6             = "./data/nmicrobiol201648-s6.txt"    # =Tree
+nmicrobiol201648_s6_PATHd8      = "./data/nmicrobiol201648-s6.txt.nw.PATHd8.out.d8.nw"    # =Tree
+nmicrobiol201648_s8             = "./data/nmicrobiol201648-s8.txt"
+itol_newick                     = "./data/itol_newick.txt"
+Entrez.email                    = "mich1@post.tau.ac.il"
+unhandledXMLsFile               = "reference_tree.unhandled_xml.txt"
 nodeIdentifiersMappingTable_csv = "reference_trees.hug.identifiers.csv"
 nodeIdentifiersMappingTable_xls = "reference_trees.hug.identifiers.xlsx"
 nodeIdentifiersMappingTable_with_testing_csv = "reference_trees.hug.identifiers.with_testing.csv"
@@ -104,6 +105,8 @@ def pruneTree(tree, keepNodes):
         if not x.taxId is None:
             taxIds.add(x.taxId)
 
+    print("Pruning, will keep %d nodes" % len(taxIds))
+
     for node in tree.traverse(strategy='postorder'):
         childTaxIds = set()
         
@@ -117,7 +120,27 @@ def pruneTree(tree, keepNodes):
 
         if not taxIds.intersection(childTaxIds):
             node.detach()
+            #node.delete()
             #print(".")
+
+    nn = []
+    for node in tree.traverse():
+        if node.is_leaf():
+            nn.append(node)
+
+    print("nn = %d" % len(nn))
+    print(len(tree))
+    tree.prune(nn, preserve_branch_length=True)
+    print(len(tree))
+
+    print("Expected: %d  Actual: %d" % (len(taxIds), len(tree)))
+    tree.write(format=1, outfile="test_tree.nw")
+
+    #assert(len(tree) <= len(taxIds))
+          
+
+def pruneTree2(tree, keepNodes):
+    tree.prune(keepNodes)
             
 
 
@@ -209,7 +232,7 @@ def inferTaxIdForLabel(label):
 def pruneReferenceTree_Nmicrobiol201648(taxa):
     treefmt = None
     
-    with open(nmicrobiol201648_s6, "r") as f:
+    with open(nmicrobiol201648_s6_PATHd8, "r") as f:
     #with open(itol_newick, "r") as f:
         treefmt = f.read()
 
@@ -245,8 +268,7 @@ def pruneReferenceTree_Nmicrobiol201648(taxa):
             #print(n)
 
 
-            # Infer
-
+            # Check if the label has a mapping in the id-conversion table
             matchingTaxId = labelToTaxId.get(node.name)
 
             #if not matchingTaxId is None:
@@ -255,6 +277,7 @@ def pruneReferenceTree_Nmicrobiol201648(taxa):
             # Did we find a match for this leaf?
             #if not matchingName is None: # match found
             if not matchingTaxId is None:
+                node.label = node.name
                 node.name = str(matchingTaxId)
                 #node.matchingName
                 #print("<%s>" % node.name)
@@ -268,7 +291,7 @@ def pruneReferenceTree_Nmicrobiol201648(taxa):
                 #if matchingTaxId != speciesLevelTaxon:
                 #    node.add_features(speciesLevelTaxon=speciesLevelTaxon)
 
-                matched.append("%s [%d]" % (matchingName, matchingTaxId))
+                matched.append("%s [%d]" % (node.label, matchingTaxId))
 
 
                 #print("--"*20)
@@ -1062,6 +1085,25 @@ def matchTreeWithAlignment():
             fout.write("%s,%s,%s\n" % (a, b, matchType))
 
 
+def convertTree():
+
+    #tree = Phylo.read(nmicrobiol201648_s6, "newick")
+    tree = Phylo.read("nmicro_s6_pruned.nw", "newick")
+
+    leafCount = 0
+
+    names = set()
+    
+    for node in tree.get_terminals():
+        leafCount += 1
+        #names.add(node.name)
+            
+
+    print(leafCount)
+    print(len(tree.get_nonterminals()))
+    print(len(names))
+            
+
 def standalone():
     import sys
     import argparse
@@ -1072,7 +1114,8 @@ def standalone():
     argsParser.add_argument("--prepare-translation-map", help="Create correlations table mapping Hug et. al. tree node-ids to NCBI taxon ids", action="store_true", default=False)
     argsParser.add_argument("--test-translation-map", help="Read correlations table and write extended table with BDQA fields", action="store_true", default=False)
     argsParser.add_argument("--write-inclusion-status-table", help="Create inclusion table for all nodes (for use in iTOL viewer)", action="store_true", default=False)
-    argsParser.add_argument("--match-tree-with-alignment", help="Create mapping between tree node names and alignment sequences", action="store_true", default=False)
+    argsParser.add_argument("--match-tree-with-alignment", help="Create mapping between tree node names and multiple-alignment sequences (for Hug et. al.)", action="store_true", default=False)
+    argsParser.add_argument("--convert-tree", help="Convert Hug et. al. tree for use in R", action="store_true", default=False)
     args = argsParser.parse_args()
 
     if args.prepare_translation_map:
@@ -1083,6 +1126,8 @@ def standalone():
         ret = outputNodeExistenceInRnafoldDB()
     elif args.match_tree_with_alignment:
         ret = matchTreeWithAlignment()
+    elif args.convert_tree:
+        ret = convertTree()
     else:
         assert(False)
     
