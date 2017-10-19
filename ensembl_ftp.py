@@ -27,7 +27,46 @@ def parseDirListingLine_returnFilenames(line):
     name = match.group(3)
     
     return (isDir, name)
-    
+
+
+"""
+Return the longest common prefix of all strings, or "" if no prefix exists
+"""
+def findCommonPrefix(strs):
+    for i,c in enumerate(strs[0]):
+        allMatch = True
+        
+        for s in strs:
+            if s[i]!=c:
+                allMatch = False
+                break
+            
+        if not allMatch:
+            return strs[0][:i]
+        
+    return ""
+
+def filterSpecialFiles(options):
+    return [x for x in options if x!="README" and x!="CHECKSUMS"]
+
+def selectGff3File(options):
+    assert(options)
+    if len(options)==1:
+        return 0
+        
+    prefix = findCommonPrefix(filterSpecialFiles([x[1] for x in options]))
+    assert(prefix)
+    assert(prefix[-1]==".")
+
+    expectedName = prefix+"gff3.gz"
+
+    assert(expectedName.find("chromosome") == -1)
+
+    if (False, expectedName) in options:
+        return options.index((False, expectedName))
+    else:
+        return None
+
 
 class EnsemblFTP(object):
     def __init__(self, localDir, speciesDirName, release=37, section="bacteria", subsection=None):
@@ -174,14 +213,15 @@ class EnsemblFTP(object):
     def fetchGFF3Files(self):
         items = self.listSpeciesItems("gff3")
 
-        gff3Matches      = list(filter( lambda x:x[1].endswith(".%d.gff3.gz" % self._release), items))
+        gff3Matches      = list(filter( lambda x:(x[1].endswith(".gff3.gz") and x[1].find(".abinitio.")==-1), items))
         readmeMatches    = list(filter( lambda x:x[1] == "README"                            , items))
         checksumsMatches = list(filter( lambda x:x[1] == "CHECKSUMS"                         , items))
 
-        localGFF3Filename = self.getLocalFilename(gff3Matches[0][1])
+        selectedGff3 = selectGff3File( gff3Matches )
+        localGFF3Filename = self.getLocalFilename( gff3Matches[selectedGff3][1] )
 
         if gff3Matches:
-            path = "%s%s" % (self.getDirName("gff3"), gff3Matches[0][1])
+            path = "%s%s" % (self.getDirName("gff3"), gff3Matches[selectedGff3][1])
             print("Fetching GFF3 from %s..." % path)
             with open(localGFF3Filename, "wb") as f:
                 resp = self._ftp.retrbinary("RETR %s" % path, f.write)
@@ -231,6 +271,10 @@ def standaloneRun():
     args = argsParser.parse_args()
 
 
+    #ftp://ftp.ensemblgenomes.org/pub/protists/release-37/fasta/protists_heterolobosea1_collection/naegleria_gruberi/dna/
+    #ftp://ftp.ensemblgenomes.org/pub/protists/release-37/fasta/protists_heterolobosea1_collection/naegleria_gruberi/cds/
+    #ftp://ftp.ensemblgenomes.org/pub/protists/release-37/gff3/protists_heterolobosea1_collection/naegleria_gruberi/
+    
     #ftp://ftp.ensemblgenomes.org/pub/bacteria/release-36/fasta/bacteria_3_collection/wolinella_succinogenes_dsm_1740/dna/
     #ftp://ftp.ensemblgenomes.org/pub/bacteria/release-36/fasta/bacteria_3_collection/wolinella_succinogenes_dsm_1740
     #ftp://ftp.ensemblgenomes.org/pub/bacteria/release-36/gff3/bacteria_3_collection/wolinella_succinogenes_dsm_1740
