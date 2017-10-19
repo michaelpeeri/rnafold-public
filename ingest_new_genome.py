@@ -38,6 +38,7 @@ reTotalCountLine = re.compile("[(]out of \d+ CDS entries for this species[)]")
 reConnectionRecycling = re.compile(".*sqlalchemy.pool.QueuePool.*exceeded timeout; recycling")
 reSkippingAmbiguousSeq = re.compile("Skipping record (\S+), containing non-nucleotide or ambiguous symbols.*")
 
+
 #Skipping OEU05659.1 (sequence lcl|KV784598.1_cds_OEU05659.1_18098, alternate ids=[])
 reSkippingExcludedSeq = re.compile("Skipping (\S+) [(]sequence (\S+), alternate ids=[[][^]]*[]][)]")
 #Skipping pseudo-gene entry lcl|KV784402.1_cds_17051
