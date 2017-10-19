@@ -86,7 +86,8 @@ Return the number of CDS records for a given taxid
 """
 def countSpeciesCDS(taxId):
     # Make sure taxid is valid
-    assert(r.exists(speciesNameKey % taxId))
+    if( not r.exists(speciesNameKey % taxId)):
+        raise Exception("Couldn't find species name for taxid=%d..." % taxId)
 
     return r.scard(speciesCDSList % taxId)
 
@@ -872,6 +873,8 @@ This is much faster than fetching the sequences separately.
 
 If fraction and modulus are set, only return the sequences for which the sequenceId % modulus == fraction
 (used to parallelize)
+
+Note: Using modulus on the sequence-ids may not maintain approximately equal group sizes for all values of modulus (but appears to work reasonably well in practice)
 """
 def getAllNativeCDSsForSpecies(taxId, fraction=None, modulus=None):
     # First, collect all sequence-ids for the given species. This manual filtering by species is much faster than simply fetching all computation results...
@@ -898,16 +901,28 @@ def getAllNativeCDSsForSpecies(taxId, fraction=None, modulus=None):
 
     return out
 
+"""
+Return all native CDS sequences for the specied species.
+Supports getting a random fraction of the sequences (using getAllNativeCDSsForSpecies)
+"""
+def nativeSequencesSource(taxId, fraction=None, numFractions=None):
+    for (seqId, seqData) in getAllNativeCDSsForSpecies(taxId, fraction, numFractions).items():
+        cdsSeq = decompressNucleicSequence(seqData)
+        del seqData
+        yield (seqId, cdsSeq)
+
 
 def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
     if( propName.find(":") != -1 ):
         raise Exception("Invalid property name '%s'" % propName)
 
     if (not overwrite) and r.exists(speciesPropertyValueKey  % (taxId, propName)):
-        return
+        return False
     
     r.set(speciesPropertyValueKey  % (taxId, propName), propVal)
     r.set(speciesPropertySourceKey % (taxId, propName), source)
+
+    return True
 
 def getSpeciesProperty(taxId, propName):
     propVal    = r.get(speciesPropertyValueKey % (taxId, propName))
