@@ -5,6 +5,7 @@ import os
 import subprocess
 import gzip
 import json
+import logging
 from time import sleep
 from datetime import datetime, timedelta
 import argparse
@@ -13,12 +14,15 @@ from data_helpers import CDSHelper, countSpeciesCDS, calcCrc, QueueSource, creat
 from runningstats import RunningStats
 from rate_limit import RateLimit
 from rnafold_vienna import RNAfold_direct
-import logging
+import profiling
 
 
 # hold configuration arguments (for either stand-alone or module use)
 args = None
 
+timerForPreFolding  = profiling.Timer()
+timerForFolding     = profiling.Timer()
+timerForPostFolding = profiling.Timer()
 
 def parseOption(possibleValues, name):
     def checkOption(value):
@@ -66,6 +70,7 @@ class RNAFold(object):
             
     def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
 
+        timerForPreFolding.start()
         logging.info("Parameters: %d %s %s %s %d %d %s" % (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, reference))
         f = self._logfile
 
@@ -85,7 +90,7 @@ class RNAFold(object):
             raise Exception(e)
 
         # Create a list of the windows we need to calculate for this CDS
-        requestedWindowStarts = frozenset(range(0, min(lastWindowStart, cds.length()-self._windowWidth-1), windowStep ))
+        requestedWindowStarts = frozenset(range(0, min(lastWindowStart+1, cds.length()-self._windowWidth-1), windowStep ))
         if( len(requestedWindowStarts) == 0):
             e = "No windows exist for calculation taxid=%d, protId=%s, CDS-length=%d, lastWindowStart=%d, windowStep=%d, windowWidth=%d - Skipping...\n" % (taxId, protId, cds.length(), lastWindowStart, windowStep, self._windowWidth)
             f.write(e)
@@ -97,49 +102,60 @@ class RNAFold(object):
         logging.info("DEBUG: requestedShuffleIds (%d items): %s\n" % (len(requestedShuffleIds), requestedShuffleIds))
         existingResults = cds.getCalculationResult2( self._seriesSourceNumber, requestedShuffleIds, True )
         #assert(len(existingResults) >= len(requestedShuffleIds))  # The returned array must be at least as large as the requested ids list
-        assert(len(existingResults) == max(requestedShuffleIds)+1)
+        assert(len(existingResults) == len(requestedShuffleIds))
+        logging.info("requestedShuffleIds: %s" % requestedShuffleIds)
+        logging.info("existingResults.keys(): %s" % existingResults.keys())
+        assert(frozenset(requestedShuffleIds)==frozenset(existingResults.keys()))
         #existingResults = [None] * (max(requestedShuffleIds)+1)
         logging.info("DEBUG: existingResults (%d items): %s\n" % (len(existingResults), existingResults))
 
         # Check for which of the requested shuffle-ids there are values missing
         shuffleIdsToProcess = {}
-        for n, r in enumerate(existingResults):
-            shuffleIdForThisN = n-1
+        for shuffleId, r in existingResults.items():
             if r is None:
                 # There are no existing results for shuffled-id n. If it was requested, it should be calculated now (including all windows)
-                if n in requestedShuffleIds:
-                    shuffleIdsToProcess[shuffleIdForThisN] = list(requestedWindowStarts)
+                if shuffleId in requestedShuffleIds:
+                    shuffleIdsToProcess[shuffleId] = list(requestedWindowStarts)
                     
                 # ------------------------------------------------------------------------------------
                 continue   # TODO - verify this line; should we abort this sequence by throwing????
                 # ------------------------------------------------------------------------------------
+
+            logging.info("/// shuffleId r = %d %s" % (shuffleId, r))
+            logging.info("r[MFE-profile] %s" % r["MFE-profile"])
             
             # Check the existing results for this shuffle
             alreadyProcessedWindowStarts = frozenset( [i for i,x in enumerate(r["MFE-profile"] ) if x is not None] ) # Get the indices (=window starts) of all non-None values
             missingWindows = requestedWindowStarts - alreadyProcessedWindowStarts # Are there any requested windows that are not already computed?
             if( missingWindows ): 
-                shuffleIdsToProcess[shuffleIdForThisN] = missingWindows
+                shuffleIdsToProcess[shuffleId] = missingWindows
 
         if( not shuffleIdsToProcess):
             e = "All requested shuffle-ids in (taxId: %d, protId: %s, seqs: %s) seems to have already been processed. Skipping...\n" % (taxId, protId, str(list(zip(seqIds, requestedShuffleIds))) )
-            logging.error(e)
-            raise Exception(e)
+            logging.warning(e)
+            return
         logging.info("DEBUG: shuffleIdsToProcess (%d items): %s\n" % (len(shuffleIdsToProcess), shuffleIdsToProcess))
 
         logging.info("DEBUG: Before (%d items): %s\n" % (len(existingResults), existingResults))
         # Initialize new results records
         for shuffleId in shuffleIdsToProcess.keys():
-            if existingResults[shuffleId+1] is None:
+            if existingResults[shuffleId] is None:
                 logging.info(seqIds)
                 logging.info(requestedShuffleIds)
                 logging.info(shuffleId)
                 thisSeqId = seqIds[ requestedShuffleIds.index(shuffleId) ]
+                    
                 existingResults[shuffleId] = { "id": "%s/%s/%d/%d" % (taxId, protId, thisSeqId, shuffleId), "seq-crc": None, "MFE-profile": [], "MeanMFE": None, "v": 2 }
         logging.info("DEBUG: existingResults (%d items): %s\n" % (len(existingResults),existingResults) )
+        timerForPreFolding.stop()
 
         # Load the sequences of all shuffle-ids we need to work on
         # TODO - combine loading of multiple sequences into one DB operation
-        for shuffleId, record in [(u-1,v) for u,v in enumerate(existingResults) if not v is None]:
+        for shuffleId, record in existingResults.items():
+            if record is None:
+                continue
+            timerForPreFolding.start()
+
             seq = None
             annotatedSeqId = None
             # Get the sequence for this entry
@@ -220,6 +236,8 @@ class RNAFold(object):
             stats = RunningStats()
             stats.extend([x for x in MFEprofile if x is not None])
 
+            timerForPreFolding.stop()
+            timerForFolding.start()
             for start in requestedWindowStarts:
                 fragment = seq[start:(start+self._windowWidth)]
                 assert(len(fragment)==self._windowWidth)
@@ -234,6 +252,9 @@ class RNAFold(object):
 
                 stats.push(energy)
                 MFEprofile[start] = energy
+                
+            timerForFolding.stop()
+            timerForPostFolding.start()
 
             # Format
             crc = calcCrc(seq)
@@ -248,10 +269,15 @@ class RNAFold(object):
 
             if( not self._debugDoneWriteResults):
                 cds.saveCalculationResult2( self._seriesSourceNumber, result, annotatedSeqId, False )
+                
+            timerForPostFolding.stop()
 
+        timerForPostFolding.start()
         
         if( not self._debugDoneWriteResults):
             cds.commitChanges()
+            
+        timerForPostFolding.stop()
 
 
 def parseTaskDescription(taskDescription):
@@ -283,6 +309,8 @@ def parseTaskDescription(taskDescription):
 
 
 
+rl = RateLimit(60)
+
 def calculateMissingWindowsForSequence(taskDescription):
     logging.info("Processing task %s" % taskDescription)
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
@@ -296,6 +324,12 @@ def calculateMissingWindowsForSequence(taskDescription):
     #def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
     ret = f.calculateMissingWindowsForSequence(taxId, protId, seqIds, requestedShuffleIds, firstWindowStart, lastWindowStart, windowStep, windowRef)
 
+    if rl():  # display performance timers
+        pre  = timerForPreFolding.stats()[0]
+        fold = timerForFolding.stats()[0]
+        post = timerForPostFolding.stats()[0]
+        logging.warning("Performance timers: Pre: %.4gs; Folding: %.4gs; Post: %.4gs; Total: %.4gs" % (pre, fold, post, pre+fold+post))
+    
     return taskDescription
 
 
