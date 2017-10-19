@@ -222,7 +222,7 @@ class CenterPreservingNormlizer(matplotlib.colors.Normalize):
         return 1/(1+np.exp(-steepness*(values-0.5)))
 
 
-def getProfileHeatmapTile(taxId, data, corrData, yrange):
+def getProfileHeatmapTile(taxId, data, dummy, yrange):
     if not taxId in data:
         return None
 
@@ -249,6 +249,7 @@ def getProfileHeatmapTile(taxId, data, corrData, yrange):
 
     #ax.set_title(taxId)
     ax.set_yticks(())
+    ax.set_xticks(())
     #ax.tick_params
 
     tileFilename = "heatmap_profile_taxid_%d.svg" % taxId
