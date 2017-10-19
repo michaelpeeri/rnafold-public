@@ -27,7 +27,7 @@ limitSpecies = frozenset()
 
 reInteger = re.compile("^-?\d+$")
 reFloat   = re.compile("^-?\d+[.]\d+$")
-reRange   = re.compile("^(\d+)-(\d+)$")
+reRange   = re.compile("^(\d+)-(\d+)C?$")
 
 # html
 # body
@@ -317,6 +317,7 @@ def fetchEntrezAssembliesTableForSpecies(genomeId, kingdomName):
         # TODO: Handle other 2xx types?
         print(r.status_code)
         raise Exception("HTTP request failed with code %d" % r.status_code)
+    
 
 
     return r.content
@@ -408,13 +409,31 @@ def getTaxonomicGroupForSpecies(taxId):
 
 
 def testGettingGenomeAttributes(genomeId, kingdomId):
-    assembliesData = fetchEntrezAssembliesTableForSpecies(genomeId, kingdomId)
-    xml = fixMissingImgCloseTags(wrapTableFragmentAsXML(assembliesData))
 
+    # Try getting the assemblies report
+    xml = None
+    attempt = 1
+    while(True):
+        try:
+            assembliesData = fetchEntrezAssembliesTableForSpecies(genomeId, kingdomId)
+            xml = fixMissingImgCloseTags(wrapTableFragmentAsXML(assembliesData))
+        except Exception as e:
+            sleep(5*requestDelaySeconds)
+            attempt += 1
+            if attempt > 3:
+                raise
+
+        if not xml is None:
+            break
+    
+
+    # Parse the assemblies report and decide which assembly to use
     (genomeId, assemblyId) = parseNCBIGenomeAssembliesHTML_fetchMainAssembly(xml)
     print((genomeId, assemblyId))
 
+    # Fetch the genome report (for the given genome and assembly)
     report = fetchEntrezGenomeReportForSpecies(genomeId, assemblyId)
+    # Return the properties for the genome
     props = parseNCBIGenomeHTML_fetchSummaryReport(report)
     print(props)
 
@@ -586,7 +605,8 @@ def testAll():
         if( val > 90 or val < 10 ):
             continue
         
-        setSpeciesProperty( taxId, 'gc-content',    "%g"%val,       "entrez", overwrite=False )
+        if( setSpeciesProperty( taxId, 'gc-content',    "%g"%val,       "entrez", overwrite=False ) ):
+            print("[gc-content (taxid=%d) -> %g]" % (taxId, val))
 
     for taxId, val in genomeSize.items():
         setSpeciesProperty( taxId, 'genome-size-mb',    "%g"%val,       "entrez", overwrite=False )
