@@ -3,6 +3,21 @@ import argparse
 import gff
 
 
+#
+# JGI format
+#
+# gff3:
+#
+#scaffold_1      phytozomev10    gene    796363  797228  .       -       .       ID=estExt_fgenesh1_pg.C_10151.3.0.228;Name=estExt_fgenesh1_pg.C_10151
+#scaffold_1      phytozomev10    mRNA    796363  797228  .       -       .       ID=209109.3.0.228;Name=209109;pacid=27345144;longest=1;Parent=estExt_fgenesh1_pg.C_10151.3.0.228
+#scaffold_1      phytozomev10    three_prime_UTR 796363  796397  .       -       .       ID=209109.3.0.228.three_prime_UTR.1;Parent=209109.3.0.228;pacid=27345144
+#scaffold_1      phytozomev10    CDS     796398  797189  .       -       0       ID=209109.3.0.228.CDS.1;Parent=209109.3.0.228;pacid=27345144
+#scaffold_1      phytozomev10    five_prime_UTR  797190  797228  .       -       .       ID=209109.3.0.228.five_prime_UTR.1;Parent=209109.3.0.228;pacid=27345144
+#
+# CDS fasta:
+#>209109 pacid=27345144 polypeptide=209069 locus=estExt_fgenesh1_pg.C_10151 ID=209109.3.0.228 annot-version=v3.0
+#
+
 def parseOption(possibleValues, name):
     def checkOption(value):
         if value in possibleValues:
@@ -177,7 +192,7 @@ for area in allAreas:
                 assert(False)
                 
             
-            #print(cds.attributes)
+            print(cds.attributes)
             #print(mRNA.attributes)
             #print(gene.attributes)
 
