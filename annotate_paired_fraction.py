@@ -1,18 +1,11 @@
 from random import randint
-from data_helpers import getAllNativeCDSsForSpecies, decompressNucleicSequence, countSpeciesCDS, setSpeciesProperty, allSpeciesSource, getSpeciesProperty
+from data_helpers import getAllNativeCDSsForSpecies, decompressNucleicSequence, countSpeciesCDS, setSpeciesProperty, allSpeciesSource, getSpeciesProperty, nativeSequencesSource
 import _distributed
 from rnafold_vienna import RNAfoldWithStructure
 
 # configuration
 windowWidth = 40
 windowStep = 10
-
-
-def nativeSequencesSource(fraction, taxId, numFractions):
-    for (seqId, seqData) in getAllNativeCDSsForSpecies(taxId, fraction, numFractions).items():
-        cdsSeq = decompressNucleicSequence(seqData)
-        del seqData
-        yield (seqId, cdsSeq)
 
 
 def sequencePairsSource(cdsSeq, windowWidth=windowWidth, windowStep=windowStep):
@@ -32,7 +25,7 @@ def calcNativePairedFraction(taxId, fraction, numFractions):
     countTotalNucleotides  = 0
     cdsCount = 0
     
-    for seqId, seq in nativeSequencesSource(fraction, taxId, numFractions):
+    for seqId, seq in nativeSequencesSource(taxId, fraction, numFractions):
         for windowPairs in sequencePairsSource(seq):
             countTotalNucleotides += windowWidth
             countPairedNucleotides += len(windowPairs)*2
