@@ -98,6 +98,7 @@ def getSpeciesName(taxId):
     return r.get("species:taxid:%d:name" % taxId)
 
 """
+Get shortened name for species (e.g., Ecoli or Scerevisiae) -- note that this is used for much more than file names...
 """
 def getSpeciesFileName(taxId):
     p = r.get("species:taxid:%d:name" % taxId).split(" ")
