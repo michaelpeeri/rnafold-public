@@ -12,29 +12,13 @@ plt.style.use('ggplot') # Use the ggplot style
 from sklearn import decomposition
 import data_helpers
 import species_selection_data
-from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, scatterPlot
+from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, scatterPlot, loadProfileData
 from fit_profile_params import getEstimatedParams
 from ncbi_entrez import getTaxonomicGroupForSpecies
 
 def getTaxName(taxId):
     return data_helpers.getSpeciesFileName(taxId)
 
-
-short_names = set()
-# TODO: This t
-def shortenTaxName(name):
-    currLength=4
-    
-    if name.startswith("Candidatus "): # drop 'Candidatus' prefix
-        name = name[11:]
-        
-    while(currLength <= len(name)):
-        candidate = name[:currLength]
-        if not candidate in short_names:
-            short_names.add(candidate)
-            return candidate
-        currLength += 1
-    raise Exception("Failed to shorten name '%s'" % name)
 
 
 def assignColors(data):
@@ -196,7 +180,7 @@ def plotXY_3(xvals, yvals1, yvals2, _labels, groups):
     plt.close(fig)
 
 
-def plotSpeciesVars(data, xvar, yvar, labelvar, groupvar, filename, title=None):
+def plotSpeciesVars(data, xvar, yvar, labelvar, groupvar, filename, title=None, showSpeciesLabels=True):
     fig, ax = plt.subplots()
 
     #data = data.copy()
@@ -246,10 +230,11 @@ def plotSpeciesVars(data, xvar, yvar, labelvar, groupvar, filename, title=None):
                 color = _c
         if( xdata ):
             #print(xdata, ydata)
-            plt.scatter(xdata, ydata, c=color, label=label, s=40)
+            plt.scatter(xdata, ydata, c=color, label=label, s=20)
 
-    for x,y,label in zip(data[xvar], data[yvar], data[labelvar]):
-        plt.annotate(label, (x+(_xrange[1]-_xrange[0])*0.01, y-(_yrange[1]-_yrange[0])*0.01), fontsize=7)
+    if showSpeciesLabels:
+        for x,y,label in zip(data[xvar], data[yvar], data[labelvar]):
+            plt.annotate(label, (x+(_xrange[1]-_xrange[0])*0.01, y-(_yrange[1]-_yrange[0])*0.01), fontsize=7)
 
     w = (_xrange[1]-_xrange[0])*1.05
     plt.xlim((_xrange[1] - w, _xrange[0] + w))
@@ -295,172 +280,11 @@ def calcWilcoxonPvalue_method2(df2):
 
     if( pval>0.0 ):
         return log10(pval) * direction * -1
-    elif( pval==0.0):
+    elif( pval==0.0):    # I think exact comparison to 0.0 is safe with floating point numbers
         return -320.0      * direction * -1
     else:
         assert(False)
 
-
-
-def loadProfileData(files):
-    xdata = []
-    ydata = []
-    ydata_nativeonly = []
-    ydata_shuffledonly = []
-    labels = []
-    groups = []
-    filesUsed = 0
-    biasProfiles = {}
-
-    dfProfileCorrs = pd.DataFrame( { "spearman_smfe_gc_rho":   pd.Series(dtype='float'),
-                                     "spearman_smfe_gc_pval":  pd.Series(dtype='float'),
-                                     "spearman_smfe_Nc_rho":   pd.Series(dtype='float'),
-                                     "spearman_smfe_Nc_pval":  pd.Series(dtype='float'),
-                                     "spearman_smfe_CAI_rho":  pd.Series(dtype='float'),
-                                     "spearman_smfe_CAI_pval": pd.Series(dtype='float'),
-                                     "spearman_smfe_Fop_rho":  pd.Series(dtype='float'),
-                                     "spearman_smfe_Fop_pval": pd.Series(dtype='float') } )
-
-    summaryStatistics = pd.DataFrame({
-        'tax_name':pd.Series(dtype='string'),
-        'short_tax_name':pd.Series(dtype='string'),
-        'tax_id':pd.Series(dtype='int'),
-        'genomic_gc':pd.Series(dtype='float'),
-        'tax_group':pd.Series(dtype='string'), # TODO: change to categorical data; Categorical([], categories=('Bacteria', 'Archaea', 'Fungi', 'Plants'), ordered=False)
-        'CDSs_included':pd.Series(dtype='int'),
-        'profileElements':pd.Series(dtype='int'),
-        'optimal_temperature':pd.Series(dtype='float'),
-        'temperature_range':pd.Categorical([]),
-        'mean_delta_lfe':pd.Series(dtype='float'),
-        'paired_fraction':pd.Series(dtype='float'),
-        'gene_density':pd.Series(dtype='float')
-    })
-
-    for h5 in files:
-        with pd.io.pytables.HDFStore(h5) as store:
-            for key in store.keys():
-                if key[:4] != "/df_":
-                    continue
-
-                dfHeader = key.split('_')
-                taxId = int(dfHeader[1])
-                taxName = getTaxName(taxId)
-                #taxGroup = data_helpers.getSpeciesTaxonomicGroup(taxId)
-                taxGroup = getTaxonomicGroupForSpecies(taxId)
-                longTaxName = data_helpers.getSpeciesName(taxId)
-                shortTaxName = shortenTaxName(taxName)
-                print(taxName)
-
-                df = store[key]
-                df = df.iloc[:-1]  # remove the last value (which is missing)
-
-                deltas_df = store["/deltas_"+key[4:]]
-                genes_df = store["/deltas_"+key[4:]]
-                summary_df = store["/statistics_"+key[4:]]
-                profileCorrelations_df = store["/profiles_spearman_rho_"+key[4:]]
-
-
-                df['MFEbias'] = pd.Series(df['native']-df['shuffled'], index=df.index)
-                dfMFEbias = df['MFEbias']
-
-                biasProfiles[taxId] = dfMFEbias
-
-                meanDeltaLFE = np.mean(dfMFEbias)
-
-                cdsCount = int(summary_df.iloc[0]['cds_count'])
-                assert(cdsCount >= 100)
-                #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
-                meanGC = data_helpers.getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
-
-                # Fetch temperature data for this species (if available)
-                optimalTemperatureData = data_helpers.getSpeciesProperty( taxId, 'optimum-temperature')
-                optimalTemperature = None
-                if not optimalTemperatureData[0] is None:
-                    optimalTemperature = float(optimalTemperatureData[0])
-
-                temperatureRangeData = data_helpers.getSpeciesProperty( taxId, 'temperature-range')
-                temperatureRange = None
-                if not temperatureRangeData[0] is None:
-                    temperatureRange = temperatureRangeData[0]
-                else:
-                    temperatureRange = "Unknown"
-
-                pairedFractionData = data_helpers.getSpeciesProperty( taxId, 'paired-mRNA-fraction')
-                pairedFraction = None
-                if not pairedFractionData[0] is None:
-                    pairedFraction = float(pairedFractionData[0])
-
-                    
-                genomeSizeData = data_helpers.getSpeciesProperty( taxId, 'genome-size-mb')
-                genomeSize = None
-                if not genomeSizeData[0] is None:
-                    genomeSize = float(genomeSizeData[0])
-
-                proteinCountData = data_helpers.getSpeciesProperty( taxId, 'protein-count')
-                proteinCount = None
-                if not proteinCountData[0] is None:
-                    proteinCount = int(proteinCountData[0])
-
-                geneDensity = None
-                if( (not genomeSize is None) and (not proteinCount is None)  ):
-                    geneDensity = float(proteinCount)/genomeSize
-                print(geneDensity)
-
-                    
-                summaryStatistics = summaryStatistics.append(pd.DataFrame({
-                    'tax_name':pd.Series([taxName]),
-                    'short_tax_name':pd.Series([shortTaxName]),
-                    'long_tax_name':pd.Series([longTaxName]),
-                    'tax_id':pd.Series([taxId], dtype='int'),
-                    'genomic_gc':pd.Series([meanGC]),
-                    'tax_group':pd.Series([taxGroup]),
-                    'CDSs_included':pd.Series([cdsCount], dtype='int'),
-                    'optimal_temperature':pd.Series([optimalTemperature], dtype='float'),
-                    'temperature_range':pd.Categorical([temperatureRange]),
-                    'mean_delta_lfe':pd.Series([meanDeltaLFE], dtype='float'),
-                    'paired_fraction':pd.Series([pairedFraction], dtype='float'),
-                    'gene_density':pd.Series([geneDensity], dtype='float')
-                }))
-
-                dfProfileCorrs = dfProfileCorrs.append( profileCorrelations_df )
-
-                # Format:
-
-                #         gc  native  position  shuffled
-                # 1    0.451  -4.944         1    -5.886
-                # 2    0.459  -5.137         2    -6.069
-                # 3    0.473  -5.349         3    -6.262
-                filesUsed += 1
-
-                #print(df.shape)
-
-                meanGC = np.mean(df.gc)
-                xdata.append(meanGC)
-
-                #meanE = np.mean(df.native - df.shuffled)
-                #ydata.append(meanE)
-
-                dirpval = calcWilcoxonPvalue_method2(deltas_df)
-                #print(dirpval)
-                ydata.append(dirpval)
-
-                #print(df.head())
-
-                #print(df.native)
-                #print(df.shuffled)
-
-                meanE_nativeonly = np.mean(df.native)
-                ydata_nativeonly.append(meanE_nativeonly)
-
-                meanE_shuffledonly = np.mean(df.shuffled)
-                ydata_shuffledonly.append(meanE_shuffledonly)
-
-                labels.append( taxName )
-
-                #groups.append( choice(('Bacteria', 'Archaea', 'Fungi', 'Plants')) )   # Testing only!!!
-                groups.append( taxGroup )
-
-    return (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics)
 
 
 def PCA(biasProfiles, xdata):
@@ -563,16 +387,29 @@ def standalone():
     title = "Profile: %d-%d (step=%d)" % (profileParams[3],profileParams[0], profileParams[1])
 
     plotSpeciesVars( summaryStatistics, 'genomic_gc',     'optimal_temperature', 'short_tax_name', 'tax_group', 'gc_vs_temperature',   title )
+    plotSpeciesVars( summaryStatistics, 'genomic_gc',     'optimal_temperature', 'short_tax_name', 'tax_group', 'gc_vs_temperature_nolabels',   title, showSpeciesLabels=False )
+    
     plotSpeciesVars( summaryStatistics, 'genomic_gc',     'mean_delta_lfe',      'short_tax_name', 'tax_group', 'gc_vs_dLFE',          title )
+    plotSpeciesVars( summaryStatistics, 'genomic_gc',     'mean_delta_lfe',      'short_tax_name', 'tax_group', 'gc_vs_dLFE_nolabels',          title, showSpeciesLabels=False  )
+
     plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'optimal_temperature', 'short_tax_name', 'tax_group', 'dLFE_vs_temperature', title )
+    plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'optimal_temperature', 'short_tax_name', 'tax_group', 'dLFE_vs_temperature_nolabels', title, showSpeciesLabels=False  )
 
     plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'paired_fraction',     'short_tax_name', 'tax_group', 'dLFE_vs_paired_fraction', title )
+    plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'paired_fraction',     'short_tax_name', 'tax_group', 'dLFE_vs_paired_fraction_nolabels', title, showSpeciesLabels=False  )
+
     plotSpeciesVars( summaryStatistics, 'genomic_gc',     'paired_fraction',     'short_tax_name', 'tax_group', 'gc_vs_paired_fraction',   title )
+    plotSpeciesVars( summaryStatistics, 'genomic_gc',     'paired_fraction',     'short_tax_name', 'tax_group', 'gc_vs_paired_fraction_nolabels',   title, showSpeciesLabels=False  )
 
 
     plotSpeciesVars( summaryStatistics, 'genomic_gc',     'gene_density',        'short_tax_name', 'tax_group', 'gc_vs_gene_density',   title )
+    plotSpeciesVars( summaryStatistics, 'genomic_gc',     'gene_density',        'short_tax_name', 'tax_group', 'gc_vs_gene_density_nolabels',   title, showSpeciesLabels=False  )
+
     plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'gene_density',        'short_tax_name', 'tax_group', 'dLFE_vs_gene_density', title )
+    plotSpeciesVars( summaryStatistics, 'mean_delta_lfe', 'gene_density',        'short_tax_name', 'tax_group', 'dLFE_vs_gene_density_nolabels', title, showSpeciesLabels=False  )
+
     plotSpeciesVars( summaryStatistics, 'gene_density',   'paired_fraction',     'short_tax_name', 'tax_group', 'gene_density_vs_paired_fraction',   title )
+    plotSpeciesVars( summaryStatistics, 'gene_density',   'paired_fraction',     'short_tax_name', 'tax_group', 'gene_density_vs_paired_fraction_nolabels',   title, showSpeciesLabels=False  )
     
 
     order = PCA(biasProfiles, xdata)
