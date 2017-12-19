@@ -1,13 +1,15 @@
 import sys
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr, spearmanr, kendalltau, linregress
+from math import log10
+from scipy.stats import pearsonr, spearmanr, kendalltau, linregress, wilcoxon
 import matplotlib
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
-from data_helpers import getSpeciesName, getSpeciesFileName
+from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty
 import seaborn as sns
+from ncbi_entrez import getTaxonomicGroupForSpecies
 
 
 def plotMFEProfileWithGC(taxId, profileId, data):
@@ -487,3 +489,219 @@ def scatterPlotWithKernel2(taxId, profileId, data, xvar, yvar, title):
     plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_%s_%s.pdf" % (yvar, xvar, profileId, getSpeciesFileName(taxId)))
     plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_%s_%s.svg" % (yvar, xvar, profileId, getSpeciesFileName(taxId)))
     plt.close(fig)
+
+
+short_names = set()
+def shortenTaxName(name):
+    currLength=4
+    
+    if name.startswith("Candidatus "): # drop 'Candidatus' prefix
+        name = name[11:]
+        
+    while(currLength <= len(name)):
+        candidate = name[:currLength]
+        if not candidate in short_names:
+            short_names.add(candidate)
+            return candidate
+        currLength += 1
+
+    #raise Exception("Failed to shorten name '%s'" % name)
+    
+    # Try adding numerical indices to resolve ambiguities
+    idx=1
+    while(True):
+        candidate = "%s%d" % (name[:4], idx)
+        if not candidate in short_names:
+            short_names.add(candidate)
+            return candidate
+        idx += 1
+
+def calcWilcoxonPvalue_method1(df):
+    difs = np.array(df.native - df.shuffled)
+    direction = np.sign(np.mean(difs))
+
+    pval = wilcoxon(difs).pvalue
+    
+    return log10(pval) * direction * -1
+
+def calcWilcoxonPvalue_method2(df2):
+    assert(df2.ndim==2)
+
+    df2 = df2[~df2['delta'].isnull()]
+
+    direction = np.sign(np.mean(df2['delta']))
+    pval = wilcoxon(df2['delta']).pvalue
+
+    if( pval>0.0 ):
+        return log10(pval) * direction * -1
+    elif( pval==0.0):    # I think exact comparison to 0.0 is safe with floating point numbers
+        return -320.0      * direction * -1
+    else:
+        assert(False)
+
+
+
+
+def getShortTaxName(taxId):
+    return getSpeciesFileName(taxId)
+
+def loadProfileData(files):
+    xdata = []
+    ydata = []
+    ydata_nativeonly = []
+    ydata_shuffledonly = []
+    labels = []
+    groups = []
+    filesUsed = 0
+    biasProfiles = {}
+
+    dfProfileCorrs = pd.DataFrame( { "spearman_smfe_gc_rho":   pd.Series(dtype='float'),
+                                     "spearman_smfe_gc_pval":  pd.Series(dtype='float'),
+                                     "spearman_smfe_Nc_rho":   pd.Series(dtype='float'),
+                                     "spearman_smfe_Nc_pval":  pd.Series(dtype='float'),
+                                     "spearman_smfe_CAI_rho":  pd.Series(dtype='float'),
+                                     "spearman_smfe_CAI_pval": pd.Series(dtype='float'),
+                                     "spearman_smfe_Fop_rho":  pd.Series(dtype='float'),
+                                     "spearman_smfe_Fop_pval": pd.Series(dtype='float') } )
+
+    summaryStatistics = pd.DataFrame({
+        'tax_name':pd.Series(dtype='string'),
+        'short_tax_name':pd.Series(dtype='string'),
+        'tax_id':pd.Series(dtype='int'),
+        'genomic_gc':pd.Series(dtype='float'),
+        'tax_group':pd.Series(dtype='string'), # TODO: change to categorical data; Categorical([], categories=('Bacteria', 'Archaea', 'Fungi', 'Plants'), ordered=False)
+        'CDSs_included':pd.Series(dtype='int'),
+        'profileElements':pd.Series(dtype='int'),
+        'optimal_temperature':pd.Series(dtype='float'),
+        'temperature_range':pd.Categorical([]),
+        'mean_delta_lfe':pd.Series(dtype='float'),
+        'paired_fraction':pd.Series(dtype='float'),
+        'gene_density':pd.Series(dtype='float')
+    })
+
+    for h5 in files:
+        with pd.io.pytables.HDFStore(h5) as store:
+            for key in store.keys():
+                if key[:4] != "/df_":
+                    continue
+
+                dfHeader = key.split('_')
+                taxId = int(dfHeader[1])
+                taxName = getShortTaxName(taxId)
+                #taxGroup = data_helpers.getSpeciesTaxonomicGroup(taxId)
+                taxGroup = getTaxonomicGroupForSpecies(taxId)
+                longTaxName = getSpeciesName(taxId)
+                shortTaxName = shortenTaxName(taxName)
+                print(taxName)
+
+                df = store[key]
+                df = df.iloc[:-1]  # remove the last value (which is missing)
+
+                deltas_df = store["/deltas_"+key[4:]]
+                genes_df = store["/deltas_"+key[4:]]
+                summary_df = store["/statistics_"+key[4:]]
+                profileCorrelations_df = store["/profiles_spearman_rho_"+key[4:]]
+
+
+                df['MFEbias'] = pd.Series(df['native']-df['shuffled'], index=df.index)
+                dfMFEbias = df['MFEbias']
+
+                biasProfiles[taxId] = dfMFEbias
+
+                meanDeltaLFE = np.mean(dfMFEbias)
+
+                cdsCount = int(summary_df.iloc[0]['cds_count'])
+                assert(cdsCount >= 100)
+                #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
+                meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
+
+                # Fetch temperature data for this species (if available)
+                optimalTemperatureData = getSpeciesProperty( taxId, 'optimum-temperature')
+                optimalTemperature = None
+                if not optimalTemperatureData[0] is None:
+                    optimalTemperature = float(optimalTemperatureData[0])
+
+                temperatureRangeData = getSpeciesProperty( taxId, 'temperature-range')
+                temperatureRange = None
+                if not temperatureRangeData[0] is None:
+                    temperatureRange = temperatureRangeData[0]
+                else:
+                    temperatureRange = "Unknown"
+
+                pairedFractionData = getSpeciesProperty( taxId, 'paired-mRNA-fraction')
+                pairedFraction = None
+                if not pairedFractionData[0] is None:
+                    pairedFraction = float(pairedFractionData[0])
+
+                    
+                genomeSizeData = getSpeciesProperty( taxId, 'genome-size-mb')
+                genomeSize = None
+                if not genomeSizeData[0] is None:
+                    genomeSize = float(genomeSizeData[0])
+
+                proteinCountData = getSpeciesProperty( taxId, 'protein-count')
+                proteinCount = None
+                if not proteinCountData[0] is None:
+                    proteinCount = int(proteinCountData[0])
+
+                geneDensity = None
+                if( (not genomeSize is None) and (not proteinCount is None)  ):
+                    geneDensity = float(proteinCount)/genomeSize
+                print(geneDensity)
+
+                    
+                summaryStatistics = summaryStatistics.append(pd.DataFrame({
+                    'tax_name':pd.Series([taxName]),
+                    'short_tax_name':pd.Series([shortTaxName]),
+                    'long_tax_name':pd.Series([longTaxName]),
+                    'tax_id':pd.Series([taxId], dtype='int'),
+                    'genomic_gc':pd.Series([meanGC]),
+                    'tax_group':pd.Series([taxGroup]),
+                    'CDSs_included':pd.Series([cdsCount], dtype='int'),
+                    'optimal_temperature':pd.Series([optimalTemperature], dtype='float'),
+                    'temperature_range':pd.Categorical([temperatureRange]),
+                    'mean_delta_lfe':pd.Series([meanDeltaLFE], dtype='float'),
+                    'paired_fraction':pd.Series([pairedFraction], dtype='float'),
+                    'gene_density':pd.Series([geneDensity], dtype='float')
+                }))
+
+                dfProfileCorrs = dfProfileCorrs.append( profileCorrelations_df )
+
+                # Format:
+
+                #         gc  native  position  shuffled
+                # 1    0.451  -4.944         1    -5.886
+                # 2    0.459  -5.137         2    -6.069
+                # 3    0.473  -5.349         3    -6.262
+                filesUsed += 1
+
+                #print(df.shape)
+
+                meanGC = np.mean(df.gc)
+                xdata.append(meanGC)
+
+                #meanE = np.mean(df.native - df.shuffled)
+                #ydata.append(meanE)
+
+                dirpval = calcWilcoxonPvalue_method2(deltas_df)
+                #print(dirpval)s
+                ydata.append(dirpval)
+
+                #print(df.head())
+
+                #print(df.native)
+                #print(df.shuffled)
+
+                meanE_nativeonly = np.mean(df.native)
+                ydata_nativeonly.append(meanE_nativeonly)
+
+                meanE_shuffledonly = np.mean(df.shuffled)
+                ydata_shuffledonly.append(meanE_shuffledonly)
+
+                labels.append( taxName )
+
+                #groups.append( choice(('Bacteria', 'Archaea', 'Fungi', 'Plants')) )   # Testing only!!!
+                groups.append( taxGroup )
+
+    return (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics)
+
