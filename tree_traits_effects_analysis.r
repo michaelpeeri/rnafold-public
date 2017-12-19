@@ -1,6 +1,8 @@
+library("Matrix")
 library("nlme")
 library("ggplot2")
 library("reshape")
+library("scales")
 library("rhdf5")
 library("rredis")
 library("phylobase")
@@ -11,7 +13,8 @@ library("grid")
 #---------------------------------------------------------------
 # Configuration
 
-pdf("tree_phenotypes_regression.out.pdf")
+cairo_pdf("tree_phenotypes_regression.out.%d.pdf")
+#svg("tree_phenotypes_regression.out.%d.svg")
 
 redisConnect(host="power5", password="rnafold")
 
@@ -20,6 +23,9 @@ profileStop <- 1000
 profileStep <- 10
 profileReference <- "begin"
 profileLen <- (profileStop-profileStart)/profileStep
+
+pyramidLength <- 30+1
+
 #---------------------------------------------------------------
 
 
@@ -300,30 +306,115 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
 
     m1 <- lm(  YvsX, traits); summary(m1)
     co <- coef(m1)
-    print(co)
+    #print(co)
 
     #print("//////////////")
     #print( nrow(traits) )
     #print( nTips(traitsTree) )
 
-    clr2 <- "#55CCB0"
-
-    gls1 <- gls( YvsX, traits, correlation=bmcorr, na.action=na.omit); summary(gls1)
-    #gls1 <- pGLS( YvsX, traits, bmcorr, na.action=na.omit); summary(gls1)
+    gls1 <- gls( YvsX,
+                 traits,
+                 correlation=bmcorr,
+                 na.action=na.omit,
+                 method="REML"); summary(gls1)
+    #gls1 <- pGLS( YvsX, traits, bmcorr, na.action=na.omit);
+    print("--")
+    print(summary(gls1))
+    print(summary(gls1)$tTable[2,4])
     co2 <- coef(gls1)
+
+    gls0 <- gls( as.formula( paste(Ytrait, " ~ ", "1")),
+                 traits,
+                 correlation=bmcorr,
+                 na.action=na.omit,
+                 method="REML")
+
+
+    #Ydata <- traits[,Ytrait]
+    #Xdata <- traits[,Xtrait]
+    #tss <- sum( (Ydata - mean(Ydata))**2 )
+    #var.from.tss <- tss / length(Ydata)
+    ##print(var(Ydata))
+    ##print(var.from.tss)
+    #rss <- sum( residuals(gls1)**2 )
+    #Rsquared <- 1 - rss/tss
+
+    #prediction.cor <- cor( Ydata, predict(gls1, Xdata), method="pearson")
+    prediction.cor <- cor( traits[,Ytrait], fitted(gls1), method="pearson")
+    Rsquared.2 <- prediction.cor ** 2
+    #print(Rsquared)
+    #print(Rsquared.2)
+
+    #logP.null <- logLik(gls0, REML=FALSE)
+    #print( logP.null )
+    #stopifnot( logP.null <= 0.0 )
+    #logP.fitted <- logLik(gls1, REML=FALSE)
+    #stopifnot( logP.fitted <= 0.0 )
+
+    #D.null.minus.D.fitted = -2 * ( logP.null - logP.fitted )
+    #D.null =                -2 * ( logP.null - 0.0         )
+    
+    #pseudoR2 <- 1 - as.numeric( logP.fitted / logP.null )
+    #print("psi")
+    #print(pseudoR2)
+    #print(summary(m1)$r.squared)
+
+    #
+    # Buse's R^2
+    # Reference: A. Buse, "Goodness of Fit in Generalized Least Squares Estimation", The American Statistician, June 1973, Vol. 27, No. 3.
+    # URL: http://www.jstor.org/stable/2683631
+    #
+    # Notation: u.hat := epsilon (residuals)
+    #           V := Omega (Covariance matrix)
+    #           Y.bar := Intercept of equivalent intercept-only model (see: http://r.789695.n4.nabble.com/Pseudo-R-squared-in-gls-model-td4641148.html)
+    #           e := first column in design matrix X (i.e., rep(1, N) if intercepts are used). See above eq. (11) p. 107.
+    #
+    u.hat <- residuals(gls1)
+    #V <- getVarCov( gls1 )   # this doesn't work (bug?)
+    V <- corMatrix( gls1$modelStruct$corStruct )
+    inv.V <- solve(V)   # invert V (=Omega). Every positive-definite matrix is invertible (https://en.wikipedia.org/wiki/Positive-definite_matrix#cite_note-5)
+    e <- rep(1, 2)
+    Y <- traits[,Ytrait]
+    Y.bar <- coef(gls0)["(Intercept)"]
+    yye <- Y - Y.bar * e
+    
+    R2 <- 1 - ( t(u.hat) %*% inv.V %*% u.hat )/( t(yye) %*% inv.V %*% yye )   # See eq. (15) p. 107.
+    stopifnot( R2 >= 0 && R2 <= 1.0 )
+
+    slopeDirection <- NA
+    if( any(class(traits[,Xtrait])==c("factor")) )
+    {
+        slopeDirection <- 1  # No slope if the explanatory variable is discrete
+    }
+    else
+    {
+        slopeDirection <- sign(coef(gls1)[Xtrait])
+    }
+    stopifnot( slopeDirection==1 || slopeDirection==-1 )
 
     if( plotRegression )
     {
+        clr2 <- "#55CCB0"
+
         if( any(class(traits[,Xtrait])==c("factor")) )
         {
             p <- ggplot(traits, aes(get(Xtrait), get(Ytrait))) +
               labs(y=Ytrait, x=Xtrait) +
-              geom_boxplot() +
-              geom_jitter() +
+              geom_boxplot(outlier.size=0, outlier.alpha=0) +  # don't show outliers on boxplot, since we're plotting all data anyway...
+              geom_jitter(colour="grey") +
               geom_hline( yintercept = 0 ) +
-              annotate( "text", x=Inf,  y=Inf, label=sprintf("lm\nR^2 = %4g\nP-val = %4g\nn = %d", summary(m1)$r.squared,      summary(m1)$coefficients[2,4], nrow(traits) ), hjust=1, vjust=1, colour="red" ) +
-              annotate( "text", x=-Inf, y=Inf, label=sprintf("gls\n\nP-val = %4g\nn = %d", summary(gls1)$tTable[2,4],     nrow(traits) ), hjust=0, vjust=1, colour=clr2 );
+              annotate( "text", x=Inf,  y=Inf, label=sprintf("lm\nR^2 = %4g\nP-val = %4g\nn = %d",  summary(m1)$r.squared,      summary(m1)$coefficients[2,4], nrow(traits) ), hjust=1, vjust=1, colour="red" ) +
+              annotate( "text", x=-Inf, y=Inf, label=sprintf("gls\nR^2 = %4g\nP-val = %4g\nn = %d", R2,                         summary(gls1)$tTable[2,4],     nrow(traits) ), hjust=0, vjust=1, colour=clr2 );
               print(p)
+            fn <- sprintf("tree_phenotypes_regression.%s_vs_%s.out.pdf", Ytrait, Xtrait)
+            ggsave(fn, plot=p )
+            unlink(fn)
+            #fn <- sprintf("tree_phenotypes_regression.%s_vs_%s.out.svg", Ytrait, Xtrait)
+            #ggsave(fn, plot=p )
+            #unlink(fn)
+            #fn <- sprintf("tree_phenotypes_regression.%s_vs_%s.out.wmf", Ytrait, Xtrait)
+            #ggsave(fn, plot=p )
+            #unlink(fn)
         }
         else
         {
@@ -333,14 +424,24 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
               geom_hline( yintercept = 0 ) +
               geom_abline( aes( slope=co[Xtrait],  intercept=co["(Intercept)"]), colour="red"  ) +
               geom_abline( aes( slope=co2[Xtrait], intercept=co2["(Intercept)"]), colour=clr2  ) +
+              #geom_linerange( aes(min=get(Ytrait), max=fitted(gls1)), color="#aaaaaa80" ) +   # show residuals
               annotate( "text", x=Inf,  y=Inf, label=sprintf("lm\nR^2 = %4g\nP-val = %4g\nn = %d", summary(m1)$r.squared,      summary(m1)$coefficients[2,4], nrow(traits) ), hjust=1, vjust=1, colour="red" ) +
-              annotate( "text", x=-Inf, y=Inf, label=sprintf("gls\n\nP-val = %4g\nn = %d", summary(gls1)$tTable[2,4],     nrow(traits) ), hjust=0, vjust=1, colour=clr2 );
+              annotate( "text", x=-Inf, y=Inf, label=sprintf("gls\nBuse R^2 = %4g\nP-val = %4g\nn = %d", R2, summary(gls1)$tTable[2,4],     nrow(traits) ), hjust=0, vjust=1, colour=clr2 );
               print(p)
         }
     }
 
     #return( c( summary(gls1)$tTable[2,4], co2[Xtrait] ) )
-    return( c( summary(gls1)$tTable[2,4], summary(m1)$r.squared ) )
+    #return( c( summary(gls1)$tTable[2,4],  summary(m1)$r.squared ) )
+    #if( Rsquared >= 0.0 && Rsquared <= 1.0 )
+    #{
+        return( c( summary(gls1)$tTable[2,4],  R2 * slopeDirection, Rsquared.2, summary(m1)$r.squared ) )
+    #}
+    #else
+    #{
+    #    return( c( NA, NA ) )
+    #}
+        
 }
 
 performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange )
@@ -367,6 +468,193 @@ performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profile
     return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=FALSE ) )
 }
 
+# Extract legend from ggplot figure
+# Source: https://stackoverflow.com/a/12041779
+# Tested with R 3.4.1
+getLegend <- function(a.gplot)
+{ 
+  tmp <- ggplot_gtable(ggplot_build(a.gplot)) 
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box") 
+  legend <- tmp$grobs[[leg]] 
+  return(legend)
+}
+
+# Tested with R 3.4.1
+plotRotatedPyramid <- function( plotdf, dotsDF, valScale, Xtrait, plotTitle )
+{
+    pyramidPlot <- ggplot( data=plotdf, aes(x=Var1, y=Var2, fill=value ) ) +
+         geom_tile( linetype=0, colour=NA ) +
+         labs(y="Profile End", x="Profile Start", value="log(p-value)", title=plotTitle) +
+         valScale +
+         coord_fixed() +
+         guides( fill=FALSE ) +
+         geom_point(data=dotsDF, aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.6 ) +
+         theme( plot.margin = unit(c(0.1,0.1,0.1,0.1), "npc"),
+               plot.background = element_blank(),
+               panel.grid.major = element_blank(),
+               panel.grid.minor = element_blank(),
+               panel.background = element_blank(),
+               axis.line = element_line(color="black"),
+               #legend.position="left",
+               aspect.ratio=1 )
+
+
+    #----------------------------------------------------------------------
+    # Draw heat-map pyramid on canvas
+    
+    grid.newpage()
+    pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.15, "npc"), angle=-45 ) )
+    pyramidPlotGrob <- ggplotGrob( pyramidPlot )
+    grid.draw( pyramidPlotGrob )
+    #print(str(pyramidPlotGrob))
+
+    #print( str( p ) )
+    #print( str( ggplotGrob( p ) ) )
+    #print( ggplot_build(p)$layout$panel_params[[1]]$x.range )
+    #print( ggplot_build(p)$layout$panel_params[[1]]$y.range )
+
+
+
+    #print("--------------------------------------")
+    #gt <- ggplot_gtable(ggplot_build(p))
+    #for( gr in gt$grobs )
+    #{
+    #    print(gr$name)
+    #}
+    
+    #dev.off()
+    #pdf("grobs.pdf")
+    #for( i in 1:length(gt$grobs) ) {
+    #    grid.draw(gt$grobs[[i]])
+    #    grid.text(i, x=unit(0.1, "npc"), y=unit(0.1, "npc"))
+    #    grid.newpage()
+    #}
+    #dev.off()
+    #quit()
+
+    #print("-----------------4---------------------")
+    #print(attributes(gt$grobs[[3]]$children[1]$axis))
+    #print(attributes(gt$grobs[[3]]$children[1]$axis$x))
+    #print(attributes(gt$grobs[[3]]$children[1]$axis$y))
+
+    #print("-----------------7---------------------")
+    #print(attributes(gt$grobs[[7]]$children[1]$axis))
+    #print(attributes(gt$grobs[[7]]$children[1]$axis$x))
+    #print(attributes(gt$grobs[[7]]$children[1]$axis$y))
+
+    #grid.ls()
+    #grid.grep("axis")
+    #current.vpTree()
+
+    #print(getNames())
+    #grid.ls(pyramidPlotGrob)
+
+    #downViewport("axis-b.7-4-7-4")
+    #grid.rect(gp=gpar(col=NA, fill=rgb(0,1,0,0.3)))
+    #upViewport()
+
+    #downViewport("axis-l.6-3-6-3")
+    #grid.rect(gp=gpar(col=NA, fill=rgb(1,0,0.5,0.3)))
+
+    #uu1a <- convertX( unit(1, "native"), "npc" )
+    #print(uu1a)
+    #uu1b <- convertY( unit(1, "native"), "npc" )
+    #print(uu1b)
+    uu1a <- convertX( unit(1, "native"), "mm" )
+    print(uu1a)
+    uu1b <- convertY( unit(1, "native"), "mm" )
+    print(uu1b)
+    
+    #upViewport()
+
+    #uu1 <- grobWidth( grid.get("axis-l.6-3-6-3" ) )
+    #print(uu1)
+    #uu2 <- grobHeight( grid.get("axis-l.6-3-6-3" ) )
+    #print(uu2)
+
+
+    #stop()
+    #dev.off()
+    #quit()
+
+    print("--------------------------------------")
+    #print( str( ggplot_build(p)$layout ) )
+    #print("--------------------------------------")
+    #print( str( ggplot_build(p)$layout$panel_ranges ) )
+    #print("--------------------------------------")
+    #print( str( ggplot_build(p)$layout$panel_scales ) )
+
+    #----------------------------------------------------------------------
+    # Draw white polygon to hide "unused" triangle
+    
+    uw = 0.12  # triangle offset
+    grid.polygon( x=c(0+uw, 1.0, 1.0, 0+uw), y=c(0.0, 1-uw, 0.0, 0.0), default.units="native", gp=gpar(fill="white", col=NA ) )
+
+
+    #print(convertUnit( x=unit(1.0, "native"), unitTo=
+    #vptt <- viewport( x=unit(0.5, "native"), y=unit(0.5, "native"), h=unit(1, "native"), w=unit(1, "native") )
+    #pushViewport( vptt )
+    #grid.rect( gp=gpar(fill="yellow") )
+    #upViewport()
+
+
+    #----------------------------------------------------------------------
+    # Draw X-axis
+
+    ww2 <- convertUnit(uu1b * 0.83 * sqrt(2.0), "npc")  # Todo - this returns more than 1 npcs (screen width). Why?
+    print(ww2)
+    
+    #u2 = 0.05
+    u2 = 0.0
+    #vp2 <- viewport( x=unit(0.5+u2, "native"), y=unit(0.5-u2, "native"), h=unit(0.01, "native"), w=ww2, angle=45 )
+    vp2 <- viewport( x=unit(0.5+u2, "native"), y=unit(0.5-u2, "native"), h=unit(0.01, "native"), w=unit(0.9, "native"), angle=45 )
+    pushViewport( vp2 )
+    
+    grid.lines( c(0.0, 1.0), c(0.5, 0.5) )
+
+    xaxis <- xaxisGrob( at=seq(0,1,5/(pyramidLength-1)) )
+
+    xaxis <- editGrob(xaxis,
+                      gPath("major"),
+                      x=unit(c(0,1), "npc")
+                      )             
+    xaxis <- editGrob(xaxis,        
+                      gPath("labels"),
+                      label=seq(0,(pyramidLength-1)*10,50)
+                      )
+    grid.draw(xaxis)
+
+    #----------------------------------------------------------------------
+    # Draw legend
+    upViewport()
+    
+    vp3 <- viewport( x=unit(0.0, "native"), y=unit(0.5, "native"), h=unit(0.5, "native"), w=unit(0.5, "native"), angle=45 )
+    pushViewport( vp3 )
+
+    p4 <- ggplot( data=plotdf, aes(x=Var1, y=Var2, fill=value ) ) +
+         valScale +
+#         scale_fill_gradient2(low="#cc7777", mid="#ffff88", high="#000000", limits=c(min(subranges$Logpval), 0), midpoint=minLogpval ) + 
+         geom_tile()
+    p4leg <- getLegend( p4 )
+    grid.draw( p4leg )
+    
+
+
+    
+
+
+    #print( p, vp=viewport(angle=-45) )
+    fn <- sprintf("tree_phenotypes_regression.ranges.%s_vs_dLFE.out.pdf", Xtrait)
+    ggsave(fn, plot=p )
+    unlink(fn)
+    #fn <- sprintf("tree_phenotypes_regression.ranges.%s_vs_dLFE.out.svg", Xtrait)
+    #ggsave(fn, plot=p )
+    #unlink(fn)
+    #fn <- sprintf("tree_phenotypes_regression.ranges.%s_vs_dLFE.out.wmf", Xtrait)
+    #ggsave(fn, plot=p )
+    #unlink(fn)
+}
+
 glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange )
 {
     # Generate indices for all valid subranges in the given range
@@ -379,50 +667,119 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange )
 
     # Perform regression on each subrange
     regressionResults <- apply( subranges, 1, function(v) performGLSregression_profileRangeMean(traits, tree, Xtrait, v) )
-    subranges$Pvalue <- regressionResults[1,]
-    subranges$Coef   <- regressionResults[2,]
+    subranges$Pvalue     <- regressionResults[1,]
+    subranges$Buse.R2    <- regressionResults[2,]
+    subranges$CorSquared <- regressionResults[3,]
+    subranges$OLS.R2     <- regressionResults[4,]
+    
     subranges$Logpval <- log10( subranges$Pvalue )
     subranges$Var1 <- (subranges$Var1 - 1) * 10
     subranges$Var2 <- (subranges$Var2 - 1) * 10
 
+    print(subranges)
+
     minLogpval <- min( subranges$Logpval, -3 )
 
-    #print(subranges)
+    #----------------------------------------------------------------------
+    # Create main pyramid heat-map
 
-    plotTitle = sprintf("%s effect on dLFE", Xtrait) 
+    plotTitle = sprintf("%s effect on dLFE", Xtrait)
 
-    grid.newpage()
+    dotsDF <- data.frame(melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Logpval") ))
+    dotsDF <- dotsDF[dotsDF$value<=-2.0,]
+
     plotdf <- melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Logpval") )
-    p <- ggplot( data=plotdf, aes(x=Var1, y=Var2, fill=value) ) +
-        geom_raster() +
-        labs(y="Profile End", x="Profile Start", value="log(p-value)", title=plotTitle) +
-        scale_fill_gradient2(low="#cc7777", mid="#ffff88", high="#000000", limits=c(min(subranges$Logpval), 0), midpoint=minLogpval ) + 
-        coord_fixed() +
-        geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.2 ) +
-        theme( plot.margin=unit(c(2,2,2,2), "cm"), aspect.ratio=1 )
-    print( p, vp=viewport(angle=-45) )
+    #p <- ggplot( data=plotdf, aes(x=Var1, y=Var2, fill=value ) ) +
+    #    geom_tile( linetype=0, colour=NA ) +
+    #    labs(y="Profile End", x="Profile Start", value="log(p-value)", title=plotTitle) +
+    #    coord_fixed() +
+#   #     guides( fill=FALSE ) +
+    #    geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.6 ) +
+    #    theme( plot.margin = unit(c(0.1,0.1,0.1,0.1), "npc"),
+    #           plot.background = element_blank(),
+    #           panel.grid.major = element_blank(),
+    #           panel.grid.minor = element_blank(),
+    #           panel.background = element_blank(),
+    #           axis.line = element_line(color="black"),
+    #           #legend.position="left",
+    #           aspect.ratio=1 )
+    valScale <- scale_fill_gradient(low="#7799ff", high="#000000", limits=c(min(subranges$Logpval), 0) )
 
-    grid.newpage()
-    p <- ggplot( data=data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Coef"   ) ) ), aes(x=Var1, y=Var2, fill=value) ) +
-        geom_raster() +
-        labs(y="Profile End", x="Profile Start", value="R^2", title=plotTitle) +
-        scale_fill_gradient2(low="#7777ff", mid="#000000", high="#ff7777", limits=c(-1, 1)) + 
-        coord_fixed() +
-        geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.2 ) +
-        theme( plot.margin=unit(c(2,2,2,2), "cm"), aspect.ratio=1 )
-    print( p, vp=viewport(angle=-45) )
+
+    plotRotatedPyramid( plotdf, dotsDF, valScale, Xtrait, plotTitle )
+
+    print("//////////////////////////////////")
+    print( data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Buse.R2"   ) ) ) )
+    print("//////////////////////////////////")
+    
+    #grid.newpage()
+    plotdf <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Buse.R2"   ) ) )
+    #p <- ggplot( data=plotdf, aes(x=Var1, y=Var2, fill=value) ) +
+    #    geom_tile( linetype=0, colour=NA ) +
+    #    labs(y="Profile End", x="Profile Start", value="Buse R^2", title=paste(plotTitle, " (Buse R^2)")) +
+    #    coord_fixed() +
+    #    geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.6 ) +
+    #    theme( plot.margin=unit(c(0.1,0.1,0.1,0.1), "npc"), aspect.ratio=1,
+    #           plot.background = element_blank(),
+    #           panel.grid.major = element_blank(),
+    #           panel.grid.minor = element_blank(),
+    #           panel.background = element_blank(),
+    #           axis.line = element_line(color="black")
+    #    )
+    #v.min <- min(trunc(subranges$Buse.R2)-1, 0.0)
+    #v.max <- max(trunc(subranges$Buse.R2)+1, 1.0)
+    valScale <- scale_fill_gradientn(
+        breaks=c(-1.0, -0.5, 0.0, 0.5, 1.0),
+        limits=c(-1.0, 1.0),
+        colors=        c("#75c0ff", "#2240cc", "#112060",   "#000000", "#602011", "#cc4022", "#ffc075"),
+        values=rescale(c(     -1.0,      -0.5,     -0.15,         0.0,      0.15,       0.5,       1.0) ) )
+    plotRotatedPyramid( plotdf, dotsDF, valScale, Xtrait, plotTitle=paste(plotTitle, " (Buse R^2)") )
+
+    #grid.newpage()
+    plotdf <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("CorSquared"   ) ) )
+    #p <- ggplot( data=plotdf, , aes(x=Var1, y=Var2, fill=value) ) +
+    #    geom_tile( linetype=0, colour=NA ) +
+    #    labs(y="Profile End", x="Profile Start", value="CorSquared", title=paste(plotTitle, " (Cor^2)")) +
+    #    coord_fixed() +
+    #    geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.6 ) +
+    #    theme( plot.margin=unit(c(0.1,0.1,0.1,0.1), "npc"), aspect.ratio=1,
+    #           plot.background = element_blank(),
+    #           panel.grid.major = element_blank(),
+    #           panel.grid.minor = element_blank(),
+    #           panel.background = element_blank(),
+    #           axis.line = element_line(color="black")
+    #    )
+    valScale <- scale_fill_gradient(low="#000000", high="#7799ff", limits=c(0, max(subranges$CorSquared, 1.0) ) )
+    plotRotatedPyramid( plotdf, dotsDF, valScale, Xtrait, plotTitle=paste(plotTitle, " (Cor^2)") )
+
+    #grid.newpage()
+    plotdf <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("OLS.R2"   ) ) )
+    #p <- ggplot( data=plotdf, , aes(x=Var1, y=Var2, fill=value) ) +
+    #    geom_tile( linetype=0, colour=NA ) +
+    #    labs(y="Profile End", x="Profile Start", value="OLS-R^2", title=paste(plotTitle, " (OLS.R^2)")) +
+    #    coord_fixed() +
+    #    geom_point(data=plotdf[plotdf$value<=-2.0,], aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=0.6 ) +
+    #    theme( plot.margin=unit(c(0.1,0.1,0.1,0.1), "npc"), aspect.ratio=1,
+    #                   plot.background = element_blank(),
+    #           panel.grid.major = element_blank(),
+    #           panel.grid.minor = element_blank(),
+    #           panel.background = element_blank(),
+    #           axis.line = element_line(color="black")
+    #    )
+    #print( p, vp=viewport(angle=-45) )
+    valScale <- scale_fill_gradient(low="#000000", high="#7799ff", limits=c(0, max(subranges$OLS.R2, 1.0) ) )
+    plotRotatedPyramid( plotdf, dotsDF, valScale, Xtrait, plotTitle=paste(plotTitle, " (OLS.R2)") )
 
 }
 
-#performGLSregression( traits, tree, "GenomicGC",   "Profile.15" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.15" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.1" )
 #print(performGLSregression_profileRangeMean( traits, tree, "GenomicGC", c(15,15) ))
 #print(performGLSregression_profileRangeMean( traits, tree, "GenomicGC", c(15,19) ))
 
-pyramidLength <- 31
-
 #--------------------
 #glsRegressionRangeAnalysis( traits, tree, "OptimumTemp", c(1,pyramidLength))
-#performGLSregression( traits, tree, "OptimumTemp", "Profile.11" )
+performGLSregression( traits, tree, "OptimumTemp", "Profile.11" )
 #performGLSregression( traits, tree, "OptimumTemp", "GenomicGC" )
 
 #glsRegressionRangeAnalysis( traits, tree, "TemperatureRange", c(1,pyramidLength))
@@ -447,11 +804,18 @@ glsRegressionRangeAnalysis( traits, tree, "Salinity", c(1,pyramidLength))
 
 glsRegressionRangeAnalysis( traits, tree, "PairedFraction", c(1,pyramidLength))
 
-performGLSregression( traits, tree, "OptimumTemp", "Profile.15" )
 performGLSregression( traits, tree, "GenomicGC",   "Profile.1" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.5" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.8" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.15" )
+performGLSregression( traits, tree, "GenomicGC",   "Profile.25" )
+
+
+performGLSregression( traits, tree, "OptimumTemp", "Profile.15" )
 performGLSregression( traits, tree, "OptimumTemp", "Profile.15" )
 
 performGLSregression( traits, tree, "PairedFraction", "Profile.15" )
+performGLSregression( traits, tree, "PairedFraction", "Profile.5" )
 performGLSregression( traits, tree, "PairedFraction", "Profile.1" )
 
 performGLSregression( traits, tree, "TemperatureRange", "Profile.15" )
@@ -468,3 +832,5 @@ performGLSregression( traits, tree, "PairedFraction",   "GenomicGC" )
 
 
 dev.off()
+
+warnings()

@@ -1,7 +1,6 @@
 from data_helpers import allSpeciesSource, getSpeciesTemperatureInfo, getSpeciesProperty
 import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
-#from easyprocess import EasyProcess
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, faces, AttrFace, PhyloTree
 from plot_xy import loadProfileData
 from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile
@@ -11,13 +10,8 @@ from ncbi_taxa import ncbiTaxa
 
 # configuration
 maxDisplayNameLength = 27
-speciesToExclude = frozenset((99999, 9876543))
+speciesToExclude = frozenset((405948,999415,946362,470, 158189, 1307761, 456481, 505682, 1280, 4932, 508771, 2850, 753081 ))
 speciesToInclude = frozenset()
-
-# Test pyvirtualdisplay
-#with Display(backend='xvnc') as disp:
-#    with EasyProcess('xmessage hello -timeout 5') as proc:
-#        proc.wait()  # returns after 5 seconds
 
 
 
@@ -59,9 +53,10 @@ algaeToColor = {'Yes': 'MediumTurquoise', 'No': 'LemonChiffon'}
 def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
     level = len(node.get_ancestors())
     if( level==1 or level==2 or level==3):
-        name = AttrFace("name", fsize=9)
-        #faces.add_face_to_node(n, node, 0, position="float")
-        faces.add_face_to_node(name, node, column=0)
+        if node.name:
+            name = AttrFace("name", fsize=9)
+            ########faces.add_face_to_node(n, node, 0, position="float")
+            faces.add_face_to_node(name, node, column=0)
 
         tf = TextFace(len(node.get_leaves()), fsize=12)
         faces.add_face_to_node(tf, node, column=1, position="float")
@@ -72,6 +67,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
         faces.add_face_to_node(tf, node, column=1, position="float")
 
     elif node.is_leaf():
+        assert(node.name)
         name = AttrFace("name", fsize=9, fstyle="italic")
         faces.add_face_to_node(name, node, column=0)
 
@@ -204,12 +200,54 @@ def drawTree(tree, basename, *args, **kw):
 
 def simpleNodeLayoutFunc(node):
     if node.is_leaf():
-        name = AttrFace("name", fsize=12, fstyle="italic")
-        faces.add_face_to_node(name, node, column=0)
+        if node.name != "n/a":
+            l = int(node.name)
+            binomicName = ncbiTaxa.get_taxid_translator([l])[l]  # There has to be an easier way to look up names...
+            #name = AttrFace("name", fsize=12, fstyle="italic")
+            name = TextFace(binomicName, fsize=12, fstyle="italic")
+            faces.add_face_to_node(name, node, column=0)
+
+    else:
+
+        try:
+            k = node.testK
+            if not k is None:
+                #binomicName = ncbiTaxa.get_taxid_translator([k])[k]  # There has to be an easier way to look up names...
+
+                name = TextFace(k, fsize=12)
+                #print("--- %s" % l)
+                faces.add_face_to_node(name, node, column=0)
+
+        except AttributeError as e:
+            pass
+        
+        try:
+            l = node.testL
+            if not l is None:
+                binomicName = ncbiTaxa.get_taxid_translator([l])[l]  # There has to be an easier way to look up names...
+
+                name = TextFace(binomicName, fsize=12)
+                #print("--- %s" % l)
+                faces.add_face_to_node(name, node, column=1)
+
+        except AttributeError as e:
+            pass
+        
     
 
 
-def drawTrees(completeTree, prunedTree):
+def drawTrees(completeTree, prunedTree, args=None):
+    import os
+    from glob import glob
+
+    files = []
+    if not args is None and args.use_profile_data:
+        files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
+    
+    print("Loading profile data for %d files..." % len(files))
+    (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+            
+    tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs)
 
     ts = TreeStyle()
     #ts.mode = "c"
@@ -218,11 +256,14 @@ def drawTrees(completeTree, prunedTree):
     ts.show_branch_length = False
     ts.show_leaf_name = False
     ts.layout_fn = simpleNodeLayoutFunc
-    ts.scale = 100
+    ts.scale = 1000
     
     with Display(backend='xvnc') as disp:  # Plotting requires an X session
         drawTree( completeTree, 'nmicro_s6',        tree_style=ts,  w=300, h=3000, units="mm")
-        drawTree( prunedTree,   'nmicro_s6_pruned', tree_style=ts,  w=300, h=1500, units="mm")
+        drawTree( prunedTree,   'nmicro_s6_pruned', tree_style=ts,  w=1500, h=1500, units="mm")
+
+        plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), tree=prunedTree)
+        
 
         # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
         
@@ -265,12 +306,13 @@ def testTileFunc(taxId):
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
 """
-def plotSpeciesOnTaxonomicTree(tileFunc=None):
+def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None):
     taxa = getSpeciesToInclude()
 
-    # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
-    # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
-    tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
+    if tree is None:
+        # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
+        # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
+        tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
     
     ts = TreeStyle()
     ts.show_leaf_name = False
@@ -311,6 +353,9 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None):
         
     # Annotate tree nodes
     for node in tree.traverse():
+        if not node.name:
+            continue
+        
         taxId = int(node.name)
         binomicName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
         node.add_features(displayName=binomicName, taxId=taxId)
@@ -338,13 +383,44 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None):
 
     with Display(backend='xvnc') as disp:  # Plotting requires an X session
 
-        tree.render('alltaxa.pdf', tree_style=ts, w=10, h=48, units="mm")
-        tree.render('alltaxa.svg', tree_style=ts, w=10, h=48, units="mm")
+        h = int(round(len(taxa)*0.25, 0))
+        tree.render('alltaxa.pdf', tree_style=ts, w=10, h=h, units="mm")
+        tree.render('alltaxa.svg', tree_style=ts, w=10, h=h, units="mm")
 
         print("------------------ Ignore error message ------------------")
         # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
 
     return 0
+
+def savePrunedTree(tree):
+    tree.write(format=1, outfile="nmicro_s6_pruned_with_names.nw")
+    
+    tree = tree.copy()
+
+
+    usedTaxIds = {}
+
+
+    # Rewrite the tax-id into the name (so it appears in the output tree)
+    # Also warn about collisions (duplicate nodes that were mapped to the tax-id)
+    for node in tree.traverse():
+        if not node.is_leaf():
+            continue
+
+        if node.taxId in usedTaxIds:
+            print("=="*20)
+            print("WARNING: Duplicate found for tax-id %d" % node.taxId)
+            print("Old: %s" % usedTaxIds[node.taxId])
+            print("New: %s" % node.label)
+            print(node.lineageItems)
+        else:
+            usedTaxIds[node.taxId] = node.label # store to detect future collisions
+
+        # Rewrite the tax-id into the name (so it appears in the output tree)
+        node.name = node.taxId 
+    
+    tree.write(format=1, outfile="nmicro_s6_pruned_with_taxids.nw")
+
 
 def standalone():
     import argparse
@@ -360,9 +436,9 @@ def standalone():
     if( args.test ):
         taxa = getSpeciesToInclude()
         (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa)
-        drawTrees( completeTree, prunedTree )
+        drawTrees( completeTree, prunedTree, args=args )
 
-        prunedTree.write(format=1, outfile="nmicro_s6_pruned.nw")
+        savePrunedTree( prunedTree )
 
         return 0
     else:
