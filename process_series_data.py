@@ -122,9 +122,11 @@ def convertResultsToMFEProfiles( results, maxShuffledGroups=20 ):
 
         # Verify the sequence CRC (optional) - makes sure the native CDS we got matches the one the profile was computed for
         # Note: This check is performed here to make sure the shuffles arrive in the expected order
-        recordedCRC = content[0]['seq-crc']
-        computedCRC = calcCrc(result["cds-seq"])
-        assert(recordedCRC==computedCRC)
+        if "cds-seq" in result:
+            recordedCRC = content[0]["seq-crc"]
+            computedCRC = calcCrc(result["cds-seq"])
+            if (recordedCRC!=computedCRC):
+                raise Exception("CRC mismatch detected in sequence %s" % result)
 
         profile = np.zeros((maxShuffledGroups+1, profileLength))
         for i, row in enumerate(content):
@@ -252,6 +254,7 @@ def calcSampledGCcontent(seq, stepSize=10):
     total = downsampleVector(Totalcounts, stepSize)
 
     return gc/total
+
 
 
 def testSampledGC():
