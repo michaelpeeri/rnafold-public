@@ -16,16 +16,16 @@ library("Matrix")
 # Configuration
 
 # FALSE - perform gls-based analysis; TRUE - use gls code to simulate OLS (testing mode - should give the same p-value and R^2 as OLS)
-testingModeSimulateOLS <- TRUE
+testingModeSimulateOLS <- FALSE
 
 # How many points to plot in the validation plot
-validationTestPoints = 10
+validationTestPoints = 100
 
 # Tree target (approximate) size
 Ntarget = 200
 
 # PDF output
-pdf("test_buse_pseudo_r_squared.out.pdf")
+pdf("test_buse_pseudo_r_squared.out.test.pdf")
 # ==========================================================================================
 
 # ==========================================================================================
@@ -322,16 +322,27 @@ validationRun <- function( useDiscreteExplanatoryVar=FALSE )
     # If testingModeSimulateOLS==TRUE, all values should be equal (x==y)
     alpha.adaptive <- 1/(1+exp((validationTestPoints-400)/100))*0.9+0.1  # use alpha when there are many points
     p <- ggplot( data=df, aes(x=OLS.R2, y=Buse.R2, colour=predictive) ) +
+         geom_abline(slope=1, intercept=0, size=0.5, linetype=2, colour="black") +  # reference line
          geom_point(alpha=alpha.adaptive)
     print(p)
 
+    
     # Plot p-values for predictive and non-predictive 
     #clr1 <- "red"
     #clr2 <- "#55CCB0"
     nbins.adaptive = min( 100, max(20, round(validationTestPoints/4) ) )
+    binwidth.adaptive = 1./nbins.adaptive
     p <- ggplot( data=df, aes( colour=predictive )) +
-        geom_freqpoly( aes(OLS.pval), bins=nbins.adaptive ) +
-        geom_freqpoly( aes(GLS.pval), bins=nbins.adaptive )
+        geom_freqpoly( aes(OLS.pval), binwidth=binwidth.adaptive, linetype=2, size=0.5, alpha=0.5  ) +
+        geom_freqpoly( aes(GLS.pval), binwidth=binwidth.adaptive, linetype=1, size=1.0, alpha=0.5  ) +
+        annotate( "text", x=Inf,  y=Inf, label=sprintf("italic(N)==%d", validationTestPoints), hjust=1, vjust=1, colour="black", parse=TRUE ) +
+        annotate( "text", x=-Inf, y=Inf, label=sprintf("KStest\nOLS,FALSE=%.3g\nOLS,TRUE=%.3g\nGLS,FALSE=%.3g\nGLS,TRUE=%.3g",
+                                                        ks.test(df[df$predictive==FALSE,"OLS.pval"], "punif")$p.value,
+                                                        ks.test(df[df$predictive==TRUE, "OLS.pval"], "punif")$p.value,
+                                                        ks.test(df[df$predictive==FALSE,"GLS.pval"], "punif")$p.value,
+                                                        ks.test(df[df$predictive==TRUE, "GLS.pval"], "punif")$p.value
+                                                        ), hjust=0, vjust=1, colour="black" ) +
+        scale_y_log10()
     print(p)
     
 }
@@ -357,5 +368,7 @@ performTest(effectTrait="mixedTrait",                      modelTrait="discreteU
 
 validationRun( useDiscreteExplanatoryVar=TRUE )
 
+
+print(sprintf("Using random seed %d", seed))
 
 dev.off()
