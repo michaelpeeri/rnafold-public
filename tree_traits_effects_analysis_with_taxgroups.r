@@ -33,8 +33,8 @@ groupsTableOutputFile <- "tree_traits_effects_analysis_with_taxgroups.out.csv"
 
 pyramidLength <- 30+1
 
-minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
-#minimalTaxonSize <- 90 # Note - should match the value in create_taxid_kingdom_table.py
+#minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
+minimalTaxonSize <- 90 # Testing only
 
 #profileMode <- "nativeLFE"
 #profileMode <- "shuffledLFE"
@@ -324,6 +324,9 @@ bmcorrmtx <- data.frame( melt( vcv1 ) )
 
 performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=TRUE, caption="" )
 {
+    # ==========================================================================================
+    # ============================== Part 1 - Prapre Tree ======================================
+    # ==========================================================================================
     # Discard tree tips for species missing data
     speciesWithMissingData <- row.names(traits[(is.na(traits[Xtrait]) | is.na(traits[Ytrait])),])
     tree <- drop.tip( tree, speciesWithMissingData )   # Filter species that will prevent analysis from being performed from the tree
@@ -334,10 +337,6 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
 
     if( is.null(tree) )
     {
-        print("Returning NA")
-        print(tree)
-        print(nrow(traits))
-        #return( c(1.0,0.0))
         return( c(NA,NA,NA))
     }
     # Check tree <-> data-frame correlation appears valid
@@ -347,31 +346,42 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     stopifnot(tipsOk)
 
     N <- nTips(tree)
-    #print(N)
 
     # Calculate the correlation matrix (for a BM process)
     bmcorr <- corBrownian( phy=tree )
 
-    YvsX = as.formula( paste(Ytrait, " ~ ", Xtrait) )
-    #print(YvsX)
+    # ==========================================================================================
+    # ============================ Part 2 - Perform Regressions ================================
+    # ==========================================================================================
+    
+    # Set the predictive (regression) and intecept-only formulas
+    # 'predictiveFormula' is the actual regression. It uses an intercept when a continuous explanatory var is used (and none with a discrete var, as in one-way ANOVA)
+    # 'inteceptFormula' is an intecept-only model, used as the baseline for calculation of R^2
+    predictiveFormula <- NA    
+    if( any(class(traits[,Xtrait])==c("factor")) )
+    {
+        predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait, " + 0") )
+    }
+    else
+    {
+        predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait) )
+    }
+    interceptFormula = as.formula( paste(Ytrait, " ~ ", "1") )
 
-    m1 <- lm(  YvsX, traits); summary(m1)
+    
+    # Perform OLS regression (used as a reference for comparison)
+    m1 <- lm(  predictiveFormula, traits); summary(m1)
     co <- coef(m1)
-    #print(co)
 
-    #print("//////////////")
-    #print( nrow(traits) )
-    #print( nTips(traitsTree) )
-
-    gls1 <- gls( YvsX,
+    # Perform GLS regression using the predictive and intercept-only models
+    gls1 <- gls( predictiveFormula,
                 traits,
                 correlation=bmcorr,
                 na.action=na.omit,
                 method="REML"); summary(gls1)
-    #gls1 <- pGLS( YvsX, traits, bmcorr, na.action=na.omit); summary(gls1)
     co2 <- coef(gls1)
 
-    gls0 <- gls( as.formula( paste(Ytrait, " ~ ", "1")),
+    gls0 <- gls( interceptFormula,
                  traits,
                  correlation=bmcorr,
                  na.action=na.omit,
@@ -392,7 +402,14 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     #V <- getVarCov( gls1 )   # this doesn't work (bug?)
     V <- corMatrix( gls1$modelStruct$corStruct )
     inv.V <- solve(V)   # invert V (=Omega). Every positive-definite matrix is invertible (https://en.wikipedia.org/wiki/Positive-definite_matrix#cite_note-5)
-    e <- rep(1, N)
+    if( any(class(traits[,Xtrait])==c("factor")) )
+    {
+        e <- rep(0, N)
+    }
+    else
+    {
+        e <- rep(1, N)
+    }
     Y <- traits[,Ytrait]
     Y.bar <- coef(gls0)["(Intercept)"]
     yye <- Y - Y.bar * e
@@ -400,6 +417,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     R2 <- 1 - ( t(u.hat) %*% inv.V %*% u.hat )/( t(yye) %*% inv.V %*% yye )   # See eq. (15) p. 107.
     stopifnot( R2 >= 0 && R2 <= 1.0 )
 
+    # Slop direction
     slopeDirection <- NA
     if( any(class(traits[,Xtrait])==c("factor")) )
     {
@@ -410,13 +428,31 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
         slopeDirection <- sign(coef(gls1)[Xtrait])
     }
     stopifnot( slopeDirection==1 || slopeDirection==-1 )
+
+    # p-value
+    pvalue <- NA
+    pvalue.OLS <- NA
+    if( any(class(traits[,Xtrait])==c("factor")) )
+    {
+        pvalue     <- anova(gls1)[1,'p-value']
+        pvalue.OLS <- anova(m1)[1,'Pr(>F)']
+    }
+    else
+    {
+        pvalue     <- summary(gls1)$tTable[2,4]
+        pvalue.OLS <- summary(m1)$coefficients[2,4]
+    }
     
-    
+    # ==========================================================================================
+    # ========================= Part 3 (optional) - Plot Regression ============================
+    # ==========================================================================================
     if( plotRegression )
     {
         clr2 <- "#55CCB0"
 
-        max.y <- max(traits[,Ytrait])
+        max.y  <- max(traits[,Ytrait])
+        min.y  <- min(traits[,Ytrait])
+        line.y <- (max.y-min.y)/32
 
         # Note: this uses plotmath syntax; See: https://www.rdocumentation.org/packages/grDevices/versions/3.4.3/topics/plotmath
     
@@ -429,8 +465,8 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
               geom_hline( yintercept = 0 ) +
               #annotate( "text", x=Inf,  y=max.y, label=sprintf("'lm\naitalic(R) ^ 2 == %4g\np-val = %4g\nn = %d'", summary(m1)$r.squared,      summary(m1)$coefficients[2,4], nrow(traits) ), hjust=1, vjust=0, colour="red", fill="white", parse=TRUE ) +
               #annotate( "text", x=-Inf, y=max.y, label=sprintf("'gls\nitalic(R) ^ 2 == %4g\np-val = %4g\nn = %d'", R2,                        summary(gls1)$tTable[2,4],     nrow(traits) ), hjust=0, vjust=0, colour=clr2, fill="white", parse=TRUE )
-              annotate( "text", x=Inf,  y=max.y+c(0.0, -0.03, -0.06, -0.09), label=c(  "lm", sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" ==  %.3g', summary(m1)$coefficients[2,4]), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
-              annotate( "text", x=-Inf, y=max.y+c(0.0, -0.03, -0.06, -0.09), label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2), sprintf('italic(p)*"-val" ==  %.3g', summary(gls1)$tTable[2,4]), sprintf("italic(N) == %d", nrow(traits))), hjust=0, vjust=0, colour=clr2, parse=TRUE )
+              annotate( "text", x=Inf,  y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "lm",  sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" ==  %.3g', pvalue.OLS), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
+              annotate( "text", x=-Inf, y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" ==  %.3g', pvalue), sprintf("italic(N) == %d", nrow(traits))),     hjust=0, vjust=0, colour=clr2,  parse=TRUE )
               print(p)
         }
         else
@@ -441,14 +477,13 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
               geom_hline( yintercept = 0 ) +
               geom_abline( aes( slope=co[Xtrait],  intercept=co["(Intercept)"]), colour="red"  ) +
               geom_abline( aes( slope=co2[Xtrait], intercept=co2["(Intercept)"]), colour=clr2  ) +
-              #annotate( "text", x=Inf,  y=max.y, label=sprintf("'lm\nitalic(R) ^ 2 == %4g\np-val = %4g\nn = %d'", summary(m1)$r.squared,      summary(m1)$coefficients[2,4], nrow(traits) ), hjust=1, vjust=0, colour="red", fill="white", parse=TRUE ) +
-              annotate( "text", x=Inf,  y=max.y+c(0.0, -0.03, -0.06, -0.09), label=c(  "lm", sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" == %.3g', summary(m1)$coefficients[2,4]), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
-              annotate( "text", x=-Inf, y=max.y+c(0.0, -0.03, -0.06, -0.09), label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2), sprintf('italic(p)*"-val" == %.3g', summary(gls1)$tTable[2,4]), sprintf("italic(N) == %d", nrow(traits))), hjust=0, vjust=0, colour=clr2, parse=TRUE )
+              annotate( "text", x=Inf,  y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "lm",  sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" == %.3g', pvalue.OLS), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
+              annotate( "text", x=-Inf, y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" == %.3g', pvalue),     sprintf("italic(N) == %d", nrow(traits))), hjust=0, vjust=0, colour=clr2,  parse=TRUE )
               print(p)
         }
     }
 
-    return( c( summary(gls1)$tTable[2,4], R2 * slopeDirection, N ) )
+    return( c( pvalue, R2 * slopeDirection, N ) )
 }
 
 performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange )
@@ -823,8 +858,8 @@ performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157",         "Op
 
 
 
-dev.off()
-quit()
+#dev.off()
+#quit()
 
 #dev.off()
 
@@ -838,7 +873,7 @@ for( gr in taxGroups )
     if( !is.na(results) )
     {
         results <- results[results$Var1==results$Var2,]
-        maxResult <- results [which.max( results$Buse.R2 ),]
+        maxResult <- results [which.max( abs(results$Buse.R2) ),]
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -870,16 +905,16 @@ for( gr in taxGroups )
     if( !is.na(results) )
     {
         results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( results$Buse.R2 ),]
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OptimumTemp"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
 }
 
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
-dev.off()  # TESTING ONLY
-write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )    # TESTING ONLY
-quit()    # TESTING ONLY
+#dev.off()  # TESTING ONLY
+#write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )    # TESTING ONLY
+#quit()    # TESTING ONLY
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
 
@@ -895,7 +930,7 @@ for( gr in taxGroups )
     if( !is.na(results) )
     {
         results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( results$Buse.R2 ),]
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Habitat"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -914,7 +949,7 @@ for( gr in taxGroups )
     if( !is.na(results) )
     {
         results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( results$Buse.R2 ),]
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Salinity"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -925,13 +960,13 @@ for( gr in taxGroups )
 for( gr in taxGroups )
 {
     print(gr)
-    glsRangeAnalysisWithFilter( traits, tree, gr, "OxygenReq", c(1,pyramidLength))
+    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OxygenReq", c(1,pyramidLength))
 
     # Store the summarized result for this group
     if( !is.na(results) )
     {
         results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( results$Buse.R2 ),]
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OxygenReq"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
