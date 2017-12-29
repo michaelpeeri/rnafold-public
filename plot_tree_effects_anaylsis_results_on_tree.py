@@ -11,8 +11,8 @@ from ncbi_taxa import ncbiTaxa
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
 csvGroupsFilename = "TaxidToKingdom.csv"
 #nwFilename = "TaxidToKingdom.nw"
-#csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.csv"
-csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.save2.csv"
+csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.csv"
+#csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.save2.csv"
 
 
 
@@ -179,7 +179,7 @@ def plotRegressionEffectsByGroup():
                     #faces.add_face_to_node(v, node, column=1)
                     
                     nstyle = NodeStyle()
-                    nstyle["size"] = math.sqrt( effectSize / math.pi ) * 400   # choose radius such that the area is proportional to effect size (since perception is proportional to area, not radius)
+                    nstyle["size"] = math.sqrt( abs(effectSize) / math.pi ) * 400   # choose radius such that the area is proportional to effect size (since perception is proportional to area, not radius)
                     nstyle["shape"] = "sphere"
                     if( pval < significanceLevel ):
                         nstyle["fgcolor"] = "#1133ff"
