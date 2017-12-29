@@ -19,7 +19,7 @@ library("Matrix")
 testingModeSimulateOLS <- FALSE
 
 # How many points to plot in the validation plot
-validationTestPoints = 100
+validationTestPoints = 5000
 
 # Tree target (approximate) size
 Ntarget = 200
@@ -162,7 +162,7 @@ performTest <- function(effectTrait, modelTrait, plotResult=TRUE, predictiveSD=0
     print("===== lm =====")
     print(summary(m1))
 
-    # Perform GLS and calculate R^2
+    # Perform GLS
     
     # Determine the variance-covariance matrix to be used for GLS
     if( !testingModeSimulateOLS )
