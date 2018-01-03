@@ -34,18 +34,26 @@ profileLen <- (profileStop-profileStart)/profileStep
 taxidToKingdomFilename <- "TaxidToKingdom.csv"   # create file using: python2 create_taxid_kingdom_table.py
 #taxonTreeFilename <- "TaxidToKingdom.nw"   # create file using: python2 create_taxid_kingdom_table.py
 
-groupsTableOutputFile <- "tree_traits_effects_analysis_with_taxgroups.out.csv"
 
 pyramidLength <- 30+1
+
+
+#profileMode <- "nativeLFE"
+#profileMode <- "shuffledLFE"
+profileMode <- "dLFE"
+
+
+groupsTableOutputFile.limitRangeFromNt <- 70      # range is inclusive at either end
+groupsTableOutputFile.limitRangeToNt   <- 1000   # range is inclusive at either end
+stopifnot(groupsTableOutputFile.limitRangeFromNt <= groupsTableOutputFile.limitRangeToNt )
+stopifnot( 10*(pyramidLength-1) >= groupsTableOutputFile.limitRangeFromNt ) # pyramidLength doesn't overlap with limits, so csv output will be empty
+groupsTableOutputFile <- sprintf("tree_traits_effects_analysis_with_taxgroups.out.%s.range.%d-%d.length.%d.csv", profileMode, groupsTableOutputFile.limitRangeFromNt , groupsTableOutputFile.limitRangeToNt, pyramidLength-1 )
+
 
 significanceLevel = 1e-2
 
 #minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
 minimalTaxonSize <- 9 # Testing only
-
-#profileMode <- "nativeLFE"
-#profileMode <- "shuffledLFE"
-profileMode <- "dLFE"
 
 
 cairo_pdf(sprintf("tree_phenotypes_regression.out.%s.by.taxgroups.%%d.pdf", profileMode))
@@ -1027,10 +1035,15 @@ for( gr in taxGroups )
     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength))
 
     # Store the summarized result for this group
-    if( !is.na(results) )
+    if( any( class(results) == "data.frame" ) && nrow(results) )
     {
-        results <- results[results$Var1==results$Var2,]
-        maxResult <- results [which.max( abs(results$Buse.R2) ),]
+        #print(results)
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        #print(results)
+        results <- results[results$Var1 >= groupsTableOutputFile.limitRangeFromNt &
+                           results$Var2 <= groupsTableOutputFile.limitRangeToNt , ]  # Only include ranges within the configured limits
+        #print(results)
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]  # Choose the result with the highest R^2
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -1038,16 +1051,24 @@ for( gr in taxGroups )
 
 print(regressionResultsByTaxGroup)
 
+# TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
+#dev.off()
+#quit()
+# TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
+
+
 for( gr in taxGroups )
 {
     print(gr)
     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OptimumTemp", c(1,pyramidLength))
 
     # Store the summarized result for this group
-    if( !is.na(results) )
+    if( any( class(results) == "data.frame" ) && nrow(results) )
     {
-        results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( abs(results$Buse.R2) ),]
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        results <- results[results$Var1 >= groupsTableOutputFile.limitRangeFromNt &
+                           results$Var2 <= groupsTableOutputFile.limitRangeToNt , ]  # Only include ranges within the configured limits
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]  # Choose the result with the highest R^2
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OptimumTemp"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -1069,10 +1090,12 @@ for( gr in taxGroups )
     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Habitat", c(1,pyramidLength))
     
     # Store the summarized result for this group
-    if( !is.na(results) )
+    if( any( class(results) == "data.frame" ) && nrow(results) )
     {
-        results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( abs(results$Buse.R2) ),]
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        results <- results[results$Var1 >= groupsTableOutputFile.limitRangeFromNt &
+                           results$Var2 <= groupsTableOutputFile.limitRangeToNt , ]  # Only include ranges within the configured limits
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]  # Choose the result with the highest R^2
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Habitat"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -1088,10 +1111,12 @@ for( gr in taxGroups )
     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Salinity", c(1,pyramidLength))
     
     # Store the summarized result for this group
-    if( !is.na(results) )
+    if( any( class(results) == "data.frame" ) && nrow(results) )
     {
-        results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( abs(results$Buse.R2) ),]
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        results <- results[results$Var1 >= groupsTableOutputFile.limitRangeFromNt &
+                           results$Var2 <= groupsTableOutputFile.limitRangeToNt , ]  # Only include ranges within the configured limits
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]  # Choose the result with the highest R^2
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Salinity"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
@@ -1105,14 +1130,22 @@ for( gr in taxGroups )
     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OxygenReq", c(1,pyramidLength))
 
     # Store the summarized result for this group
-    if( !is.na(results) )
+    if( any( class(results) == "data.frame" ) && nrow(results) )
     {
-        results <- results[results$Var1==results$Var2,]
-        maxResult <- results[which.max( abs(results$Buse.R2) ),]
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        results <- results[results$Var1 >= groupsTableOutputFile.limitRangeFromNt &
+                           results$Var2 <= groupsTableOutputFile.limitRangeToNt , ]  # Only include ranges within the configured limits
+        #print(results)
+        maxResult <- results[which.max( abs(results$Buse.R2) ),]  # Choose the result with the highest R^2
+        #print(maxResult)
 
         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OxygenReq"), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
     }
 }
+
+
+
+performGLSregressionWithFilter( traits, tree, "Member_Flavobacteriales_200644", "GenomicGC", "Profile.18" )
 
 
 dev.off()
