@@ -12,6 +12,7 @@ from socket import gethostname
 from collections import Iterable, Set
 from os import getpid
 from cStringIO import StringIO
+from string import maketrans
 import redis
 from binascii import crc32
 from Bio import SeqIO
@@ -103,6 +104,108 @@ Get shortened name for species (e.g., Ecoli or Scerevisiae) -- note that this is
 def getSpeciesFileName(taxId):
     p = r.get("species:taxid:%d:name" % taxId).split(" ")
     return p[0][0] + p[1]
+
+skipWords = frozenset(("group", "candidatus", "candidate", "phyla", "bacterium", "sp.", "marine", "i", "subsp.", "strain", "str.", "serovar"))
+badTaxonomicNameChars = maketrans(".()", "***")
+def _getSpeciesFileName2(taxId):
+    terms = r.get("species:taxid:%d:name" % taxId).split(" ")
+    p = list(filter(lambda x: x.lower() not in skipWords, terms))
+    p = list(filter(lambda x: x.translate(badTaxonomicNameChars).find("*") == -1, p))
+    isStandardBinomial = (len(p)==len(terms))
+    #print("%d %s %s" % (taxId, p, isStandardBinomial))
+    assert(len(p) > 1)
+    assert(len(p[0]) > 1)
+    assert(len(p[1]) > 1)
+    
+    if isStandardBinomial:
+        assert(p[1][0] == p[1][0].lower())
+        assert(p[0][0] == p[0][0].upper())
+
+    return(p)
+
+
+def getSpeciesShortestUniqueNamesMapping():
+    allNames = list(sorted([(taxid, _getSpeciesFileName2(taxid)) for taxid in allSpeciesSource()], key=lambda x:x[1]))
+    expectedNamesCount = len(allNames)
+    allNames.append((-1, ["?","?"]))  # Add dummy name (to make iteration easier)
+
+    def getSimpleShortName(parts, lenPart2=3):
+        return parts[0][0] + parts[1][:lenPart2]
+
+    out = {}            # final mapping of taxids to unique names
+    conflicting = set() # running list of conflicting names
+    names = set()       # running list of already-assigned names
+
+    # Round 1
+    for first, second in [(allNames[i-1], allNames[i]) for i in range(1,len(allNames))]:
+
+        f1 = getSimpleShortName(first[1])
+        f2 = getSimpleShortName(second[1])
+
+        if f1 == f2:
+            conflicting.add(first[0])
+            conflicting.add(second[0])
+
+    # Round 2
+    for first in allNames:
+        if first[0] <= 0: continue
+        if first[0] not in conflicting:
+            candidate = getSimpleShortName(first[1])
+            if candidate not in names:
+                #print("%s -> %s" % (first, candidate))
+                out[first[0]] = candidate
+                names.add(candidate)
+            else:
+                #print("*** %s -X-> %s ***" % (first, candidate))
+                conflicting.add(first[0])
+
+    # Round 3
+    for first in allNames:
+        if first[0] <= 0: continue
+        if not first[0] in conflicting: continue
+
+        if len(first[1]) == 2:
+            candidate = first[1][0][:3] + first[1][1][-6:]
+            if candidate not in names:
+                #print("%s -> %s" % (first, candidate))
+                out[first[0]] = candidate
+                names.add(candidate)
+                conflicting.remove(first[0])
+                
+        elif len(first[1]) >= 3:
+            candidate = first[1][0][0] + first[1][1][:3] + first[1][-1][-5:]
+            if candidate not in names:
+                #print("%s -> %s" % (first, candidate))
+                out[first[0]] = candidate
+                names.add(candidate)
+                conflicting.remove(first[0])
+
+    ##out[4444] = "Test"  ## TESTING ONLY
+    
+    # Are there remaining species for which we haven't been able to find a name?
+    if conflicting:
+        print("%%"*10)
+        errorMessage = "Heuristic failed to find short name for %d species" % len(conflicting)
+        print(errorMessage)
+        
+        for first in allNames:
+            if first[0] <= 0: continue
+            if not first[0] in conflicting: continue
+            
+            print(first[1])
+        raise Exception(errorMessage)
+
+    # Is there a mismatch between the real and expected number of names?
+    if len(out) != expectedNamesCount:
+        print("%%"*10)
+        errorMessage = "Heuristic returned wrong number of names (expected: %d, actual: %d)" % (expectedNamesCount, len(out))
+        print(errorMessage)
+        
+        raise Exception(errorMessage)
+
+    return out
+            
+
 
 """
 Get a taxonomic group containing this taxId (the groups were chosen, rather arbitrarily, for plotting)

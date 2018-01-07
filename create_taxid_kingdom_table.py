@@ -1,6 +1,7 @@
 # Create a tax-id to kingdom table for all species (for use by R code...)
 import pandas as pd
-from data_helpers import allSpeciesSource
+import csv  # for QUOTE_NONNUMERIC
+from data_helpers import allSpeciesSource, getSpeciesShortestUniqueNamesMapping, getSpeciesName
 from ncbi_entrez import getKingdomForSpecies
 from ncbi_taxa import ncbiTaxa
 
@@ -8,7 +9,6 @@ from ncbi_taxa import ncbiTaxa
 # Configuration
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
 csvFilename = "TaxidToKingdom.csv"
-#nwFilename = "TaxidToKingdom.nw"
 
 
 print("Processing all species...")
@@ -42,15 +42,20 @@ def getMajorTaxonomicGroups(taxidToLineage):
     return sorted( out, key=lambda x: -(x[1]) )  # Sort by decreasing size
 
 
+shortNames = getSpeciesShortestUniqueNamesMapping()
+
 # Create an empty data-frame for csv output
 df = pd.DataFrame({
-#    'kingdom': pd.Categorical([], categories=['Bacteria', 'Eukaryota', 'Archaea'], ordered=False)  # Do pandas categorical vars ever work?
-    'kingdom': pd.Series(dtype="string")
+    'kingdom': pd.Series(dtype="string"),
+    'full.name': pd.Series(dtype="string"),
+    'short.name': pd.Series(dtype="string")
     }, index=pd.Index([], name='tax_id', dtype='int') )
 
 # Add kingdom data to the data-frame
 for k,v in taxidToKingdom.items():
-    df.loc[k, 'kingdom'] = v
+    df.loc[k, 'kingdom'   ] = v
+    df.loc[k, 'full.name' ] = getSpeciesName(k)
+    df.loc[k, 'short.name'] = shortNames[k]
     assert(df.loc[k, 'kingdom'] == v)
 
 # Get list of large taxonomic groups (based on the lineages of all species)
@@ -76,7 +81,7 @@ print(df.shape)
 
 print(df.loc[511145,])
     
-df.to_csv(csvFilename)
+df.to_csv(csvFilename, quoting=csv.QUOTE_NONNUMERIC)
 print("Wrote %s" % csvFilename)
 
 #majorGroupsTree = ncbiTaxa.get_topology( [x[0] for x in majorGroups] )
