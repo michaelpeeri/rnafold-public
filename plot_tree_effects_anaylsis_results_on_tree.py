@@ -4,25 +4,20 @@ from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, RectFace, faces, AttrFace, PhyloTree
 from ncbi_taxa import ncbiTaxa
 from data_helpers import allSpeciesSource
-from ncbi_entrez import getKingdomForSpecies
 from ncbi_taxa import ncbiTaxa
 
 # Configuration
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
-csvGroupsFilename = "TaxidToKingdom.csv"
-#nwFilename = "TaxidToKingdom.nw"
-csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.csv"
-#csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.save2.csv"
+csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.dLFE.length.300.csv"
+baseFontSize = 25         # Scale factor for (most) text
+significanceLevel = 1e-2  # p-values smaller than this will be marked as significant
+barScale = 500            # Width of 100%-bar
 
 
 
 print("Processing all species...")
-taxidToKingdom = {}
 taxidToLineage = {}
-for taxId in allSpeciesSource():    # read kingdoms and taxonomic lineages for all species
-    kingdom = getKingdomForSpecies(taxId)
-    taxidToKingdom[taxId] = kingdom
-
+for taxId in allSpeciesSource():    # read taxonomic lineages for all species
     lineage = ncbiTaxa.get_lineage( taxId )
     taxidToLineage[taxId] = lineage
 
@@ -47,62 +42,27 @@ def getMajorTaxonomicGroups(taxidToLineage):
     return sorted( out, key=lambda x: -(x[1]) )  # Sort by decreasing size
 
 
-def writeMajorGroupsTable():
-    # Create an empty data-frame for csv output
-    df = pd.DataFrame({
-    #    'kingdom': pd.Categorical([], categories=['Bacteria', 'Eukaryota', 'Archaea'], ordered=False)  # Do pandas categorical vars ever work?
-        'kingdom': pd.Series(dtype="string")
-        }, index=pd.Index([], name='tax_id', dtype='int') )
+# fixedHyphenations = {"Gammaproteobacteria":"Gammaproteo-\nbacteria"}
+# def hyphenate(s):
+#     return(s)  # DEBUG ONLY
+#     if s in fixedHyphenations:
+#         return fixedHyphenations[s]
+#     else:
+#         spacepos = s.find(" ")
+#         if spacepos > 4:
+#             #return s.replace(" ", "\n")
+#             return s[:spacepos]  # DEBUG ONLY
+#         else:
+#             if len(s) < 10:
+#                 return s
 
-    # Add kingdom data to the data-frame
-    for k,v in taxidToKingdom.items():
-        df.loc[k, 'kingdom'] = v
-        assert(df.loc[k, 'kingdom'] == v)
+#             return s[:9]  # DEBUG ONLY
 
-    # Get list of large taxonomic groups (based on the lineages of all species)
-    majorGroups = getMajorTaxonomicGroups(taxidToLineage)
-
-    # Add a binary membership column for each major group
-    for groupTaxId, _ in majorGroups:
-        groupName = ncbiTaxa.get_taxid_translator( [groupTaxId] )[groupTaxId]
-        groupName = "Member_%s_%d" % (groupName.replace(" ", "_").replace("/", "_").replace("-", "_"), groupTaxId)
-
-        groupDf = pd.DataFrame(
-            {groupName: pd.Series(dtype='bool')},
-            index = pd.Index(df.index.values, name='tax_id', dtype='int')
-        )
-
-        for taxId, lineage in taxidToLineage.items():
-            isMember = int(groupTaxId in lineage)
-            groupDf.loc[taxId, groupName] = isMember
-
-        df = pd.merge( df, groupDf, how='inner', left_index=True, right_index=True )  # Add the new column (is there an easier way to do this?)
-
-    print(df.shape)
-
-    print(df.loc[511145,])
-
-    df.to_csv(csvGroupsFilename)
-    print("Wrote %s" % csvGroupsFilename)
-
-
-fixedHyphenations = {"Gammaproteobacteria":"Gammaproteo-\nbacteria"}
-def hyphenate(s):
-    if s in fixedHyphenations:
-        return fixedHyphenations[s]
-    else:
-        spacepos = s.find(" ")
-        if spacepos > 4:
-            return s.replace(" ", "\n")
-        else:
-            if len(s) < 10:
-                return s
-
-            slashpos = s.find("/") 
-            if slashpos > 4:
-                return s.replace("/", "/\n")
+#             slashpos = s.find("/") 
+#             if slashpos > 4:
+#                 return s.replace("/", "/\n")
             
-            return "%s-\n%s" % (s[:9], s[9:])
+#             return "%s-\n%s" % (s[:9], s[9:])
     
 
 def plotRegressionEffectsByGroup():
@@ -112,26 +72,30 @@ def plotRegressionEffectsByGroup():
     df = pd.read_csv( csvRegressionEffectsByGroupCsv )
     print(df)
 
-    baseFontSize = 25
 
     allExplanatoryVars = set(df['ExplanatoryVar'])
 
-    significanceLevel = 1e-2
+    allRanges = list(sorted(set(df['Range'])))
 
     with Display(backend='xvnc') as disp:  # Plotting requires an X session
 
-        for var in allExplanatoryVars:
+        # Helper function for plotting a single tree, for the specified trait and with data from all specified ranges
+        def plotSingleTree( var, ranges ):
+            print("Plotting tree for trait %s (ranges: %s)" % (var, ranges))
+
+            assert(type(ranges)==type(()))
+
             ts = TreeStyle()
             ts.show_branch_length = False
             ts.show_leaf_name = False
-            ts.scale = 60     # scale for branch length
+            ts.scale = 130     # scale for branch length
             #ts.rotation = 90
             ts.rotation = 0
-            ts.min_leaf_separation = 5
-            
+            ts.min_leaf_separation = 250
+
 
             tree = majorGroupsTree.copy()
-            
+
             taxidsToKeep = set(df[df['ExplanatoryVar']==var]['TaxGroup'].values)
 
             def nodeLayoutFunc(node):
@@ -139,59 +103,95 @@ def plotRegressionEffectsByGroup():
 
                 if taxid in taxidsToKeep:
                     taxGroupName = ncbiTaxa.get_taxid_translator([taxid])[taxid]  # There has to be an easier way to look up names...
+
+                    row = None
+                    rangeRows = None
                     
-                    row =  df[(df['ExplanatoryVar'] == var) & (df['TaxGroup'] == taxid)]
-                    effectSize = float(row['EffectSize'].values[0])
-                    pval = float(row['Pvalue'].values[0])
+                    if( len(ranges) == 1 ):
+                        row       =  df[(df['ExplanatoryVar'] == var) & (df['TaxGroup'] == taxid) & (df['Range'] == ranges[0]) ]
+                        assert(len(row)==len(ranges))
+                    elif len(ranges) > 1:
+                        row       =  df[(df['ExplanatoryVar'] == var) & (df['TaxGroup'] == taxid) & (df['Range'] == 0) ]
+                        assert(len(row)==1)
+                        rangeRows =  df[(df['ExplanatoryVar'] == var) & (df['TaxGroup'] == taxid) & (df['Range'].isin(set(ranges))) ]
+                    else:
+                        assert(False)
+                        
+                    overallPval = float(row['Pvalue'].values[0])
 
-                    significanceMarker = ""
-                    if( pval < significanceLevel ):
-                        significanceMarker = " (*)" #unichr(0x2731)
-
-                    #name = TextFace("%s\np-val=%.1g%s\nR^2=%.2g\n(N=%d)" % (hyphenate(taxGroupName), pval, significanceMarker, effectSize, row['NumSpecies']) )#, fsize=baseFontSize) #, fstyle="italic")
-                    name = TextFace("%s" % hyphenate(taxGroupName), fsize=baseFontSize*1.5 ) #, pval, significanceMarker ) ) #, significanceMarker, effectSize, row['NumSpecies']), fsize=baseFontSize) #, fstyle="italic")
-                    #name = TextFace("%s" % hyphenate(taxGroupName), fsize=baseFontSize) #, fstyle="italic")
-                    #print("[%s]" % hyphenate(taxGroupName))
-                    #name.rotation = -90
+                    name = TextFace("%s" % taxGroupName, fsize=baseFontSize*2.5 )
+                    name.tight_text=True
                     name.margin_left=20
                     name.margin_right=0
-                    name.margin_top=60
-                    name.margin_bottom=40
-                    #faces.add_face_to_node(name, node, column=1)
+                    name.margin_top=40
+                    name.margin_bottom=12
                     faces.add_face_to_node(name, node, column=0)
 
-                    details = TextFace("p-val=%.1g%s\nR^2=%.2g\n(N=%d)" % ( pval, significanceMarker, effectSize, row['NumSpecies']), fsize=baseFontSize )#, fsize=baseFontSize) #, fstyle="italic")
-                    #details = TextFace("%s\np-val=%.3g%s" % (hyphenate(taxGroupDetails), pval, significanceMarker ) ) #, significanceMarker, effectSize, row['NumSpecies']), fsize=baseFontSize) #, fstyle="italic")
-                    #details = TextFace("%s" % hyphenate(taxGroupDetails), fsize=baseFontSize) #, fstyle="italic")
-                    #print("[%s]" % hyphenate(taxGroupDetails))
-                    #details.rotation = -90
-                    details.margin_left=20
-                    details.margin_right=0
-                    details.margin_top=10
-                    details.margin_bottom=90
-                    #faces.add_face_to_node(details, node, column=1)
-                    faces.add_face_to_node(details, node, column=0)
-                    
+                    #print(rangeRows)
 
-                        
-                    #v = RectFace(width=effectSize*70, height=baseFontSize*2, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g %s" % (effectSize, significanceMarker), "fontsize":baseFontSize+1, "color":"black" } )
-                    #v.rotation = -90
-                    #faces.add_face_to_node(v, node, column=1)
-                    
+                    # For each range to be included in this plot, add a bar
+                    for rangeId in ranges:
+                        #print("rangeId = %s" % (rangeId))
+
+                        rowForThisRange = None
+
+                        if len(ranges)==1:
+                            rowForThisRange =  row
+                        else:
+                            rowForThisRange =  rangeRows[rangeRows['Range'] == rangeId]
+                            
+                        assert(len(rowForThisRange)==1)
+
+                        # Extract p-value and "effect-size" (signed R^2)
+                        effectSize = float(rowForThisRange['EffectSize'].values[0])
+                        pval       = float(rowForThisRange['Pvalue'].values[0])
+
+                        # Set bar-graph color and significance markers
+                        barColor = ""
+                        significanceMarker = ""
+                        if( pval < significanceLevel ):
+                            significanceMarker = " %s" % unichr(0x2731)
+                            
+                            if effectSize < 0:
+                                barColor = "#1133ff"
+                            else:
+                                barColor = "#ff3311"
+                        else:  # not significant
+                            if effectSize < 0:
+                                barColor = "#b0b0f0"
+                            else:
+                                barColor = "#ccb090"
+
+                        # Add the minus sign if needed
+                        signChar = ""
+                        if effectSize < 0:
+                            signChar = unichr(0x2212)  # minus sign (more legible than a hypen...)
+                                
+                        v = RectFace(width=abs(effectSize)*barScale, height=baseFontSize*3.5, fgcolor=barColor, bgcolor=barColor, label={"text":"%s%.2g %s" % (signChar, abs(effectSize), significanceMarker), "fontsize":baseFontSize*1.8, "color":"black" } )
+                        #v.rotation = -90
+                        v.margin_top=1
+                        v.margin_left=30
+                        v.margin_right=8
+                        v.margin_bottom=12
+                        faces.add_face_to_node(v, node, column=0)
+
+
+                    details = TextFace("N=%d" % row['NumSpecies'], fsize=baseFontSize*1.5 )#, fsize=baseFontSize) #, fstyle="italic")
+                    details.background.color = "#dfdfdf"
+                    details.margin_left=6
+                    details.margin_right=20
+                    #details.margin_top=5
+                    #details.margin_bottom=0
+                    faces.add_face_to_node(details, node, column=1)
+
                     nstyle = NodeStyle()
-                    nstyle["size"] = math.sqrt( abs(effectSize) / math.pi ) * 400   # choose radius such that the area is proportional to effect size (since perception is proportional to area, not radius)
-                    nstyle["shape"] = "sphere"
-                    if( pval < significanceLevel ):
-                        nstyle["fgcolor"] = "#1133ff"
-                    else:
-                        nstyle["fgcolor"] = "#90b0cc"
-                        
+                    nstyle["size"] = 0
+
                     node.set_style(nstyle)
-                    # TODO - add text
-                    
-            
+
+
             ts.layout_fn = nodeLayoutFunc
-            
+
             # Annotate tree nodes
             nodesToKeep = []
             for node in tree.traverse():
@@ -200,11 +200,29 @@ def plotRegressionEffectsByGroup():
 
             tree.prune(nodesToKeep)
 
+            rangesStr = ""
+            if len(ranges)==1:
+                rangesStr = str(ranges[0])
+            else:
+                rangesStr = "_".join(map(str, ranges))
 
-            tree.render('regressionByTaxgroup_%s.pdf' % var, tree_style=ts, units="mm")
-            tree.render('regressionByTaxgroup_%s.svg' % var, tree_style=ts, units="mm")
-        
-    
+            tree.render('regressionByTaxgroup_%s_range_%s.pdf' % (var, rangesStr), tree_style=ts, units="mm")
+            tree.render('regressionByTaxgroup_%s_range_%s.svg' % (var, rangesStr), tree_style=ts, units="mm")
+            # End of plotSingleTree()
+            #-----------------------------------------------------------
+            
+
+        for var in allExplanatoryVars:
+            # Results are organized by taxon and by range. Non-zero ranges are defined in tree_traits_effects_analysis_with_taxgroups.r.
+            # The range '0' covers the entire section analyzed (i.e., the pyramid width in the same file).
+            # For each trait, we will output one tree for per range, plus an extra tree showing all non-zero ranges.
+            # e.g., if there are three ranges, we will output the following plots: [0], [1], [2], [3], [1,2,3].
+            # The [0] range is useful for traits for which there is no dependence on the range, and the [1,2,3] is good for traits in
+            # which there is such dependendece.
+            for ranges in list(map( lambda x: (x,), allRanges)) + [tuple(sorted(set(allRanges)-set((0,)))),]:
+                #print("%s %s" % (var, ranges))
+                plotSingleTree( var, ranges )
+            
 
 
 def test():
