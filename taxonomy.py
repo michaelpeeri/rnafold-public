@@ -295,6 +295,9 @@ class ProfileDataTileGenerator(object):
 def testTileFunc(taxId):
     return "heatmap_profile_taxid_511145.png"
 
+
+
+
 """
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
@@ -422,11 +425,11 @@ def standalone():
     
     argsParser = argparse.ArgumentParser()
     argsParser.add_argument("--use-profile-data", type=str, default="")
-    argsParser.add_argument("--test", action="store_true", default=False)
+    argsParser.add_argument("--use-hug-reference-tree", action="store_true", default=False)
     args = argsParser.parse_args()
 
 
-    if( args.test ):
+    if( args.use_hug_reference_tree ):
         taxa = getSpeciesToInclude()
         (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa)
         drawTrees( completeTree, prunedTree, args=args )
