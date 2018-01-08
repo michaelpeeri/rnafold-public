@@ -12,7 +12,7 @@ plt.style.use('ggplot') # Use the ggplot style
 from sklearn import decomposition
 import data_helpers
 import species_selection_data
-from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, scatterPlot, loadProfileData
+from mfe_plots import heatmaplotProfiles, scatterPlot, loadProfileData
 from fit_profile_params import getEstimatedParams
 from ncbi_entrez import getTaxonomicGroupForSpecies
 
@@ -415,12 +415,7 @@ def standalone():
     order = PCA(biasProfiles, xdata)
 
     orderMap = dict(order)
-    yrange = heatmaplotProfiles(biasProfiles, 'MFEbias', dfProfileCorrs, [], None, lambda x: orderMap[x] )
-
-    #tileFilename = getProfileHeatmapTile(511145, biasProfiles, dfProfileCorrs, yrange)
-    #print(tileFilename)
-
-    #order2 = PCAforParams(params)
+    yrange = heatmaplotProfiles(biasProfiles, dfProfileCorrs, lambda x: orderMap[x] )
 
     print("---------")
     params = {}

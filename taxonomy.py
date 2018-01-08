@@ -270,29 +270,22 @@ def drawTrees(completeTree, prunedTree, args=None):
     return 0
 
 
-
-reMatchH5file_find_taxid = re.compile("(\w+_)+taxid_(\d+)(_\w+)+.h5")
+"""
+Plot each profile separataly, and return the filename of a 'tile' that can be included in other graphs.
+"""
 class ProfileDataTileGenerator(object):
     def __init__(self, files, biasProfiles, dfProfileCorrs):
         self._biasProfiles = biasProfiles
         self._dfProfileCorrs = dfProfileCorrs
 
-        self._yrange = heatmaplotProfiles(biasProfiles, None, dfProfileCorrs, None)
-        
-        #self._h5files = {}
-        #self.parse_files(files)
-        #print(self._h5files)
-
-    #def parse_files(self, files):
-    #    for fn in files:
-    #        match = reMatchH5file_find_taxid.match(fn)
-    #        if match:
-    #            taxid = int(match.group(2))
-    #            self._h5files[taxid] = fn
+        self._yrange = heatmaplotProfiles(biasProfiles, dfProfileCorrs)
 
     def getProfileTile(self, taxid):
-        return getProfileHeatmapTile(taxid, self._biasProfiles, self._dfProfileCorrs, self._yrange)
-    
+        return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange)
+
+    """
+    Return a free function that will return a tile based on the taxid
+    """
     def getProfileTileFunc(self):
         return lambda x: self.getProfileTile(x)
                 
@@ -443,12 +436,13 @@ def standalone():
         return 0
     else:
         files = []
+
         if args.use_profile_data:
             files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
 
         print("Loading profile data for %d files..." % len(files))
         (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
-            
+
         tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs)
         
         #return plotSpeciesOnTaxonomicTree()

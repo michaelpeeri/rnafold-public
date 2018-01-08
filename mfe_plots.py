@@ -224,7 +224,13 @@ class CenterPreservingNormlizer(matplotlib.colors.Normalize):
         return 1/(1+np.exp(-steepness*(values-0.5)))
 
 
-def getProfileHeatmapTile(taxId, data, dummy, yrange):
+"""
+Plot the profile for a single species (contained in 'data'), save into a file, and return its name.
+ taxId   - taxId of the species to plot
+ data    - profile data for multiple species (including the one specified by taxId...)
+ yrange  - y-range scale (this allows all tiles to have the same scale)
+"""
+def getProfileHeatmapTile(taxId, data, yrange):
     if not taxId in data:
         return None
 
@@ -262,8 +268,11 @@ def getProfileHeatmapTile(taxId, data, dummy, yrange):
     return tileFilename
     
     
-
-def heatmaplotProfiles(data, dummy1, corrData, dummy2, dummy3=None, order=None):
+"""
+Plot all profiles together on a single page (this is not really legible when there are more than a few profiles...)
+Also used to return the y-range encompassing all profiles (so they are all displayed using the same scale).
+"""
+def heatmaplotProfiles(data, corrData, order=None):
     fig, axes = plt.subplots(nrows=len(data), ncols=2, sharex='col') #, gridspec_kw={'width_ratios': [4,1]})
 
     keysInOrder = data.keys()[:]
