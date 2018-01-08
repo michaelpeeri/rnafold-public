@@ -425,11 +425,11 @@ def standalone():
     
     argsParser = argparse.ArgumentParser()
     argsParser.add_argument("--use-profile-data", type=str, default="")
-    argsParser.add_argument("--use-hug-reference-tree", action="store_true", default=False)
+    argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed"), default="taxonomic")
     args = argsParser.parse_args()
 
 
-    if( args.use_hug_reference_tree ):
+    if( args.use_tree=="hug" ):
         taxa = getSpeciesToInclude()
         (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa)
         drawTrees( completeTree, prunedTree, args=args )
@@ -437,7 +437,11 @@ def standalone():
         savePrunedTree( prunedTree )
 
         return 0
-    else:
+    
+    elif( args.use_tree=="taxonomic-collapsed" ):
+        pass
+    
+    elif( args.use_tree=="taxonomic" ):
         files = []
 
         if args.use_profile_data:
