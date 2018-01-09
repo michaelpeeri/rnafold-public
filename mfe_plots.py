@@ -10,6 +10,7 @@ plt.style.use('ggplot') # Use the ggplot style
 from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty
 import seaborn as sns
 from ncbi_entrez import getTaxonomicGroupForSpecies
+from rate_limit import RateLimit
 
 
 def plotMFEProfileWithGC(taxId, profileId, data):
@@ -588,6 +589,8 @@ def loadProfileData(files):
         'gene_density':pd.Series(dtype='float')
     })
 
+    rl = RateLimit(10)
+
     for h5 in files:
         with pd.io.pytables.HDFStore(h5) as store:
             for key in store.keys():
@@ -601,7 +604,6 @@ def loadProfileData(files):
                 taxGroup = getTaxonomicGroupForSpecies(taxId)
                 longTaxName = getSpeciesName(taxId)
                 shortTaxName = shortenTaxName(taxName)
-                print(taxName)
 
                 df = store[key]
                 df = df.iloc[:-1]  # remove the last value (which is missing)
@@ -656,7 +658,6 @@ def loadProfileData(files):
                 geneDensity = None
                 if( (not genomeSize is None) and (not proteinCount is None)  ):
                     geneDensity = float(proteinCount)/genomeSize
-                print(geneDensity)
 
                     
                 summaryStatistics = summaryStatistics.append(pd.DataFrame({
@@ -711,6 +712,9 @@ def loadProfileData(files):
 
                 #groups.append( choice(('Bacteria', 'Archaea', 'Fungi', 'Plants')) )   # Testing only!!!
                 groups.append( taxGroup )
+
+                if( rl() ):
+                    print("Loaded %d profiles (%.2g%%)" % (filesUsed, float(filesUsed)/len(files)*100))
 
     return (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics)
 
