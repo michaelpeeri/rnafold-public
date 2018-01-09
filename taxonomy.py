@@ -2,16 +2,59 @@ from data_helpers import allSpeciesSource, getSpeciesTemperatureInfo, getSpecies
 import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, faces, AttrFace, PhyloTree
+import numpy as np
 from plot_xy import loadProfileData
 from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile
 from reference_trees import pruneReferenceTree_Nmicrobiol201648
 from ncbi_taxa import ncbiTaxa
+from cluster_profiles import analyzeProfileClusters
 
-
+# ---------------------------------------------------------
 # configuration
+# ---------------------------------------------------------
+# Length at which to truncate taxon names
 maxDisplayNameLength = 27
+
+# Exclusion and inclusion list
 speciesToExclude = frozenset((405948,999415,946362,470, 158189, 1307761, 456481, 505682, 1280, 4932, 508771, 2850, 753081 ))
-speciesToInclude = frozenset()
+speciesToInclude = frozenset()  # If non empty, only these species will be included
+
+# Master font scale (points)
+fontScale = 14
+
+
+#
+# Collapsed-tree plotting
+#
+# Distance threshold for deciding how many clusters to use for a given taxon
+max_rms_distance_to_merge_clusters = 0.04
+# Taxons below this level will be merged
+collapedTaxonomicTreeLevel = 4
+# Font-size for the taxon name at each level
+levelFontSizes = {0: 1.5, 1: 2.1, 2:1.8, 3:1.5}
+# Display distance between centroids (to help choose max_rms_distance_to_merge_clusters)
+showInterCentroidDistances = False
+# Use fixed Y scale (TODO - use adaptive scale, as in the other profile plots)
+fixedYscale = 2.9
+# For K-means, choose the number of initial points to use
+#n_init=10000
+n_init=5000
+
+# ---------------------------------------------------------
+# Choose plot format:
+#
+# single-page (long)
+kingdomPageAssignment_SinglePage = {2: 0,     # Bacteria
+                                    2759: 0,  # Eukaryotes
+                                    2157: 0}  # Archaea
+# 2-page
+kingdomPageAssignment_2page      = {2: 1,     # Bacteria
+                                    2759: 0,  # Eukaryotes
+                                    2157: 0}  # Archaea
+
+kingdomPageAssignment = kingdomPageAssignment_2page
+
+# ---------------------------------------------------------
 
 
 
@@ -54,21 +97,21 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
     level = len(node.get_ancestors())
     if( level==1 or level==2 or level==3):
         if node.name:
-            name = AttrFace("name", fsize=9)
+            name = AttrFace("name", fsize=fontScale)
             ########faces.add_face_to_node(n, node, 0, position="float")
             faces.add_face_to_node(name, node, column=0)
 
-        tf = TextFace(len(node.get_leaves()), fsize=12)
+        tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
         faces.add_face_to_node(tf, node, column=1, position="float")
         
     elif( level==0 ):
-        tf = TextFace(len(node.get_leaves()), fsize=12)
+        tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
         tf.margin_right = 5
         faces.add_face_to_node(tf, node, column=1, position="float")
 
     elif node.is_leaf():
         assert(node.name)
-        name = AttrFace("name", fsize=9, fstyle="italic")
+        name = AttrFace("name", fsize=fontScale, fstyle="italic")
         faces.add_face_to_node(name, node, column=0)
 
         #-------------------------------
@@ -204,7 +247,7 @@ def simpleNodeLayoutFunc(node):
             l = int(node.name)
             binomicName = ncbiTaxa.get_taxid_translator([l])[l]  # There has to be an easier way to look up names...
             #name = AttrFace("name", fsize=12, fstyle="italic")
-            name = TextFace(binomicName, fsize=12, fstyle="italic")
+            name = TextFace(binomicName, fsize=fontScale*1.5, fstyle="italic")
             faces.add_face_to_node(name, node, column=0)
 
     else:
@@ -214,7 +257,7 @@ def simpleNodeLayoutFunc(node):
             if not k is None:
                 #binomicName = ncbiTaxa.get_taxid_translator([k])[k]  # There has to be an easier way to look up names...
 
-                name = TextFace(k, fsize=12)
+                name = TextFace(k, fsize=fontScale*1.5)
                 #print("--- %s" % l)
                 faces.add_face_to_node(name, node, column=0)
 
@@ -226,7 +269,7 @@ def simpleNodeLayoutFunc(node):
             if not l is None:
                 binomicName = ncbiTaxa.get_taxid_translator([l])[l]  # There has to be an easier way to look up names...
 
-                name = TextFace(binomicName, fsize=12)
+                name = TextFace(binomicName, fsize=fontScale*1.5)
                 #print("--- %s" % l)
                 faces.add_face_to_node(name, node, column=1)
 
@@ -247,7 +290,7 @@ def drawTrees(completeTree, prunedTree, args=None):
     print("Loading profile data for %d files..." % len(files))
     (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
             
-    tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs)
+    tileGenerator = ProfileDataTileGenerator(files, biasProfiles)
 
     ts = TreeStyle()
     #ts.mode = "c"
@@ -274,11 +317,10 @@ def drawTrees(completeTree, prunedTree, args=None):
 Plot each profile separataly, and return the filename of a 'tile' that can be included in other graphs.
 """
 class ProfileDataTileGenerator(object):
-    def __init__(self, files, biasProfiles, dfProfileCorrs):
+    def __init__(self, files, biasProfiles):
         self._biasProfiles = biasProfiles
-        self._dfProfileCorrs = dfProfileCorrs
 
-        self._yrange = heatmaplotProfiles(biasProfiles, dfProfileCorrs)
+        self._yrange = heatmaplotProfiles(biasProfiles)  # plot all profiles, to determine a single color-scale that will fit them all
 
     def getProfileTile(self, taxid):
         return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange)
@@ -388,6 +430,171 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None):
 
     return 0
 
+
+def makeProfilesArray(keys, biasProfiles):
+    if( not keys ):
+        raise Exception("No keys specified")
+
+    # Filter keys with missing profiles
+    keysFound = [key for key in keys if key in biasProfiles]
+    if( not keysFound ):
+        raise Exception("No profiles found matching requested keys: %s..." % str(keys))
+
+    # Find out the length of the profile
+    profileLength = biasProfiles[keysFound[0]].shape[0]  # We will use the length of the first profile, and later verify the following profiles match
+    assert(profileLength > 3)
+
+    # Copy the profiles into an array
+    out = np.zeros( (len(keysFound), profileLength ) )
+    for i, key in enumerate(keysFound):
+        out[i,:] = biasProfiles[key]
+
+    return out
+
+def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
+    level = len(node.get_ancestors())
+    taxId = int(node.name)
+    nodeName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
+    members = groupMembers[taxId]
+        
+    if level > 0:
+        name = TextFace(nodeName, fsize=fontScale*levelFontSizes[level])
+        faces.add_face_to_node(name, node, column=0)
+
+        
+    if( level >= collapedTaxonomicTreeLevel - 2 ):
+        assert(node.name)
+
+        tile = None
+
+        profilesArray = makeProfilesArray( members, biasProfiles )
+
+        #print("//// %d %s" % (level, profilesArray.shape))
+
+        if( profilesArray.shape[0] == 1 ):
+            #if not taxId in biasProfiles:
+            #    print("TaxId %d not found" % taxId)
+                
+            tileDummyId = 1900000000+taxId*10
+
+            tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, (-fixedYscale,fixedYscale) )
+
+            if not tile is None:
+                profileFace = faces.ImgFace(tile, width=150, height=fontScale, is_url=False)
+                profileFace.margin_top = 4   # separate this taxon's profiles from the next
+                faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
+
+                countFace = faces.TextFace( "1", fsize=fontScale )
+                countFace.background.color = "#dfdfdf"
+                countFace.margin_right = 3
+                faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
+
+            else:
+                print("No node <- Level: %d profilesArray: %s" % (level, profilesArray.shape))
+                
+        else:
+            # Perform clustering
+            centers, labels, dist = analyzeProfileClusters( profilesArray, n_init, max_rms_distance_to_merge_clusters )
+            groupCounts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each group
+            
+            for i in range(centers.shape[0]):
+                tileDummyId = 1900000000+taxId*10+i
+
+                tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, (-fixedYscale,fixedYscale) )
+
+                if not tile is None:
+                    profileFace = faces.ImgFace(tile, width=150, height=fontScale, is_url=False)
+                    profileFace.margin_bottom = 2   # separate this taxon's profiles from the next
+                    if i==0:
+                        profileFace.margin_top = 4   # separate this taxon's profiles from the next
+                    faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
+
+                    countFace = faces.TextFace( groupCounts[i], fsize=fontScale )
+                    countFace.background.color = "#dfdfdf"
+                    countFace.margin_right = 3
+                    faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
+
+                    if showInterCentroidDistances:
+                        distFace = faces.TextFace( "%.3g" % dist, fsize=fontScale )
+                        #distFace.background.color = "#dfdfdf"
+                        distFace.margin_left = 7
+                        distFace.margin_right = 3
+                        faces.add_face_to_node(distFace, node, column=3 )#, aligned=True)
+
+                else:
+                    print("No node <- Level: %d  Id: %d profilesArray: %s" % (level, i, profilesArray.shape))
+
+    else:
+        countFace = faces.TextFace( len(members), fsize=fontScale )
+        countFace.background.color = "#dfdfdf"
+        countFace.margin_right = 3
+        faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
+        
+        
+
+
+def plotCollapsedTaxonomicTree(biasProfiles):
+    allTaxa = getSpeciesToInclude()
+
+    # ---------------------------------------------------------
+    collapsedTaxa = set()
+    groupMembers = {}
+    
+    for taxid in allTaxa:
+        lineage = ncbiTaxa.get_lineage(taxid)
+
+        group = lineage[collapedTaxonomicTreeLevel]
+
+        # Create a mapping containing all leaves found under a grouping taxon
+        for ancestor in lineage[:collapedTaxonomicTreeLevel+1]:
+            if ancestor in groupMembers:
+                groupMembers[ancestor].append( taxid )
+            else:
+                groupMembers[ancestor] = [taxid]
+
+        collapsedTaxa.add(group)
+
+
+    def filterTaxaByPage(taxa, pageToInclude):
+        out = set()
+        for taxid in taxa:
+            lineage = ncbiTaxa.get_lineage(taxid)
+            taxonPage = kingdomPageAssignment[lineage[2]]
+            if taxonPage == pageToInclude:
+                out.add(taxid)
+        return out
+            
+    
+    with Display(backend='xvnc') as disp:  # Plotting requires an X session
+        
+        def plotCollapsedTree(taxa, i):
+            print("Page %d (%d taxons)" % (i, len(taxa)))
+            
+            # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
+            # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
+            # In this case, we provide mid-level taxons to get the "collapsed" tree
+            tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
+
+
+            # Plot the tree
+            ts = TreeStyle()
+            ts.show_leaf_name = False
+            ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles)
+
+
+            h = int(round(len(taxa)*0.25, 0))
+            tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=7, h=h, units="mm")
+            tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=7, h=h, units="mm")
+
+        for pageNum in sorted(set(kingdomPageAssignment.values())):
+            plotCollapsedTree(filterTaxaByPage(collapsedTaxa, pageNum), pageNum)
+    
+    print("------------------ Ignore error message ------------------")
+    # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
+
+    return 0
+
+
 def savePrunedTree(tree):
     tree.write(format=1, outfile="nmicro_s6_pruned_with_names.nw")
     
@@ -439,7 +646,16 @@ def standalone():
         return 0
     
     elif( args.use_tree=="taxonomic-collapsed" ):
-        pass
+
+        if( not args.use_profile_data ):
+            raise Exception()
+        
+        files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
+        
+        print("Loading profile data for %d files..." % len(files))
+        (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+        
+        return plotCollapsedTaxonomicTree(biasProfiles)
     
     elif( args.use_tree=="taxonomic" ):
         files = []
@@ -450,7 +666,7 @@ def standalone():
         print("Loading profile data for %d files..." % len(files))
         (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
 
-        tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs)
+        tileGenerator = ProfileDataTileGenerator(files, biasProfiles)
         
         #return plotSpeciesOnTaxonomicTree()
         return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc())
