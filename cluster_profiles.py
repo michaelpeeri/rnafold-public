@@ -26,6 +26,14 @@ def analyzeProfileClusters(profilesArray, n_init=10000, max_rms_distance_to_merg
         if len(centers) == 2:
             dist = metrics.mean_squared_error(centers[0], centers[1])
         assert(len(centers) <= 2 )
+
+        # Sort the centeroids so they appear in a consistent order; update the labels accordingly
+        counts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each cluster
+        centers_order = np.argsort( -np.array(counts) ) # sort in descending order
+        assert(centers_order.shape == (n_clusters,))
+        centers = centers[centers_order,:]  # sort the centeroids
+        labels = [centers_order[x] for x in labels]  # update the labels to match the sorted centroids
+        
         
         results[n_clusters] = (centers, labels, dist)
         #print("%d\t%g\t%g" % (n_clusters,
