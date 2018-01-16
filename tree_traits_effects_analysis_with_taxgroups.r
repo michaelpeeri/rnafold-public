@@ -287,6 +287,16 @@ taxidToKingdom$tax_id <- as.character(taxidToKingdom$tax_id)  # Convert the taxi
 traits <- traits %>% left_join(taxidToKingdom, by="tax_id")  # Perform the merge
 rownames(traits) <- traits$tax_id  # Restore the tax_ids index
 
+traits$HighGC <- (traits$GenomicGC >  50) + 0
+traits$LowGC  <- (traits$GenomicGC <= 50) + 0
+
+traits$GC.0.40   <- (traits$GenomicGC <= 40) + 0
+traits$GC.40.60  <- (traits$GenomicGC >= 40) & (traits$GenomicGC <= 60) + 0
+traits$GC.60.100 <- (traits$GenomicGC >= 60) + 0
+
+traits$TempHighLow75   <- as.factor(traits$OptimumTemp > 75)
+print(traits$TempHighLow75)
+
 
 stopifnot(nrow(traits) > 300 )  # sanity test
 #stopifnot(ncol(traits) == profileLen+7 )
@@ -966,15 +976,20 @@ glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, p
     if( is.na(ret[[1]]) ) { return( NA ) }
     traits <- ret[[1]]
     tree   <- ret[[2]]
+    stopifnot( nTips(tree) == nrow(traits) ) # after filtering, the tree must still match the traits array
         
     if( is.null(tree) || nTips(tree) < minimalTaxonSize )
     {
         return( NA )
     }
 
-    N <- nTips(tree)
+    if( any(class(traits[,studyTrait])==c("factor")) && nlevels(as.factor(as.numeric(traits[,studyTrait]))) < 2 )
+    {
+        print("Only one level remaining...")
+        return( NA )
+    }
     
-    return( glsRegressionRangeAnalysis( traits, tree, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, N ) ) )
+    return( glsRegressionRangeAnalysis( traits, tree, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits) ) ) )
 }
 
 # These are the names the of taxon membership variables
@@ -1097,6 +1112,33 @@ for( gr in taxGroups )
     }
 }
 
+
+for( gr in taxGroups )
+{
+    print(gr)
+    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "TempHighLow75", c(1,pyramidLength))
+
+    # Store peaks (for each range) for this group
+    if( any( class(results) == "data.frame" ) && nrow(results) )
+    {
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+        # Iterate over each range to find the relevant peak
+        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+        {
+            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("TempHighLow75"), Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+        }
+    }
+}
+
+
+
+
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 #dev.off()  # TESTING ONLY
 #write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )    # TESTING ONLY
@@ -1173,6 +1215,13 @@ for( gr in taxGroups )
 }
 
 
+glsRangeAnalysisWithFilter( traits, tree, "HighGC",    "OptimumTemp", c(1,pyramidLength))
+glsRangeAnalysisWithFilter( traits, tree, "LowGC",     "OptimumTemp", c(1,pyramidLength))
+glsRangeAnalysisWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", c(1,pyramidLength))
+glsRangeAnalysisWithFilter( traits, tree, "GC.40.60",  "OptimumTemp", c(1,pyramidLength))
+glsRangeAnalysisWithFilter( traits, tree, "GC.60.100", "OptimumTemp", c(1,pyramidLength))
+
+
 performGLSregressionWithFilter( traits, tree, "Member_Flavobacteriales_200644", "GenomicGC", "Profile.18" )
 
 
@@ -1204,6 +1253,65 @@ performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",       
 
 performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.17" )
 performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.28" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.18" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.21" )
+
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.1" )
+performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.1" )
+performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.1" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.5" )
+performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.5" )
+performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.5" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.10" )
+performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.10" )
+performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.10" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.15" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.20" )
+performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.20" )
+performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.20" )
+
+
+performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.1" )
+performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.1" )
+performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.1" )
+
+performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.10" )
+performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.10" )
+performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.10" )
+
+performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.15" )
+
+performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.20" )
+performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.20" )
+performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.20" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.1"   )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.5"   )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.11"  )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.15"  )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.19"  )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.24"  )
+
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.1"  )
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.5"  )
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.11" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.19" )
+performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.24" )
+
 
 
 dev.off()
