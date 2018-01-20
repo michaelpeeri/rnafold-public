@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import pandas as pd
 from math import log10
+from bisect import bisect_left
 from scipy.stats import pearsonr, spearmanr, kendalltau, linregress, wilcoxon
 import matplotlib
 matplotlib.use("cairo")
@@ -231,7 +232,7 @@ Plot the profile for a single species (contained in 'data'), save into a file, a
  data    - profile data for multiple species (including the one specified by taxId...)
  yrange  - y-range scale (this allows all tiles to have the same scale)
 """
-def getProfileHeatmapTile(taxId, data, yrange):
+def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10):
     if not taxId in data:
         return None
 
@@ -256,10 +257,14 @@ def getProfileHeatmapTile(taxId, data, yrange):
     #taxDescriptor = "%s.%s" % (taxname[0], taxname[1:9])
     #fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
 
-    #ax.set_title(taxId)
     ax.set_yticks(())
-    ax.set_xticks(())
-    #ax.tick_params
+    if ticks:
+        tickValues = range(10, len(series)-10, 10)
+        ax.set_xticks(tickValues)
+        ax.set_xticklabels(["" for x in tickValues])
+    else:
+        ax.set_xticks(())
+            
 
     tileFilename = "heatmap_profile_taxid_%d.svg" % taxId
     plt.savefig(tileFilename, orientation='portrait', bbox_inches='tight')
@@ -267,7 +272,58 @@ def getProfileHeatmapTile(taxId, data, yrange):
     plt.close(fig)
 
     return tileFilename
+
+
+"""
+Plot the profile for a single species (contained in 'data'), save into a file, and return its name.
+ taxId   - taxId of the species to plot
+ data    - profile data for multiple species (including the one specified by taxId...)
+ yrange  - y-range scale (this allows all tiles to have the same scale)
+"""
+def getLegendHeatmapTile(yrange):
+    assert(len(yrange) == 2)
+    assert(yrange[0] <= yrange[1])
     
+    fig, ax = plt.subplots()
+
+    series = np.linspace( 10**yrange[0], 1 - 10**(-yrange[1]), 100)  # Create a range whose logit image will cover the range yrange...
+    #series = np.linspace( yrange[0], yrange[1], 100)   # linear scale
+    series = np.log10(series/(1-series))  # Logit function (inverse if logistic function)
+    #print(series)
+    cmapNormalizer = CenterPreservingNormlizer(yrange[0], yrange[1])
+
+    imdata = series
+    imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
+
+    ax.imshow( imdata, cmap='coolwarm', aspect=2.0, norm=cmapNormalizer )
+
+    def roundTowardZero(x):
+        if x < -0.5:
+            return round(x)+1
+        elif x > 0.5:
+            return round(x)-1
+        else:
+            return 0
+
+    #ax.set_title(taxId)
+    ax.set_yticks(())
+    #ax.axis(xmin=yrange[0], xmax=yrange[1])
+    tick_values = list(sorted(list(range(int(roundTowardZero(yrange[0])), int(roundTowardZero(yrange[1]))+1 )) + [-0.5, 0.5]))  # Put ticks at integer intervals, plus two special ticks at -.5 and .5 (since this regions spans much of the graph)
+    #print(tick_values)
+    tick_positions = [bisect_left(series, x) for x in tick_values]  # use bisect to find the approximate position of each tick
+    #print(tick_positions)
+    
+    ax.set_xticks( tick_positions ) # set tick positions
+    ax.set_xticklabels( ["%.2g" % x for x in tick_values], size="xx-large" )  # set tick labels
+
+    tileFilename = "heatmap_profile_legend.png"
+    plt.savefig(tileFilename, orientation='landscape', bbox_inches='tight', dpi=600)
+    plt.close(fig)
+
+    return tileFilename
+    
+
+
     
 """
 Plot all profiles together on a single page (this is not really legible when there are more than a few profiles...)

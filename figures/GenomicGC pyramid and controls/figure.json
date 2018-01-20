@@ -1,0 +1,60 @@
+{
+    "plotOutput" :
+    {
+        "width":  1120,
+        "height": 768,
+        "fileName": "GenomicGC pyramid and controls.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/GenomicGC pyramid and controls/tree_phenotypes_regression.out.by.taxgroups.66.all.dLFE.pdf.png",
+            "x": 0.01,
+            "y": 0.09,
+            "w": 0.72,
+            "h": 0.72
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/GenomicGC pyramid and controls/tree_phenotypes_regression.out.nativeLFE.by.taxgroups.41.pdf.png",
+            "x": 0.72,
+            "y": 0.12,
+            "w": 0.45,
+            "h": 0.39
+        },
+        {
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/GenomicGC pyramid and controls/tree_phenotypes_regression.out.shuffledLFE.by.taxgroups.41.GC.all.pdf.png",
+            "x": 0.72,
+            "y": 0.58,
+            "w": 0.45,
+            "h": 0.39
+        },         
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/GenomicGC pyramid and controls/heatmap_profile_taxid_99990010.svg.png",
+            "x": 0.035,
+            "y": 0.84,
+            "w": 0.675,
+            "h": 0.12
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/GenomicGC pyramid and controls/heatmap_profile_legend.png",
+            "x": 0.308,
+            "y": 0.88,
+            "w": 0.40,
+            "h": 0.25
+        }
+    ],
+    "annotations" :
+    [
+        {
+            "text": "\u0394LFE",
+            "x": 0.25,
+            "y": 0.91,
+            "size": 20
+        }
+    ]
+}

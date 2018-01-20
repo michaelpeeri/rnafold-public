@@ -1,0 +1,27 @@
+{
+    "plotOutput" :
+    {
+        "width":  1120,
+        "height": 785,
+        "fileName": "Profile diversity.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Profile diversity/alltaxa.collapsed.0.pdf.png",
+            "x": 0.00,
+            "y": 0.00,
+            "w": 0.50,
+            "h": 1.00
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Profile diversity/alltaxa.collapsed.1.pdf.png",
+            "x": 0.50,
+            "y": 0.00,
+            "w": 0.50,
+            "h": 1.00
+        }
+    ]
+}
