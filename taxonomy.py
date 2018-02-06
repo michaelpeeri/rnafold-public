@@ -1,10 +1,11 @@
 from data_helpers import allSpeciesSource, getSpeciesTemperatureInfo, getSpeciesProperty
 import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
-from ete3 import Tree, TreeStyle, NodeStyle, TextFace, faces, AttrFace, PhyloTree
+from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, AttrFace, PhyloTree
+#from PyQt4 import QtCore, QtGui
 import numpy as np
 from plot_xy import loadProfileData
-from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile
+from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, getLegendHeatmapTile
 from reference_trees import pruneReferenceTree_Nmicrobiol201648
 from ncbi_taxa import ncbiTaxa
 from cluster_profiles import analyzeProfileClusters
@@ -20,25 +21,35 @@ speciesToExclude = frozenset((405948,999415,946362,470, 158189, 1307761, 456481,
 speciesToInclude = frozenset()  # If non empty, only these species will be included
 
 # Master font scale (points)
-fontScale = 14
+fontScale = 16
 
+# Dimensions for drawing profiles
+profileDrawingWidth  = 150
+profileDrawingHeight = fontScale
+
+#
+profileStepNt  = 10
+profileWidthNt = 40
 
 #
 # Collapsed-tree plotting
 #
 # Distance threshold for deciding how many clusters to use for a given taxon
-max_rms_distance_to_merge_clusters = 0.04
+#max_distance_to_split_clusters = 1.10
+max_distance_to_split_clusters = 1.30
+# Maximum number of clusters (for each taxon)
+max_clusters = 15
 # Taxons below this level will be merged
 collapedTaxonomicTreeLevel = 4
 # Font-size for the taxon name at each level
 levelFontSizes = {0: 1.5, 1: 2.1, 2:1.8, 3:1.5}
-# Display distance between centroids (to help choose max_rms_distance_to_merge_clusters)
+# Display distance between centroids (to help choose max_distance_to_split_clusters)
 showInterCentroidDistances = False
 # Use fixed Y scale (TODO - use adaptive scale, as in the other profile plots)
 fixedYscale = 2.9
 # For K-means, choose the number of initial points to use
 #n_init=10000
-n_init=5000
+n_init=1000
 
 # ---------------------------------------------------------
 # Choose plot format:
@@ -122,7 +133,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
             tile = tileFunc(node.taxId)
             
         if not tile is None:
-            profileFace = faces.ImgFace(tile, width=150, height=10, is_url=False) # no support for margin_right?
+            profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False) # no support for margin_right?
             faces.add_face_to_node(profileFace, node, column=1, aligned=True)
 
         #proteinCount = getSpeciesProperty(taxId, 'protein-count')
@@ -300,6 +311,7 @@ def drawTrees(completeTree, prunedTree, args=None):
     ts.show_leaf_name = False
     ts.layout_fn = simpleNodeLayoutFunc
     ts.scale = 1000
+    #ts.branch_vertical_margin = 10  # Y-axis spacing
     
     with Display(backend='xvnc') as disp:  # Plotting requires an X session
         drawTree( completeTree, 'nmicro_s6',        tree_style=ts,  w=300, h=3000, units="mm")
@@ -354,6 +366,7 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None):
     
     ts = TreeStyle()
     ts.show_leaf_name = False
+    #ts.branch_vertical_margin = 10  # Y-axis spacing
     ts.layout_fn = makeNodeLayoutFuncWithTiles( nodeLayoutWithTaxonomicNames, tileFunc )
     ts.aligned_header.add_face(TextFace("LFE"), column=1)
     ts.aligned_header.add_face(TextFace("GC%"), column=2)
@@ -456,6 +469,10 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
     taxId = int(node.name)
     nodeName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
     members = groupMembers[taxId]
+
+    nstyle = NodeStyle()
+    nstyle["size"] = 0     # hide node symbols
+    node.set_style(nstyle)
         
     if level > 0:
         name = TextFace(nodeName, fsize=fontScale*levelFontSizes[level])
@@ -480,7 +497,7 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
             tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, (-fixedYscale,fixedYscale) )
 
             if not tile is None:
-                profileFace = faces.ImgFace(tile, width=150, height=fontScale, is_url=False)
+                profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
                 profileFace.margin_top = 4   # separate this taxon's profiles from the next
                 faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
 
@@ -494,7 +511,7 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                 
         else:
             # Perform clustering
-            centers, labels, dist = analyzeProfileClusters( profilesArray, n_init, max_rms_distance_to_merge_clusters )
+            centers, labels, dist = analyzeProfileClusters( profilesArray, n_init, max_distance_to_split_clusters, max_clusters )  # use default metric
             groupCounts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each group
             
             for i in range(centers.shape[0]):
@@ -503,19 +520,21 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                 tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, (-fixedYscale,fixedYscale) )
 
                 if not tile is None:
-                    profileFace = faces.ImgFace(tile, width=150, height=fontScale, is_url=False)
+                    profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=fontScale, is_url=False)
                     profileFace.margin_bottom = 2   # separate this taxon's profiles from the next
                     if i==0:
-                        profileFace.margin_top = 4   # separate this taxon's profiles from the next
+                        profileFace.margin_top = 8   # separate this taxon's profiles from the next
                     faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
 
-                    countFace = faces.TextFace( groupCounts[i], fsize=fontScale )
+                    countFace = faces.TextFace( groupCounts[i], fsize=fontScale*0.95 )
                     countFace.background.color = "#dfdfdf"
                     countFace.margin_right = 3
+                    countFace.margin_top = 0
+                    countFace.margin_bottom = 0
                     faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
 
                     if showInterCentroidDistances:
-                        distFace = faces.TextFace( "%.3g" % dist, fsize=fontScale )
+                        distFace = faces.TextFace( "%.4g" % dist, fsize=fontScale )
                         #distFace.background.color = "#dfdfdf"
                         distFace.margin_left = 7
                         distFace.margin_right = 3
@@ -525,7 +544,7 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                     print("No node <- Level: %d  Id: %d profilesArray: %s" % (level, i, profilesArray.shape))
 
     else:
-        countFace = faces.TextFace( len(members), fsize=fontScale )
+        countFace = faces.TextFace( len(members), fsize=fontScale*1.5 )
         countFace.background.color = "#dfdfdf"
         countFace.margin_right = 3
         faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
@@ -576,21 +595,82 @@ def plotCollapsedTaxonomicTree(biasProfiles):
             tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
 
 
-            # Plot the tree
+            # Configure tree plotting settings
             ts = TreeStyle()
             ts.show_leaf_name = False
+            ts.branch_vertical_margin = 6  # Y-axis spacing
             ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles)
+            ts.show_scale = False
+            ts.margin_top = 25
+            ts.margin_bottom = 50
 
 
+            # Create figure legend
+            #if i==max(kingdomPageAssignment.values()):  # only on last page
+            if i==0:                                     # only on first page
+
+                ts.legend_position = 1 #=top left
+
+                lastProfileStart = (biasProfiles[biasProfiles.keys()[0]].shape[0] - 1) * profileStepNt
+                widthFor100nt = profileDrawingWidth * (100. / lastProfileStart)
+                scaleFace = faces.RectFace( width=widthFor100nt, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
+                scaleFace.margin_top     = 10
+                scaleFace.margin_bottom  = 5
+                scaleFace.margin_left    = 20
+                scaleFace.margin_right   = 50
+                ts.legend.add_face( scaleFace, column=0 )
+                scaleFaceText = TextFace("100 bp", fsize=fontScale*1.5 )
+                scaleFaceText.margin_top = 0
+                ts.legend.add_face( scaleFaceText, column=0 )
+                
+                widthForWindow = profileDrawingWidth * (float(profileWidthNt) / lastProfileStart)
+                windowWidthFace = faces.RectFace( width=widthForWindow, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
+                windowWidthFace.margin_top    = 10
+                windowWidthFace.margin_bottom = 5
+                windowWidthFace.margin_left   = 20
+                windowWidthFace.margin_right  = 50
+                ts.legend.add_face( windowWidthFace, column=1 )
+                windowWidthFace = TextFace("40 bp", fsize=fontScale*1.5 )
+                windowWidthFace.margin_top    = 0
+                ts.legend.add_face( windowWidthFace, column=1 )
+                
+                # Draw color scale
+                
+                #ts.legend.add_face( TextFace(unichr(0x1d6ab)+"LFE", fsize=12    ), column=0 )
+                #ts.legend.add_face( TextFace("\xf0\x9d\x9a\xab"+"LFE", fsize=12    ), column=0 )
+                dLFEFace = TextFace("dLFE", fsize=fontScale*2.0    )
+                dLFEFace.margin_bottom = 0
+                ts.legend.add_face( dLFEFace, column=2 )
+
+                unitsFace = TextFace("kcal/mol/window", fsize=fontScale*1.5 )
+                unitsFace.margin_top = 0
+                ts.legend.add_face( unitsFace, column=2 )
+                
+                legendColorScaleTile = getLegendHeatmapTile((-fixedYscale, fixedYscale))
+                legendColorScaleFace = faces.ImgFace(legendColorScaleTile, width=480, height=80, is_url=False) # no support for margin_right?
+                ts.legend.add_face( legendColorScaleFace, column=3 )
+
+                # Test rich text plotting, using Qt (this didn't work...)
+                #txtItem = QtGui.QGraphicsTextItem( "Hello, World! " + unichr(0x1d6ab)+ "LFE" )
+                #txtItem = QtGui.QGraphicsSimpleTextItem()
+                #txtItem.setPlainText( QtCore.QString( "Hello, World! " ) )   # <-- This step crashes the interpreter silently
+                
+                #siFace = StaticItemFace(txtItem)
+                #siFace.width = 100
+                #siFace.height = 20
+                #ts.legend.add_face( siFace, column=5 )
+
+            # Render and save the tree
             h = int(round(len(taxa)*0.25, 0))
             tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=7, h=h, units="mm")
             tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=7, h=h, units="mm")
 
+        # Plot each page (with a different subset of the tree)
         for pageNum in sorted(set(kingdomPageAssignment.values())):
             plotCollapsedTree(filterTaxaByPage(collapsedTaxa, pageNum), pageNum)
     
     print("------------------ Ignore error message ------------------")
-    # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
+    # Display is about to close; how can we disconnect cleanly? (to prevent "Client Killed" message...)
 
     return 0
 
