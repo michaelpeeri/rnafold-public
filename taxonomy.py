@@ -4,11 +4,11 @@ from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, AttrFace, PhyloTree
 #from PyQt4 import QtCore, QtGui
 import numpy as np
-from plot_xy import loadProfileData
-from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, getLegendHeatmapTile
+from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles
 from reference_trees import pruneReferenceTree_Nmicrobiol201648
 from ncbi_taxa import ncbiTaxa
 from cluster_profiles import analyzeProfileClusters
+
 
 # ---------------------------------------------------------
 # configuration
@@ -50,6 +50,10 @@ fixedYscale = 2.9
 # For K-means, choose the number of initial points to use
 #n_init=10000
 n_init=1000
+
+
+# Phylosignal profiles
+#phylosignalProfilesFile = "phylosignalLipaOutputFile.csv"
 
 # ---------------------------------------------------------
 # Choose plot format:
@@ -301,7 +305,11 @@ def drawTrees(completeTree, prunedTree, args=None):
     print("Loading profile data for %d files..." % len(files))
     (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
             
-    tileGenerator = ProfileDataTileGenerator(files, biasProfiles)
+    phylosignalProfiles = None
+    if( args.use_phylosignal_data ):
+        phylosignalProfiles = loadPhylosignalProfiles( args.use_phylosignal_data )
+        
+    tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
 
     ts = TreeStyle()
     #ts.mode = "c"
@@ -329,13 +337,16 @@ def drawTrees(completeTree, prunedTree, args=None):
 Plot each profile separataly, and return the filename of a 'tile' that can be included in other graphs.
 """
 class ProfileDataTileGenerator(object):
-    def __init__(self, files, biasProfiles):
+    def __init__(self, files, biasProfiles, corrData, phylosignalProfiles=None):
         self._biasProfiles = biasProfiles
 
-        self._yrange = heatmaplotProfiles(biasProfiles)  # plot all profiles, to determine a single color-scale that will fit them all
+        self._yrange = heatmaplotProfiles(biasProfiles, corrData)  # plot all profiles, to determine a single color-scale that will fit them all
+
+        self._phylosignalProfiles = phylosignalProfiles
+        print(self._phylosignalProfiles.keys())
 
     def getProfileTile(self, taxid):
-        return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange)
+        return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange, phylosignalProfiles=self._phylosignalProfiles)
 
     """
     Return a free function that will return a tile based on the taxid
@@ -350,13 +361,11 @@ def testTileFunc(taxId):
     return "heatmap_profile_taxid_511145.png"
 
 
-
-
 """
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
 """
-def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None):
+def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile=""):
     taxa = getSpeciesToInclude()
 
     if tree is None:
@@ -713,8 +722,12 @@ def standalone():
     argsParser = argparse.ArgumentParser()
     argsParser.add_argument("--use-profile-data", type=str, default="")
     argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed"), default="taxonomic")
+    argsParser.add_argument("--use-phylosignal-data", type=str, default="")
     args = argsParser.parse_args()
 
+    phylosignalProfiles = None
+    if( args.use_phylosignal_data ):
+        phylosignalProfiles = loadPhylosignalProfiles( args.use_phylosignal_data )
 
     if( args.use_tree=="hug" ):
         taxa = getSpeciesToInclude()
@@ -746,10 +759,10 @@ def standalone():
         print("Loading profile data for %d files..." % len(files))
         (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
 
-        tileGenerator = ProfileDataTileGenerator(files, biasProfiles)
+        tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
         
         #return plotSpeciesOnTaxonomicTree()
-        return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc())
+        return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc() )
 
 
 if __name__=="__main__":

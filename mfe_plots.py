@@ -232,41 +232,63 @@ Plot the profile for a single species (contained in 'data'), save into a file, a
  data    - profile data for multiple species (including the one specified by taxId...)
  yrange  - y-range scale (this allows all tiles to have the same scale)
 """
-def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10):
+def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None):
     if not taxId in data:
         return None
 
     assert(len(yrange)==2)
     assert(yrange[0] < yrange[1])
     
-    fig, ax = plt.subplots()
+    #fig, ax = plt.subplots()
+    fig, (ax1,ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
 
+    # read profile data
     series = data[taxId]
-    cmapNormalizer = CenterPreservingNormlizer(yrange[0], yrange[1])
+    
+    cmapNormalizer        = CenterPreservingNormlizer(yrange[0], yrange[1])
+    phylosignalNormalizer = CenterPreservingNormlizer(np.min(phylosignalProfiles.values), np.max(phylosignalProfiles.values) )
 
-    imdata = np.array(series)
-    imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
+    # read phylosignal profile (if used)
+    phylosignalProfile = None
+    if( not phylosignalProfiles is None and taxId in phylosignalProfiles.index ):
+        phylosignalProfile = phylosignalProfiles.loc[taxId,:]
+        if( len(series) != len(phylosignalProfile) ):
+            print(series)
+            print(phylosignalProfile)
+        if( len(series) < len(phylosignalProfile) ):
+            phylosignalProfile = phylosignalProfile[:len(series)]
+            assert(phylosignalProfile.index[0] == "Profile.1")
+            assert(len(phylosignalProfile)==len(series))
+        print( "Got phylosignal for {}".format(taxId) )
+
+
+    imdata = np.array(series).reshape(1,-1)
+    #imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
 
     #ax.axis(xmin=series.index[0], xmax=series.index[-1])
 
-    ax.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
+    ax1.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
 
-    pos = list(ax.get_position().bounds)
+    if( not phylosignalProfile is None ):
+        ax2.imshow( phylosignalProfile.values.reshape(1,-1), cmap='coolwarm', aspect='auto', norm=phylosignalNormalizer )
 
+
+    #pos = list(ax1.get_position().bounds)
     #taxname = getSpeciesFileName(taxId)
     #taxDescriptor = "%s.%s" % (taxname[0], taxname[1:9])
     #fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
 
-    ax.set_yticks(())
+    ax1.set_yticks(())
+    ax2.set_yticks(())
     if ticks:
         tickValues = range(10, len(series)-10, 10)
-        ax.set_xticks(tickValues)
-        ax.set_xticklabels(["" for x in tickValues])
+        ax1.set_xticks(tickValues)
+        ax1.set_xticklabels(["" for x in tickValues])
     else:
-        ax.set_xticks(())
+        ax1.set_xticks(())
             
 
-    tileFilename = "heatmap_profile_taxid_%d.svg" % taxId
+    tileFilename = "heatmap_profile_taxid_%d.png" % taxId
     plt.savefig(tileFilename, orientation='portrait', bbox_inches='tight')
     #plt.savefig("heatmap_profile_taxid_%d.svg" % taxId, orientation='portrait')
     plt.close(fig)
@@ -774,3 +796,8 @@ def loadProfileData(files):
 
     return (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics)
 
+def loadPhylosignalProfiles( phylosignalFile ):
+    df = None
+    with open(phylosignalFile, 'r') as csvfile:
+        df = pd.read_csv(csvfile, sep=',', dtype={"":np.int}, index_col=0 )
+    return df
