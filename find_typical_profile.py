@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.neighbors import KernelDensity
 from sklearn.grid_search import GridSearchCV
 from sklearn.cross_validation import KFold, LeaveOneOut
-from mfe_plots import loadProfileData
+from mfe_plots import loadProfileData, getProfileHeatmapTile, getLegendHeatmapTile
 
 
 # Configuration
@@ -21,6 +21,9 @@ fileglob = "gcdata_v2_taxid_*_profile_1000_10_begin_0.h5"
 profileLengthSamples = 31
 profileStep = 10
 typicalProfileOutputCSV = "find_typical_profile.out.profile.csv"
+fixedYrange = (-2.9, 2.9)
+#bwEstimationPoints = 1000
+bwEstimationPoints = 150
 
 def getFileNames():
     from glob import glob
@@ -65,7 +68,7 @@ plt.close()
 # Determine the optimal bandwidth, using cross-validation
 optimalBW = []
 for k in range(0,K,1):
-    bandwidths = 10 ** np.linspace(-2.0, 1, 1000)
+    bandwidths = 10 ** np.linspace(-2.0, 1, bwEstimationPoints)
     x1 = np.expand_dims(x[:,k], 1)
     
     cv = KFold(len(x1), n_folds=10)
@@ -152,6 +155,11 @@ plt.close()
 
 typicalProfilePd = pd.DataFrame( { "CDS_position": np.linspace(0, v, len(estimatedValues)),  "Profile": estimatedValues, "Optimal_KDE_BW": optimalBW } )
 typicalProfilePd.to_csv( typicalProfileOutputCSV )
+
+
+print(getProfileHeatmapTile( 99990010, pd.DataFrame( { 99990010 : estimatedValues } ), fixedYrange, True, profileStep ))
+
+print(getLegendHeatmapTile( fixedYrange ))
 
 
 
