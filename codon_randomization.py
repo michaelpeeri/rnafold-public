@@ -87,8 +87,8 @@ class SynonymousCodonPermutingRandomization(object):
         identity = float(identityCount)/len(seq)
 
         # refuse returning a sequence identical to the source (even though it is a valid permutation)
-        if( self._skipIdenticalSequences and identity > 0.9999 ):
-            return self.randomize(nucleotideSeq)
+        #if( self._skipIdenticalSequences and identity > 0.9999 ):
+        #    return self.randomize(nucleotideSeq)
 
         # warn if the permutation only effects a small number of positions
         # note: identities are normally over 67%
