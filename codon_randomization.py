@@ -1,4 +1,4 @@
-from itertools import compress
+from itertools import compress, chain, imap
 from copy import copy
 from math import factorial
 import random
@@ -31,8 +31,11 @@ def applyCodonsPermutation(mutableSeq, newCodons, positions):
     for newCodon, pos in zip(newCodons, positions):
         mutableSeq[pos] = newCodon
 
+negate = lambda p: imap( lambda x: not x, p ) # return a sequence where each element is negated
+        
 class SynonymousCodonPermutingRandomization(object):
     """
+    Args:
     skipIdenticalSequences - refuse returning sequences identical to the source (even though they are valid permutation). This means the sampling from the population of random perumtations is done without replacement; This can be thought of as either distorting the distribution or avoiding distrortion; The difference is only noticeble for sequences which have a very small number of permutations (compared to the number actually generated).
     """
     def __init__(self, geneticCode=1, skipIdenticalSequences=True):
@@ -76,7 +79,7 @@ class SynonymousCodonPermutingRandomization(object):
         # refuse providing permutations if the number of possible permutations is very small
         if(permutationsCount < 50):
             print("Warning: sequence only has %d possible permutations" % permutationsCount)
-            raise Exception("Sequence only has %d possible permutations" % permutationsCount)
+            #raise Exception("Sequence only has %d possible permutations" % permutationsCount)
 
         # calculate nucleotide identity to the original sequence
         identityCount = sum([x==y for x,y in zip(''.join(randomizedCodonsSeq), seq)])
@@ -97,23 +100,108 @@ class SynonymousCodonPermutingRandomization(object):
         assert(Seq(resultingSeq).translate(table=self._code) == origSeqTranslation)  # translation was not maintained by randomization!
         return (permutationsCount, identity, resultingSeq)
 
+    """
+    nucleotideSeq - nucleotide coding sequence (using the species genetic code). Length must be divisible by 3.
+                    Start and end codons are not treated specially.
+    codonMask - List of logical values of length nucleotideSeq/3 (not nucleotideSeq!)
+                True  = randomize this codon
+                False = keep this codon
+    """
+    def randomizeWithMask(self, nucleotideSeq, codonMask):
+        assert( len(nucleotideSeq)%3 == 0 )   # length must be divisible by 3
+        nucleotideMask = list(chain(*zip(codonMask,codonMask,codonMask))) # repeat each element of codonMask 3 times
+        assert( len(nucleotideMask) == len(nucleotideSeq) )  
 
-def test():
+        originalMaskedNucleotides   = ''.join(compress( nucleotideSeq,        nucleotideMask  ))
+        unmaskedNucleotides         = ''.join(compress( nucleotideSeq, negate(nucleotideMask) ))
+        assert( len(originalMaskedNucleotides)+len(unmaskedNucleotides) == len(nucleotideSeq) )   # each nucleotide must be included in exactly one subset
+        maskedFraction = float(sum(nucleotideMask))/len(nucleotideSeq)  # the fraction of masked nucleotides (will be used to calculate %identity)
+
+        if len(originalMaskedNucleotides) == 0:   # Masked (randomized area) covers nothing - just return the original sequence
+            return (1, 100.0, nucleotideSeq)
+
+        origSeqTranslation = Seq( nucleotideSeq ).translate(table=self._code)
+        
+        (permutationsCount, identity, randomizedMaskedNucleotides) = self.randomize( originalMaskedNucleotides )
+
+        idxMasked   = iter(range(len(originalMaskedNucleotides)))
+        idxUnmasked = iter(range(len(unmaskedNucleotides)))
+
+        resultingSeq = ''.join(imap( lambda isMasked: randomizedMaskedNucleotides[next(idxMasked)] if isMasked else unmaskedNucleotides[next(idxUnmasked)],
+                            nucleotideMask ))
+        assert( len(resultingSeq) == len(nucleotideSeq) )
+        #for i in range(0, len(nucleotideSeq), 40):
+        #    print("")
+        #    print( ''.join(map(lambda x: '+' if x else ' ', nucleotideMask[i:i+40] ) ) )
+        #    print( nucleotideSeq[i:i+40] )
+        #    print(           ret[i:i+40] )
+
+        assert( all( map( lambda x: True if x[2] else x[0]==x[1],  zip( resultingSeq, nucleotideSeq, nucleotideMask ) ) ) ) # all unmasked nucleotide must remain unchanged
+        assert(Seq(resultingSeq).translate(table=self._code) == origSeqTranslation)  # translation was not maintained by randomization!
+        identity = identity*maskedFraction + 1.0*(1-maskedFraction)
+        
+        return (permutationsCount, identity, resultingSeq)
+        
+        
+
+#map( lambda x: x[1] if x[0] else x[2], zip( [0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1], [8]*20, [1]*20 ) )
+
+def testCountRandomizations(N=50000):
     c = SynonymousCodonPermutingRandomization()
     s = set()
+    testSeq  = 'atcccgcgcccacctaataacacagcgatcagaccgctcagaccacatatacgatcggactcg'
+    #testSeq  = 'atcccgcgcccacctaataacacagcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcg'
     totalPermutationsCount = None
-    testSeq = 'atcccgcgcccacctaataacacagcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcg'
-    #testSeq =  'atcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccaata'
-    #testSeq =  'atcgcggcagcagcg'
-    for i in range(1000):
+    for i in range(N):
         totalPermutationsCount, identity, perm = c.randomize(testSeq)
         s.add( perm )
     print('-----------------')
-    print('Found %d randomizations' % len(s))
+    print('Iters: %d; Found %d unique randomizations' % (N, len(s)))
     print('Sequence length: %d codons' % (len(testSeq)/3))
     print('Total randomizations: %g' % float(totalPermutationsCount))
     return 0
 
+def testMaskedRandomization(N=10000):
+    c = SynonymousCodonPermutingRandomization()
+    s = set()
+    totalPermutationsCount = None
+    #
+    #testSeq =  'atcgcggcagcagcggcggcggcggcggca'
+    #testMask = [  0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+    #testMask = [  0, 0, 0, 0, 0, 0,  1, 1, 1, 1]
+    #
+    testSeq  = 'atcccgcgcccacctaataacacagcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcg'
+    #testMask = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    #
+    #testSeq  =       'atcccgcgcccacctaataacacagcgatcagaccgctcagaccacatatacgatcggactcg'
+    #testMask =       [  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    #
+    #testSeq  =  'xxxxxxatcccgcgcccacctaataacacagcgatcagaagaagaagaagaccgctcagaccacatatacgatcggactcgcccccccccccc'
+    #testMask =  [  0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
+    #
+    #testSeq  = 'atctaataaatcccgcgcccacctaataacacagcgatcagaagaagaagaagaccgctcagaccacatatacgatcggactcgtatacgatcgga'
+    #testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
+
+    assert(len(testSeq)/3==len(testMask))
+    for i in range(N):
+        totalPermutationsCount, identity, perm = c.randomizeWithMask(testSeq, testMask)
+        s.add( perm )
+    print('-----------------')
+    print('Iters: %d; Found %d randomizations' % (N, len(s)))
+    print('Sequence length: %d codons' % (len(testSeq)/3))
+    print('Total randomizations: %g' % float(totalPermutationsCount))
+    return 0
+
+def testAll():
+    ret = testCountRandomizations(N=1000)
+    if ret: return ret
+
+    ret = testMaskedRandomization(N=20000)
+    if ret: return ret
+    return 0
+
+
 if __name__=="__main__":
     import sys
-    sys.exit(test())
+    sys.exit(testAll())
