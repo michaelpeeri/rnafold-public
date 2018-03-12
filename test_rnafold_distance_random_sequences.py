@@ -1,3 +1,6 @@
+"""
+Compare distance between paired nucleotides in native and random sequences
+"""
 from __future__ import print_function
 from math import log
 from time import time
