@@ -7,6 +7,18 @@ config_file = sys.argv[1]
 annotationsFont = "Arial"
 
 
+
+def addAnnotation( ctx, x, y, size, _, annotationConfig ):
+    ctx.save()
+    ctx.translate( x, y )
+    ctx.set_source_rgb( 0.0, 0.0, 0.0 )
+    ctx.select_font_face( annotationsFont ) 
+    ctx.set_font_size( size )
+    ctx.show_text( annotationConfig["text"] )
+    ctx.restore()
+
+
+
 def addPanel(ctx, label, filename, x, y, w, h, config, panelConfig):
     ctx.save()
 
@@ -41,13 +53,15 @@ def addPanel(ctx, label, filename, x, y, w, h, config, panelConfig):
     ctx.restore()
 
 
-    ctx.save()
-    ctx.translate( x, y-0.02 )
-    ctx.set_source_rgb( 0.0, 0.0, 0.0 )
-    ctx.select_font_face( annotationsFont )
-    ctx.set_font_size( 50 )
-    ctx.show_text( label )
-    ctx.restore()
+    # Add the annotation
+    # ctx.save()
+    # ctx.translate( x, y-0.02 )
+    # ctx.set_source_rgb( 0.0, 0.0, 0.0 )
+    # ctx.select_font_face( annotationsFont )
+    # ctx.set_font_size( 50 )
+    # ctx.show_text( label )
+    # ctx.restore()
+    addAnnotation( ctx, x, y-0.02, 50, config, dict(text=label) )
 
 
 def addPanelUsingConfig( ctx, config, panelConfig ):
@@ -65,16 +79,6 @@ def addPanelUsingConfig( ctx, config, panelConfig ):
         config,
         panelConfig
                    )
-
-
-def addAnnotation( ctx, x, y, size, config, annotationConfig ):
-    ctx.save()
-    ctx.translate( x, y )
-    ctx.set_source_rgb( 0.0, 0.0, 0.0 )
-    ctx.select_font_face( annotationsFont ) 
-    ctx.set_font_size( size )
-    ctx.show_text( annotationConfig["text"] )
-    ctx.restore()
 
 
 def addAnnotationUsingConfig( ctx, config, annotationConfig ):
@@ -102,10 +106,10 @@ def createPlot( config ):
     ctx.paint()
 
 
-
     for panelConfig in config["panels"]:
         addPanelUsingConfig( ctx, config, panelConfig )
 
+    # TODO - fix bug causing annotations after the first to appear in the wrong place
     if "annotations" in config:
         for annotationConfig in config["annotations"]:
             addAnnotationUsingConfig( ctx, config, annotationConfig )
