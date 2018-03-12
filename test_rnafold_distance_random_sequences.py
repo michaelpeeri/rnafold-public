@@ -14,7 +14,7 @@ matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
 import pandas as pd
-from data_helpers import getAllNativeCDSsForSpecies, decompressNucleicSequence, getSpeciesTranslationTable, countSpeciesCDS, getSpeciesName, allSpeciesSource
+from data_helpers import getAllNativeCDSsForSpecies, decompressNucleicSequence, getSpeciesTranslationTable, countSpeciesCDS, getSpeciesName, allSpeciesSource, nativeSequencesSource
 import _distributed
 import config
 from rnafold_vienna import RNAfoldWithStructure
@@ -184,13 +184,6 @@ class CodonEntropyCalculation(object):
         
 def roundH(x):
     return int(round(x,1)*10)
-
-
-def nativeSequencesSource(fraction, taxId, numFractions):
-    for (seqId, seqData) in getAllNativeCDSsForSpecies(taxId, fraction, numFractions).items():
-        cdsSeq = decompressNucleicSequence(seqData)
-        del seqData
-        yield (seqId, cdsSeq)
 
 class CalcStats(object):
     def __init__(self, taxId):
@@ -363,7 +356,7 @@ def testNativeDistances(fraction, taxId, numFractions):
     diffStats = CalcStats2(taxId)
     allNativeStats = CalcStats2(taxId)
     
-    for (seqId, seq) in nativeSequencesSource(fraction, taxId, numFractions):
+    for (seqId, seq) in nativeSequencesSource(taxId, fraction, numFractions):
 
         if random.randint(0,1)>0:
             continue
