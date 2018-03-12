@@ -1,6 +1,6 @@
 # Create report tables summarizing the data
 from ncbi_phyla_report import parseReport
-from data_helpers import allSpeciesSource
+from data_helpers import allSpeciesSource, getSpeciesName, countSpeciesCDS, getSpeciesProperty, nativeSequencesSource
 from collections import Counter
 import pandas as pd
 from ncbi_taxa import ncbiTaxa
@@ -208,12 +208,163 @@ def speciesByPhylaTable():
         print(skippedCounts)
         print("="*50)
 
+
+
+def calcNativeSequencesStatistics(taxId, fraction, numFractions):
+    
+    #countPairedNucleotides = 0
+    #countTotalNucleotides  = 0
+    cdsCount = 0
+    gcCount = 0
+    totalCount = 0
+    
+    
+    for seqId, seq in nativeSequencesSource(taxId, fraction, numFractions):
+        seq = seq.lower()
+
+        gcCount    += sum([1 for x in seq if (x=='c' or x=='g')])
+        totalCount += sum([1 for x in seq if (x=='c' or x=='g' or x=='a' or x=='t')])
+            
+        cdsCount += 1
+
+
+    #print("Total:  %d" % countTotalNucleotides)
+    #print("Paired: %d (%.3g%%)" % (countPairedNucleotides, float(countPairedNucleotides)/countTotalNucleotides*100))
+
+    return (taxId, fraction, cdsCount, gcCount, totalCount )
+
+        
+
+def speciesStatisticsAndValidityReport():
+    from random import randint
+    import _distributed
+    import dask
+
+    speciesDf = pd.DataFrame({
+        'TaxId': pd.Series([], dtype='int'),           # Species TaxId
+        'Species': pd.Series([], dtype='str'),         # Species binomial name
+        'Domain': pd.Categorical([]),                  # Bacteria, Eukaryota, Archaea
+        'Phylum': pd.Categorical([]),                  # Phylum name (string)
+        'NumCDSs': pd.Series([], dtype='int'),         # CDS count for this species
+        'AnnotatedNumCDSs': pd.Series([], dtype='int'),   # 
+        'CDSDifference': pd.Series([], dtype='float'), # 
+        'NumNativeSeqs': pd.Series([], dtype='int'),      # 
+        'GCContentInCDS': pd.Series([], dtype='float'), # 
+        'AnnotatedGCContent': pd.Series([], dtype='float'), # 
+        'RowType': pd.Categorical([]),                 # Species count or total
+        'Warnings': pd.Series([], dtype='str')         # 
+    })              
+    
+    scheduler = _distributed.open()
+
+    results = {}
+    delayedCalls = []
+    
+    for taxId in allSpeciesSource():
+
+        warnings = []
+   
+        cdsCountInRedis = countSpeciesCDS(taxId)
+
+        annotatedProteinCount = getSpeciesProperty(taxId, 'protein-count')[0]
+
+        annotatedGCContent = getSpeciesProperty(taxId, 'gc-content')[0]
+
+        proteinDifference = None
+        if not annotatedProteinCount is None:
+            proteinDifference = (1.0 - float(annotatedProteinCount) / float(cdsCountInRedis)) * 100.0
+
+            if abs(proteinDifference) > 9.9:
+                warnings.append("CDS_count")
+        else:
+            warnings.append("No_CDS_count")
+                
+
+        speciesDf = speciesDf.append(pd.DataFrame({
+            'TaxId': pd.Series([taxId], dtype='int'),                    # Species TaxId
+            'Species': pd.Series([getSpeciesName(taxId)], dtype='str'),       
+            'Domain': pd.Categorical(["-"]),                             # Bacteria, Eukaryota, Archaea
+            'Phylum': pd.Categorical(["-"]),                             # Phylum name (string)
+            'NumCDSs': pd.Series([cdsCountInRedis], dtype='int'),        # CDS count for this species
+            'AnnotatedNumCDSs': pd.Series([0 if annotatedProteinCount is None else annotatedProteinCount], dtype='int'),   # 
+            'CDSDifference': pd.Series([proteinDifference], dtype='float'), # 
+            'NumNativeSeqs': pd.Series([0], dtype='int'),                   # 
+            'GCContentInCDS': pd.Series([0.0], dtype='float'), # 
+            'AnnotatedGCContent': pd.Series([annotatedGCContent], dtype='float'), # 
+            'RowType': pd.Categorical(["species"]),                      # Species count or total
+            'Warnings': pd.Series([", ".join(warnings)], dtype='str')                       # 
+            }))
+
+        if randint(0, 4) > 0:
+            continue
+
+        fractionSize = 100   # How many sequences (roughly) to process in each task
+        numFractions = cdsCountInRedis/fractionSize
+        if numFractions == 0: numFractions = 1
+        
+        for i in range(numFractions):
+            call = dask.delayed( calcNativeSequencesStatistics )(taxId, i, numFractions)
+            delayedCalls.append( call )
+        
+
+    speciesDf.set_index('TaxId', inplace=True)
+
+    print("Starting %d calls..." % len(delayedCalls))
+
+    futures = scheduler.compute(delayedCalls) # submit all delayed calculations; obtain futures immediately
+
+    try:
+        _distributed.progress(futures) # wait for all calculations to complete
+    except Exception as e:
+        print(E)
+    print("\n")
+
+    print("Waiting for all tasks to complete...")
+    _distributed.wait(futures)
+
+    results = {}
+
+    errorsCount = 0
+    for f in futures:
+        try:
+            (taxId, fraction, cdsCount, gcCounts, totalCounts) = scheduler.gather(f)
+
+            current = None
+            if taxId in results:
+                current = results[taxId]
+            else:
+                current = (0, 0, 0)
+
+            current = (current[0] + cdsCount,
+                       current[1] + gcCounts,
+                       current[2] + totalCounts)
+
+            results[taxId] = current
+            
+        except Exception as e:
+            print(e)
+            errorsCount += 1
+
+    for taxId, result in results.items():
+        (numNativeSeqs, gcCounts, totalCounts) = result
+        speciesDf.at[taxId, 'NumNativeSeqs'] = numNativeSeqs
+
+        speciesDf.at[taxId, 'GCContentInCDS'] = float(gcCounts)/float(totalCounts)*100.0
+
+        #if numNativeSeqs < species.at[taxId, 'NumCDSs']:
+        #    pass
+    
+
+    speciesDf = speciesDf.sort_values(by=['Domain', 'Species' ])    # sort rows
+    speciesDf.to_html( 'species_report.html', float_format='{0:.1f}'.format, columns=['Species', 'NumCDSs', 'AnnotatedNumCDSs', 'CDSDifference', 'NumNativeSeqs', 'GCContentInCDS', 'AnnotatedGCContent', 'Phylum', 'Domain', 'Warnings'])
+    speciesDf.to_excel('species_report.xlsx', sheet_name='Species summary')
     
     
 
 
 def standalone():
-    speciesByPhylaTable()
+    #speciesByPhylaTable()
+    speciesStatisticsAndValidityReport()
     return 0
     
 
