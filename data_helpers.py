@@ -11,7 +11,10 @@ from math import floor
 from socket import gethostname
 from collections import Iterable, Set
 from os import getpid
-from cStringIO import StringIO
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
 from string import maketrans
 import redis
 from binascii import crc32
@@ -856,7 +859,7 @@ Update worker's heartbeat time; optionally, update job's progress counter
 SecsPerDay = float(24*60*60)
 def updateJobStatus_ItemCompleted( workerKey, itemCompleted=None ):
     # Send job keep-alive
-    timeSinceEpoch = datetime.datetime.utcnow() - datetime.datetime(2016, 06, 01)
+    timeSinceEpoch = datetime.datetime.utcnow() - datetime.datetime(2016, 6, 1)
     timeIndex = timeSinceEpoch.days + float(timeSinceEpoch.seconds)/SecsPerDay
 
     r.zadd( workerKeepAliveKey, timeIndex, workerKey)
