@@ -12,7 +12,7 @@ plt.style.use('ggplot') # Use the ggplot style
 from sklearn import decomposition
 import data_helpers
 import species_selection_data
-from mfe_plots import heatmaplotProfiles, scatterPlot, loadProfileData
+from mfe_plots import getHeatmaplotProfilesValuesRange, scatterPlot, loadProfileData, PCAForProfiles
 from fit_profile_params import getEstimatedParams
 from ncbi_entrez import getTaxonomicGroupForSpecies
 
@@ -287,41 +287,6 @@ def calcWilcoxonPvalue_method2(df2):
 
 
 
-def PCA(biasProfiles, xdata):
-    X = np.vstack(biasProfiles.values())
-    assert(len(X)==len(xdata))
-
-    pca = decomposition.PCA()
-    pca.fit(X)
-    print(pca.explained_variance_)
-
-    pca.n_components = 2
-    X_reduced = pca.fit_transform(X)
-    print(X_reduced.shape)
-
-    fig, ax = plt.subplots()
-    plt.scatter(X_reduced[:,0], X_reduced[:,1], label=[getTaxName(x)[:4] for x in biasProfiles.keys()])
-    for i, taxId in enumerate(biasProfiles.keys()):
-        x = X_reduced[i,0]
-        y = X_reduced[i,1]
-        label = getTaxName(taxId)[:4]
-        plt.annotate(label, (x+0.05, y-0.05), fontsize=7)
-
-    ax.set_aspect("equal")
-
-    plt.grid(True)
-    plt.savefig("pca_test.pdf")
-    plt.savefig("pca_test.svg")
-    plt.close(fig)
-    
-    a = list(zip(biasProfiles.keys(), X_reduced[:,0]))
-    a.sort(key=lambda x:x[1])
-    print("top:")
-    print(a[:3])
-    print("bottom:")
-    print(a[-3:])
-    return a
-
 
 def estimateProfileParams(xs, ys):
     return getEstimatedParams(xs, ys, [0.0, 20.0, 80.0], [1.0, 1.0, 8.0])
@@ -412,10 +377,11 @@ def standalone():
     plotSpeciesVars( summaryStatistics, 'gene_density',   'paired_fraction',     'short_tax_name', 'tax_group', 'gene_density_vs_paired_fraction_nolabels',   title, showSpeciesLabels=False  )
     
 
-    order = PCA(biasProfiles, xdata)
+    order = PCAForProfiles(biasProfiles, xdata)
 
     orderMap = dict(order)
-    yrange = heatmaplotProfiles(biasProfiles, dfProfileCorrs, lambda x: orderMap[x] )
+    #yrange = getHeatmaplotProfilesValuesRange(biasProfiles, dfProfileCorrs, lambda x: orderMap[x] )
+    # TODO - restore plotting?
 
     print("---------")
     params = {}

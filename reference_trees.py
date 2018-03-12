@@ -99,13 +99,21 @@ class FuzzyTaxonMatcher(object):
         
         
         
-def pruneTree(tree, keepNodes):
-    taxIds = set()
-    for x in keepNodes:
-        if not x.taxId is None:
-            taxIds.add(x.taxId)
+def pruneTree(tree, keepNodes=None, keepTaxIds=None, saveTreeAs=None):
 
-    print("Pruning, will keep %d nodes" % len(taxIds))
+    # Collect all taxids to keep (based on keepNodes and keepTaxIds):
+    _allTaxIdsToKeep = set()
+    # first, if we got nodes, extract the taxid from each one
+    if( not keepNodes is None ):
+        for x in keepNodes:
+            if not x.taxId is None:
+                _allTaxIdsToKeep.add(x.taxId)
+
+    # second, if we got taxids, also add them to the list of kept taxids
+    if( not keepTaxIds is None ):
+        _allTaxIdsToKeep = _allTaxIdsToKeep.union( frozenset(keepTaxIds) )
+
+    print("Pruning, will keep %d nodes" % len(_allTaxIdsToKeep))
 
     for node in tree.traverse(strategy='postorder'):
         childTaxIds = set()
@@ -118,7 +126,7 @@ def pruneTree(tree, keepNodes):
                 pass
         #print(len(childTaxIds))
 
-        if not taxIds.intersection(childTaxIds):
+        if not _allTaxIdsToKeep.intersection(childTaxIds):
             node.detach()
             #node.delete()
             #print(".")
@@ -133,16 +141,60 @@ def pruneTree(tree, keepNodes):
     tree.prune(nn, preserve_branch_length=True)
     print(len(tree))
 
-    print("Expected: %d  Actual: %d" % (len(taxIds), len(tree)))
-    tree.write(format=1, outfile="test_tree.nw")
+    print("Expected: %d  Actual: %d" % (len(_allTaxIdsToKeep), len(tree)))
+    if not saveTreeAs is None:
+        tree.write(format=1, outfile=saveTreeAs)
 
     #assert(len(tree) <= len(taxIds))
+    return tree
           
 
 def pruneTree2(tree, keepNodes):
     tree.prune(keepNodes)
             
 
+def pruneTreeByTaxonomy(tree, parentTaxonIdToKeep):
+    allKeepTaxIds = set()
+
+    # Collect all child taxons whose lineage includes the specified parent
+    for node in tree.traverse():
+        if node.is_leaf():
+            if (not node.taxId is None):
+                lineage = frozenset(ncbiTaxa.get_lineage(node.taxId))
+
+                if( parentTaxonIdToKeep in lineage ):
+                    allKeepTaxIds.add( node.taxId )
+
+    return pruneTree(tree, keepTaxIds=allKeepTaxIds )
+
+def getTaxidsFromTree(tree):
+    out = []
+    for node in tree.traverse():
+        if node.is_leaf():
+            if (not node.taxId is None):
+                out.append(node.taxId)
+    return out
+
+
+def extendTreeWithSpecies( tree, additionalSpecies, limitTaxonomy=None ):
+    
+    # Collect the tax-ids of all species included in the tree
+    realTreeSpecies = frozenset(getTaxidsFromTree(tree))
+
+    for taxId in additionalSpecies:
+        if taxId in realTreeSpecies: continue # this species is included in the tree, no need to append it
+
+        if not limitTaxonomy is None:
+            lineage = frozenset(ncbiTaxa.get_lineage(taxId))
+            if( not limitTaxonomy in lineage ):   # this species does not belong to the specified taxon
+                continue
+
+        # Create a compatible node for this species, and add it to the tree as an outgroup
+        newNode = tree.add_child( name=str(taxId), dist=0.1 )
+        newNode.add_features( taxId = taxId, label = taxId, dummyTopology = True )
+        
+    return tree
+    
 
 def readTranslationMap():
     treeNodeIdentifiersDf = pd.read_csv(nodeIdentifiersMappingTable_with_testing_csv, dtype={'NodeLabel': 'string', 'DBIdentifier': 'string', 'DBIdentifierType': 'category', 'TaxId': 'int32'} )

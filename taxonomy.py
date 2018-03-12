@@ -1,11 +1,13 @@
+# Note: use 'export OPENBLAS_NUM_THREADS=1'
+#       to limit automatica parallelization done by BLAS (during clustering)
 from data_helpers import allSpeciesSource, getSpeciesTemperatureInfo, getSpeciesProperty
 import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, AttrFace, PhyloTree
 #from PyQt4 import QtCore, QtGui
 import numpy as np
-from mfe_plots import heatmaplotProfiles, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles
-from reference_trees import pruneReferenceTree_Nmicrobiol201648
+from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange
+from reference_trees import pruneReferenceTree_Nmicrobiol201648, pruneTreeByTaxonomy, extendTreeWithSpecies, getTaxidsFromTree
 from ncbi_taxa import ncbiTaxa
 from cluster_profiles import analyzeProfileClusters
 
@@ -25,7 +27,7 @@ fontScale = 16
 
 # Dimensions for drawing profiles
 profileDrawingWidth  = 150
-profileDrawingHeight = fontScale
+profileDrawingHeight = fontScale*1.5
 
 #
 profileStepNt  = 10
@@ -35,21 +37,21 @@ profileWidthNt = 40
 # Collapsed-tree plotting
 #
 # Distance threshold for deciding how many clusters to use for a given taxon
-#max_distance_to_split_clusters = 1.10
-max_distance_to_split_clusters = 1.30
+#max_distance_to_split_clusters = 1.30  # previous level (with 4 levels)
+max_distance_to_split_clusters = 1.60
 # Maximum number of clusters (for each taxon)
-max_clusters = 15
+max_clusters = 9
 # Taxons below this level will be merged
-collapedTaxonomicTreeLevel = 4
+collapedTaxonomicTreeLevel = 3
 # Font-size for the taxon name at each level
 levelFontSizes = {0: 1.5, 1: 2.1, 2:1.8, 3:1.5}
 # Display distance between centroids (to help choose max_distance_to_split_clusters)
 showInterCentroidDistances = False
 # Use fixed Y scale (TODO - use adaptive scale, as in the other profile plots)
-fixedYscale = 2.9
+yScale = None
 # For K-means, choose the number of initial points to use
 #n_init=10000
-n_init=1000
+n_init=10000
 
 
 # Phylosignal profiles
@@ -108,23 +110,30 @@ habitatToColor = {'HostAssociated': 'LightPink' , 'Aquatic': 'LightSeaGreen', 'S
 
 algaeToColor = {'Yes': 'MediumTurquoise', 'No': 'LemonChiffon'}
 
-def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
+def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=False):
+    nstyle = NodeStyle()
+    node.set_style(nstyle)
+    
+    nstyle["size"] = 0     # hide node symbols
+    
+    
     level = len(node.get_ancestors())
-    if( level==1 or level==2 or level==3):
-        if node.name:
-            name = AttrFace("name", fsize=fontScale)
-            ########faces.add_face_to_node(n, node, 0, position="float")
-            faces.add_face_to_node(name, node, column=0)
+    if not node.is_leaf():
+        if( level==1 or level==2 or level==3):
+            if node.name:
+                name = AttrFace("name", fsize=fontScale)
+                ########faces.add_face_to_node(n, node, 0, position="float")
+                faces.add_face_to_node(name, node, column=0)
 
-        tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
-        faces.add_face_to_node(tf, node, column=1, position="float")
-        
-    elif( level==0 ):
-        tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
-        tf.margin_right = 5
-        faces.add_face_to_node(tf, node, column=1, position="float")
+            tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
+            faces.add_face_to_node(tf, node, column=1, position="float")
 
-    elif node.is_leaf():
+        elif( level==0 ):
+            tf = TextFace(len(node.get_leaves()), fsize=fontScale*1.5)
+            tf.margin_right = 5
+            faces.add_face_to_node(tf, node, column=1, position="float")
+
+    else: #node.is_leaf():
         assert(node.name)
         name = AttrFace("name", fsize=fontScale, fstyle="italic")
         faces.add_face_to_node(name, node, column=0)
@@ -134,11 +143,15 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
         #
         tile = None
         if not tileFunc is None:
+            print("Getting tile for {}...".format(node.taxId))
             tile = tileFunc(node.taxId)
+            print("...{}".format(tile))
             
         if not tile is None:
             profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False) # no support for margin_right?
             faces.add_face_to_node(profileFace, node, column=1, aligned=True)
+        else:
+            print("No tile for node {}".format(node.taxId))
 
         #proteinCount = getSpeciesProperty(taxId, 'protein-count')
         #if not proteinCount[0] is None:
@@ -162,88 +175,94 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None):
             genomicGCFace.margin_right = 5
             faces.add_face_to_node(genomicGCFace, node, column=2, aligned=True)
         
-            
-        #-------------------------------
-        # Temperature
-        #
-        (numericalProp, categoricalProp) = getSpeciesTemperatureInfo(node.taxId)
-        if categoricalProp[0] != "Unknown":
-            temperatureColor = temperatureRangeToColor[categoricalProp[0]]
-            temperatureFace = faces.RectFace( width=25, height=10, fgcolor=temperatureColor, bgcolor=temperatureColor )
-            temperatureFace.margin_right = 5
-            faces.add_face_to_node(temperatureFace, node, column=3, aligned=True)
 
-        #-------------------------------
-        # Salinity
-        #
-        salinity = getSpeciesProperty(node.taxId, 'salinity')[0]
-        if salinity is None:
-            salinity = "Unknown"
-            
-        if salinity != "Unknown":
-            salinityColor = salinityToColor[salinity]
-            salinityFace = faces.RectFace( width=25, height=10, fgcolor=salinityColor, bgcolor=salinityColor )
-            salinityFace.margin_right = 5
-            faces.add_face_to_node(salinityFace, node, column=4, aligned=True)
+        if( not hideEnvironmentalVars):
+            #-------------------------------
+            # Temperature
+            #
+            (numericalProp, categoricalProp) = getSpeciesTemperatureInfo(node.taxId)
+            if categoricalProp[0] != "Unknown":
+                temperatureColor = temperatureRangeToColor[categoricalProp[0]]
+                temperatureFace = faces.RectFace( width=25, height=10, fgcolor=temperatureColor, bgcolor=temperatureColor )
+                temperatureFace.margin_right = 5
+                faces.add_face_to_node(temperatureFace, node, column=3, aligned=True)
+
+            #-------------------------------
+            # Salinity
+            #
+            salinity = getSpeciesProperty(node.taxId, 'salinity')[0]
+            if salinity is None:
+                salinity = "Unknown"
+
+            if salinity != "Unknown":
+                salinityColor = salinityToColor[salinity]
+                salinityFace = faces.RectFace( width=25, height=10, fgcolor=salinityColor, bgcolor=salinityColor )
+                salinityFace.margin_right = 5
+                faces.add_face_to_node(salinityFace, node, column=4, aligned=True)
 
 
-        #-------------------------------
-        # Oxygen-req
-        #
-        oxygenReq = getSpeciesProperty(node.taxId, 'oxygen-req')[0]
-        if oxygenReq is None:
-            oxygenReq = "Unknown"
-            
-        if oxygenReq != "Unknown":
-            oxygenReqColor = oxygenReqToColor[oxygenReq]
-            oxygenReqFace = faces.RectFace( width=25, height=10, fgcolor=oxygenReqColor, bgcolor=oxygenReqColor )
-            oxygenReqFace.margin_right = 5
-            faces.add_face_to_node(oxygenReqFace, node, column=5, aligned=True)
+            #-------------------------------
+            # Oxygen-req
+            #
+            oxygenReq = getSpeciesProperty(node.taxId, 'oxygen-req')[0]
+            if oxygenReq is None:
+                oxygenReq = "Unknown"
 
-        #-------------------------------
-        # Habitat
-        #
-        habitat = getSpeciesProperty(node.taxId, 'habitat')[0]
-        if habitat is None:
-            habitat = "Unknown"
-            
-        if habitat != "Unknown":
-            habitatColor = habitatToColor[habitat]
-            habitatFace = faces.RectFace( width=25, height=10, fgcolor=habitatColor, bgcolor=habitatColor )
-            habitatFace.margin_right = 5
-            faces.add_face_to_node(habitatFace, node, column=6, aligned=True)
-            
-        #-------------------------------
-        # Algae
-        #
-        algae = getSpeciesProperty(node.taxId, 'algae')[0]
-        if algae is None:
-            algae = "Unknown"
-            
-        if algae != "Unknown":
-            algaeColor = algaeToColor[algae]
-            algaeFace = faces.RectFace( width=25, height=10, fgcolor=algaeColor, bgcolor=algaeColor )
-            algaeFace.margin_right = 5
-            faces.add_face_to_node(algaeFace, node, column=7, aligned=True)
+            if oxygenReq != "Unknown":
+                oxygenReqColor = oxygenReqToColor[oxygenReq]
+                oxygenReqFace = faces.RectFace( width=25, height=10, fgcolor=oxygenReqColor, bgcolor=oxygenReqColor )
+                oxygenReqFace.margin_right = 5
+                faces.add_face_to_node(oxygenReqFace, node, column=5, aligned=True)
 
-        #-------------------------------
-        # paired fraction
-        #
-        pairedFraction = getSpeciesProperty(node.taxId, 'paired-mRNA-fraction')[0]
-        if not pairedFraction is None:
-            pairedFraction = float(pairedFraction)
-            pairedFractionFace = faces.RectFace( width= pairedFraction*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%(pairedFraction*100), "fontsize":8, "color":"Black"} )
-            pairedFractionFace.margin_right = 5
-            faces.add_face_to_node(pairedFractionFace, node, column=8, aligned=True)
-            
+            #-------------------------------
+            # Habitat
+            #
+            habitat = getSpeciesProperty(node.taxId, 'habitat')[0]
+            if habitat is None:
+                habitat = "Unknown"
 
+            if habitat != "Unknown":
+                habitatColor = habitatToColor[habitat]
+                habitatFace = faces.RectFace( width=25, height=10, fgcolor=habitatColor, bgcolor=habitatColor )
+                habitatFace.margin_right = 5
+                faces.add_face_to_node(habitatFace, node, column=6, aligned=True)
+
+            #-------------------------------
+            # Algae
+            #
+            algae = getSpeciesProperty(node.taxId, 'algae')[0]
+            if algae is None:
+                algae = "Unknown"
+
+            if algae != "Unknown":
+                algaeColor = algaeToColor[algae]
+                algaeFace = faces.RectFace( width=25, height=10, fgcolor=algaeColor, bgcolor=algaeColor )
+                algaeFace.margin_right = 5
+                faces.add_face_to_node(algaeFace, node, column=7, aligned=True)
+
+            #-------------------------------
+            # paired fraction
+            #
+            pairedFraction = getSpeciesProperty(node.taxId, 'paired-mRNA-fraction')[0]
+            if not pairedFraction is None:
+                pairedFraction = float(pairedFraction)
+                pairedFractionFace = faces.RectFace( width= pairedFraction*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%(pairedFraction*100), "fontsize":8, "color":"Black"} )
+                pairedFractionFace.margin_right = 5
+                faces.add_face_to_node(pairedFractionFace, node, column=8, aligned=True)
+
+        # Hide the lines of dummyTopology nodes (i.e., nodes for which the tree topology is unknown and were added under the top node)
+        if "dummyTopology" in node.features and node.dummyTopology:
+            nstyle["hz_line_width"] = 0
+            nstyle["hz_line_color"] = "#ffffff"
+            nstyle["vt_line_width"] = 0
+            nstyle["vt_line_color"] = "#ffffff"
 
 """
 Return unary layout function that also receives a tile function (for getting image to plot along each node)
 TODO - are there other parameters to layout funcs that should be passed?
 """
-def makeNodeLayoutFuncWithTiles( layoutfn, tileFunc=None):
-    return lambda node: layoutfn(node, tileFunc=tileFunc)
+def makeNodeLayoutFuncWithTiles( layoutfn, tileFunc=None, hideEnvironmentalVars=False):
+    return lambda node: layoutfn(node, tileFunc=tileFunc, hideEnvironmentalVars=hideEnvironmentalVars)
 
         
 
@@ -291,12 +310,27 @@ def simpleNodeLayoutFunc(node):
         except AttributeError as e:
             pass
         
-    
 
+def collectProfilesFromTree(tree, profiles):
+    ret = {}
+    for taxId in getTaxidsFromTree(tree):
+        if taxId in profiles:
+            ret[taxId] = profiles[taxId]
+
+    return ret
+
+
+class DummyResourceManager(object):
+    def __init__(self, *dummy1, **dummy2):  pass
+    def __enter__(self): return self
+    def __exit__(self, exc_type, exc_val, exc_tb):  pass
+    
 
 def drawTrees(completeTree, prunedTree, args=None):
     import os
     from glob import glob
+
+    print("drawTrees()")
 
     files = []
     if not args is None and args.use_profile_data:
@@ -309,6 +343,7 @@ def drawTrees(completeTree, prunedTree, args=None):
     if( args.use_phylosignal_data ):
         phylosignalProfiles = loadPhylosignalProfiles( args.use_phylosignal_data )
         
+    print("(initializing tile-gen)")
     tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
 
     ts = TreeStyle()
@@ -317,15 +352,35 @@ def drawTrees(completeTree, prunedTree, args=None):
     #ts.arc_span  =  360
     ts.show_branch_length = False
     ts.show_leaf_name = False
+    ts.show_scale = False
     ts.layout_fn = simpleNodeLayoutFunc
-    ts.scale = 1000
+    ts.scale = 1500
     #ts.branch_vertical_margin = 10  # Y-axis spacing
-    
-    with Display(backend='xvnc') as disp:  # Plotting requires an X session
-        drawTree( completeTree, 'nmicro_s6',        tree_style=ts,  w=300, h=3000, units="mm")
-        drawTree( prunedTree,   'nmicro_s6_pruned', tree_style=ts,  w=1500, h=1500, units="mm")
+    prunedTree.dist = 0.1  # Cut the root distance (since we are displaying a partial tree)
 
-        plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), tree=prunedTree)
+    # PCA
+    profilesForPCA = collectProfilesFromTree(prunedTree, biasProfiles )
+
+    PCAForProfiles( profilesForPCA, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species )
+    return
+
+    if args.X_server:
+        _disp = Display
+    else:
+        _disp = DummyResourceManager
+    
+    with _disp(backend='xvnc') as disp:  # Plotting requires an X session
+        for treeToPlot, title in ( (completeTree, 'nmicro_s6'), (prunedTree, 'nmicro_s6_pruned') ):
+            h = int(round(len(treeToPlot)*3.5, 0))
+            
+            if not args.hide_environmental_vars:
+                h = int(round(len(treeToPlot)*6.0, 0))
+            print("(drawTree {}) h={}".format(title, h))
+            drawTree( treeToPlot, title,        tree_style=ts,  w=100, h=h, units="mm")
+            #profilesForPCA = collectProfilesFromTree(treeToPlot, biasProfiles )
+            #drawPCAforTree( profilesForPCA, [0]*len(profilesForPCA) )
+        
+        plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), tree=prunedTree, hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, treeScale=1000)
         
 
         # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
@@ -340,10 +395,9 @@ class ProfileDataTileGenerator(object):
     def __init__(self, files, biasProfiles, corrData, phylosignalProfiles=None):
         self._biasProfiles = biasProfiles
 
-        self._yrange = heatmaplotProfiles(biasProfiles, corrData)  # plot all profiles, to determine a single color-scale that will fit them all
+        self._yrange = getHeatmaplotProfilesValuesRange(biasProfiles)  # plot all profiles once, to determine a single color-scale that will fit them all
 
         self._phylosignalProfiles = phylosignalProfiles
-        print(self._phylosignalProfiles.keys())
 
     def getProfileTile(self, taxid):
         return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange, phylosignalProfiles=self._phylosignalProfiles)
@@ -354,7 +408,8 @@ class ProfileDataTileGenerator(object):
     def getProfileTileFunc(self):
         return lambda x: self.getProfileTile(x)
                 
-            
+    def getYRange(self):
+        return self._yrange
         
 
 def testTileFunc(taxId):
@@ -365,7 +420,7 @@ def testTileFunc(taxId):
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
 """
-def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile=""):
+def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile="", hideLegend=False, hideEnvironmentalVars=False, ownXserver=False, treeScale=100):
     taxa = getSpeciesToInclude()
 
     if tree is None:
@@ -375,45 +430,52 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile=""):
     
     ts = TreeStyle()
     ts.show_leaf_name = False
+    ts.show_scale = False
+    ts.scale = treeScale
     #ts.branch_vertical_margin = 10  # Y-axis spacing
-    ts.layout_fn = makeNodeLayoutFuncWithTiles( nodeLayoutWithTaxonomicNames, tileFunc )
+    ts.layout_fn = makeNodeLayoutFuncWithTiles( nodeLayoutWithTaxonomicNames, tileFunc, hideEnvironmentalVars=hideEnvironmentalVars )
+
+    # Add header (with a caption above each column)
     ts.aligned_header.add_face(TextFace("LFE"), column=1)
     ts.aligned_header.add_face(TextFace("GC%"), column=2)
-    ts.aligned_header.add_face(TextFace("Tmp"), column=3)
-    ts.aligned_header.add_face(TextFace("Hal"), column=4)
-    ts.aligned_header.add_face(TextFace("Oxy"), column=5)
+    if( not hideEnvironmentalVars):
+        ts.aligned_header.add_face(TextFace("Tmp"), column=3)
+        ts.aligned_header.add_face(TextFace("Hal"), column=4)
+        ts.aligned_header.add_face(TextFace("Oxy"), column=5)
+        ts.aligned_header.add_face(TextFace("Hab"), column=6)
+        ts.aligned_header.add_face(TextFace("Alg"), column=7)
+        ts.aligned_header.add_face(TextFace("Paired"), column=8)
 
-    ts.aligned_header.add_face(TextFace("Hab"), column=6)
-    ts.aligned_header.add_face(TextFace("Alg"), column=7)
+    
+    if( not hideLegend ):
+        # Draw legend
+        for cat in ('Psychrophilic', 'Mesophilic', 'Thermophilic', 'Hyperthermophilic'):
+            color = temperatureRangeToColor[cat]
+            ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=1)
 
+        for cat in ('NonHalophilic', 'ModerateHalophilic', 'ExtremeHalophilic'):
+            color = salinityToColor[cat]
+            ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=2)
 
-    ts.aligned_header.add_face(TextFace("Paired"), column=8)
+        for cat in ('Aerobic', 'Facultative', 'Anaerobic', 'Microaerophilic'):
+            color = oxygenReqToColor[cat]
+            ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=3)
 
-    for cat in ('Psychrophilic', 'Mesophilic', 'Thermophilic', 'Hyperthermophilic'):
-        color = temperatureRangeToColor[cat]
-        ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=1)
+        for cat in ('Aquatic', 'Terrestrial', 'HostAssociated', 'Specialized', 'Multiple'):
+            color = habitatToColor[cat]
+            ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=4)
 
-    for cat in ('NonHalophilic', 'ModerateHalophilic', 'ExtremeHalophilic'):
-        color = salinityToColor[cat]
-        ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=2)
+        for cat in ('Yes', 'No'):
+            color = algaeToColor[cat]
+            ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=5)
 
-    for cat in ('Aerobic', 'Facultative', 'Anaerobic', 'Microaerophilic'):
-        color = oxygenReqToColor[cat]
-        ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=3)
-
-    for cat in ('Aquatic', 'Terrestrial', 'HostAssociated', 'Specialized', 'Multiple'):
-        color = habitatToColor[cat]
-        ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=4)
-
-    for cat in ('Yes', 'No'):
-        color = algaeToColor[cat]
-        ts.legend.add_face(faces.RectFace( width=100, height=20, fgcolor=color, bgcolor=color, label={"text":cat, "color":"Black", "fontsize":8}), column=5)
-        
 
         
     # Annotate tree nodes
     for node in tree.traverse():
         if not node.name:
+            if( node.is_leaf() ):
+                print("Warning: node.name missing for node {}".format(node.taxId))
             continue
         
         taxId = int(node.name)
@@ -439,13 +501,21 @@ def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile=""):
         else:
             node.set_style(nsLight)
         n += 1
+
+    if ownXserver:
+        _disp = Display
+    else:
+        _disp = DummyResourceManager
+
+    with _disp(backend='xvnc') as disp:  # Plotting requires an X session
+
+        if not hideEnvironmentalVars:
+            h = int(round(len(tree)*2.5, 0))
+        else:
+            h = int(round(len(tree)*4.0, 0))
         
-
-    with Display(backend='xvnc') as disp:  # Plotting requires an X session
-
-        h = int(round(len(taxa)*0.25, 0))
-        tree.render('alltaxa.pdf', tree_style=ts, w=10, h=h, units="mm")
-        tree.render('alltaxa.svg', tree_style=ts, w=10, h=h, units="mm")
+        tree.render('alltaxa.pdf', tree_style=ts, w=100, h=h, units="mm")
+        tree.render('alltaxa.svg', tree_style=ts, w=100, h=h, units="mm")
 
         print("------------------ Ignore error message ------------------")
         # Display is about to close; how to tell tree to disconnect cleanly? (to prevent "Client Killed" message...)
@@ -503,7 +573,7 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                 
             tileDummyId = 1900000000+taxId*10
 
-            tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, (-fixedYscale,fixedYscale) )
+            tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, yScale )
 
             if not tile is None:
                 profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
@@ -526,11 +596,11 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
             for i in range(centers.shape[0]):
                 tileDummyId = 1900000000+taxId*10+i
 
-                tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, (-fixedYscale,fixedYscale) )
+                tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, yScale )
 
                 if not tile is None:
-                    profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=fontScale, is_url=False)
-                    profileFace.margin_bottom = 2   # separate this taxon's profiles from the next
+                    profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
+                    profileFace.margin_bottom  = 2   # separate this taxon's profiles from the next
                     if i==0:
                         profileFace.margin_top = 8   # separate this taxon's profiles from the next
                     faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
@@ -553,15 +623,16 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                     print("No node <- Level: %d  Id: %d profilesArray: %s" % (level, i, profilesArray.shape))
 
     else:
-        countFace = faces.TextFace( len(members), fsize=fontScale*1.5 )
-        countFace.background.color = "#dfdfdf"
-        countFace.margin_right = 3
-        faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
+        pass
+        #countFace = faces.TextFace( len(members), fsize=fontScale*1.5 )
+        #countFace.background.color = "#dfdfdf"
+        #countFace.margin_right = 3
+        #faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
         
         
 
 
-def plotCollapsedTaxonomicTree(biasProfiles):
+def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
     allTaxa = getSpeciesToInclude()
 
     # ---------------------------------------------------------
@@ -591,9 +662,16 @@ def plotCollapsedTaxonomicTree(biasProfiles):
             if taxonPage == pageToInclude:
                 out.add(taxid)
         return out
-            
+
+    global yScale
+    yScale = getHeatmaplotProfilesValuesRange( biasProfiles )
+
+    if ownXserver:
+        _disp = Display
+    else:
+        _disp = DummyResourceManager
     
-    with Display(backend='xvnc') as disp:  # Plotting requires an X session
+    with _disp(backend='xvnc') as disp:  # Plotting requires an X session
         
         def plotCollapsedTree(taxa, i):
             print("Page %d (%d taxons)" % (i, len(taxa)))
@@ -655,7 +733,7 @@ def plotCollapsedTaxonomicTree(biasProfiles):
                 unitsFace.margin_top = 0
                 ts.legend.add_face( unitsFace, column=2 )
                 
-                legendColorScaleTile = getLegendHeatmapTile((-fixedYscale, fixedYscale))
+                legendColorScaleTile = getLegendHeatmapTile(yScale)
                 legendColorScaleFace = faces.ImgFace(legendColorScaleTile, width=480, height=80, is_url=False) # no support for margin_right?
                 ts.legend.add_face( legendColorScaleFace, column=3 )
 
@@ -670,9 +748,13 @@ def plotCollapsedTaxonomicTree(biasProfiles):
                 #ts.legend.add_face( siFace, column=5 )
 
             # Render and save the tree
-            h = int(round(len(taxa)*0.25, 0))
-            tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=7, h=h, units="mm")
-            tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=7, h=h, units="mm")
+            if collapedTaxonomicTreeLevel==4:
+                h = int( round(  (len(tree)             *4.5), 0) )
+            else:
+                h = int( round( ((len(tree) + (i==0)*3 )*6.5), 0) )
+                
+            tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=100, h=h, units="mm")
+            tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=100, h=h, units="mm")
 
         # Plot each page (with a different subset of the tree)
         for pageNum in sorted(set(kingdomPageAssignment.values())):
@@ -713,16 +795,35 @@ def savePrunedTree(tree):
     
     tree.write(format=1, outfile="nmicro_s6_pruned_with_taxids.nw")
 
+    
+def parseList(conversion=str):
+    def convert(values):
+        return map(conversion, values.split(","))
+    return convert
 
 def standalone():
     import argparse
     from glob import glob
     import os
-    
+
     argsParser = argparse.ArgumentParser()
     argsParser.add_argument("--use-profile-data", type=str, default="")
     argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed"), default="taxonomic")
     argsParser.add_argument("--use-phylosignal-data", type=str, default="")
+    argsParser.add_argument("--limit-taxonomy", type=int, default=None)
+    argsParser.add_argument("--include-all-species", action="store_true", default=False)
+    argsParser.add_argument("--hide-legend", action="store_true", default=False)
+    argsParser.add_argument("--hide-environmental-vars", action="store_true", default=False)
+    argsParser.add_argument("--profiles-Y-offset-workaround", type=float, default=0.0)
+    argsParser.add_argument("--profile-scale", type=float, default=1.0)
+    #argsParser.add_argument("--profile-height", type=float, default=1.0)
+    argsParser.add_argument("--font-size", type=float, default=7)
+    argsParser.add_argument("--X-server", action="store_true", default=False)
+    argsParser.add_argument("--highlight-species", type=parseList(int), default=())
+
+
+
+    
     args = argsParser.parse_args()
 
     phylosignalProfiles = None
@@ -731,7 +832,16 @@ def standalone():
 
     if( args.use_tree=="hug" ):
         taxa = getSpeciesToInclude()
-        (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa)
+        
+        (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa) # prune complete reference phylogenetic tree to include only dataset species 
+        if( not args.limit_taxonomy is None ):  # limit taxonomy to specified taxon
+            prunedTree = pruneTreeByTaxonomy( prunedTree, args.limit_taxonomy  )
+
+        if args.include_all_species:
+            print("{} =ext=> ".format(len(prunedTree)))
+            prunedTree = extendTreeWithSpecies( tree=prunedTree, additionalSpecies=taxa, limitTaxonomy=args.limit_taxonomy )
+            print(" =ext=> {}".format(len(prunedTree)))
+        
         drawTrees( completeTree, prunedTree, args=args )
 
         savePrunedTree( prunedTree )
@@ -744,11 +854,11 @@ def standalone():
             raise Exception()
         
         files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
-        
+
         print("Loading profile data for %d files..." % len(files))
         (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
         
-        return plotCollapsedTaxonomicTree(biasProfiles)
+        return plotCollapsedTaxonomicTree(biasProfiles, ownXserver=args.X_server)
     
     elif( args.use_tree=="taxonomic" ):
         files = []
@@ -762,7 +872,7 @@ def standalone():
         tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
         
         #return plotSpeciesOnTaxonomicTree()
-        return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc() )
+        return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, ownXserver=args.X_server, treeScale=7 )
 
 
 if __name__=="__main__":

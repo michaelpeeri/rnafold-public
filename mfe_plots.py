@@ -1,15 +1,19 @@
 import sys
 import numpy as np
 import pandas as pd
-from math import log10
+from math import log10, sqrt
 from bisect import bisect_left
 from scipy.stats import pearsonr, spearmanr, kendalltau, linregress, wilcoxon
 import matplotlib
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
-from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty
+from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty, getSpeciesShortestUniqueNamesMapping
+from sklearn import decomposition
 import seaborn as sns
+from pyqtree import Index
 from ncbi_entrez import getTaxonomicGroupForSpecies
 from rate_limit import RateLimit
 
@@ -234,6 +238,7 @@ Plot the profile for a single species (contained in 'data'), save into a file, a
 """
 def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None):
     if not taxId in data:
+        print("getProfileHeatmapTile(): taxId {} not found".format(taxId))
         return None
 
     assert(len(yrange)==2)
@@ -246,31 +251,31 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
     series = data[taxId]
     
     cmapNormalizer        = CenterPreservingNormlizer(yrange[0], yrange[1])
-    phylosignalNormalizer = CenterPreservingNormlizer(np.min(phylosignalProfiles.values), np.max(phylosignalProfiles.values) )
+    phylosignalNormalizer = None
+    if not phylosignalProfiles is None:
+        phylosignalNormalizer = CenterPreservingNormlizer(np.min(phylosignalProfiles.values), np.max(phylosignalProfiles.values) )
 
     # read phylosignal profile (if used)
     phylosignalProfile = None
     if( not phylosignalProfiles is None and taxId in phylosignalProfiles.index ):
         phylosignalProfile = phylosignalProfiles.loc[taxId,:]
-        if( len(series) != len(phylosignalProfile) ):
-            print(series)
-            print(phylosignalProfile)
+        
         if( len(series) < len(phylosignalProfile) ):
             phylosignalProfile = phylosignalProfile[:len(series)]
-            assert(phylosignalProfile.index[0] == "Profile.1")
-            assert(len(phylosignalProfile)==len(series))
-        print( "Got phylosignal for {}".format(taxId) )
+
+        assert(phylosignalProfile.index[0] == "Profile.1")
+        assert(len(phylosignalProfile)==len(series))
+        #print( "Got phylosignal for {}".format(taxId) )
 
 
     imdata = np.array(series).reshape(1,-1)
-    #imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
 
     #ax.axis(xmin=series.index[0], xmax=series.index[-1])
 
-    ax1.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
+    ax1.imshow( imdata, cmap='bwr', aspect='auto', norm=cmapNormalizer, interpolation="bilinear" )
 
     if( not phylosignalProfile is None ):
-        ax2.imshow( phylosignalProfile.values.reshape(1,-1), cmap='coolwarm', aspect='auto', norm=phylosignalNormalizer )
+        ax2.imshow( phylosignalProfile.values.reshape(1,-1), cmap='bwr', aspect='auto', norm=phylosignalNormalizer, interpolation="bilinear" )
 
 
     #pos = list(ax1.get_position().bounds)
@@ -317,7 +322,7 @@ def getLegendHeatmapTile(yrange):
     imdata = series
     imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
 
-    ax.imshow( imdata, cmap='coolwarm', aspect=2.0, norm=cmapNormalizer )
+    ax.imshow( imdata, cmap='bwr', aspect=2.0, norm=cmapNormalizer, interpolation="bilinear" )
 
     def roundTowardZero(x):
         if x < -0.5:
@@ -347,19 +352,13 @@ def getLegendHeatmapTile(yrange):
 
 
     
-"""
-Plot all profiles together on a single page (this is not really legible when there are more than a few profiles...)
-Also used to return the y-range encompassing all profiles (so they are all displayed using the same scale).
-"""
-def heatmaplotProfiles(data, corrData, order=None):
-    fig, axes = plt.subplots(nrows=len(data), ncols=2, sharex='col') #, gridspec_kw={'width_ratios': [4,1]})
+def getHeatmaplotProfilesValuesRange(data, dummy1=None, dummy2=None):
 
-    keysInOrder = data.keys()[:]
-    if not order is None:
-        keysInOrder.sort( key=lambda x:order(x) )
-    #keysInOrder = data.keys()
+    #keysInOrder = data.keys()[:]
+    #if not order is None:
+    #    keysInOrder.sort( key=lambda x:order(x) )
+    keysInOrder = data.keys()
     
-    plt.grid(False)
 
     # Find the overall range that will be used to normalize all values
     # Todo - allow some "over-exposure" to expand the mid range at the cost of losing detail at the extremes
@@ -378,56 +377,59 @@ def heatmaplotProfiles(data, corrData, order=None):
     assert(valuesRange[1] > 0.0)
     maxRange = max(-valuesRange[0], valuesRange[1])
     
-    cmapNormalizer = CenterPreservingNormlizer(-maxRange, maxRange)
-
-    for ax, taxId in zip([x[0] for x in axes], keysInOrder):
-        series = data[taxId]
-
-        imdata = np.array(series)
-        imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
-
-        #ax.axis(xmin=series.index[0], xmax=series.index[-1])
-
-        ax.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
-            
-        pos = list(ax.get_position().bounds)
-
-        taxname = getSpeciesFileName(taxId)
-        taxDescriptor = "%s.%s" % (taxname[0], taxname[1:9])
-        fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
-        
-        #ax.set_title(taxId)
-        ax.set_yticks(())
-        #ax.tick_params
-
-    #plt.colorbar(im, ax=axes[0], norm=cmapNormalizer, orientation='horizontal')
-    #plt.colorbar(im, cax=axes[-1], orientation='horizontal')
-    cbarRange = np.expand_dims( np.linspace( valuesRange[0]+0.001, valuesRange[1], 200 ), 2)
-
-    cbx = plt.subplot2grid((len(data),2), (0,1), rowspan=len(data))
-    #cbx.imshow( np.hstack((cbarRange, cbarRange)), aspect='auto', cmap='coolwarm', norm=cmapNormalizer)
-    #cbx.set_xticks(())
-
-
-    corrDataForPlotting = corrData.rename( columns={'spearman_smfe_gc_rho':'GC%', 'spearman_smfe_Nc_rho':'ENc', 'spearman_smfe_CAI_rho':'CAI', 'spearman_smfe_Fop_rho':'Fop' } )
-    del corrDataForPlotting['spearman_smfe_gc_pval']
-    del corrDataForPlotting['spearman_smfe_Nc_pval']
-    del corrDataForPlotting['spearman_smfe_CAI_pval']
-    del corrDataForPlotting['spearman_smfe_Fop_pval']
-    orderdf = pd.DataFrame({'order':range(len(keysInOrder))}, index=keysInOrder)
-    df2 = pd.merge(corrDataForPlotting, orderdf, left_index=True, right_index=True, how='inner')
-    df2.sort_values(by=['order'])
-    del df2['order']
-
-    corrsHeatmap = sns.heatmap(df2, annot=True, fmt=".2g", ax=cbx)
-    #corrsHeatmap.savefig("heatmap_profile_correlations.pdf")
-    #corrsHeatmap.savefig("heatmap_profile_correlations.svg")
-
-    plt.savefig("heatmap_profile_test.pdf", orientation='portrait')
-    plt.savefig("heatmap_profile_test.svg", orientation='portrait')
-    plt.close(fig)
-
     return (-maxRange, maxRange)  # return the normalized range used
+
+    # fig, axes = plt.subplots(nrows=len(data), ncols=2, sharex='col') #, gridspec_kw={'width_ratios': [4,1]})
+    # plt.grid(False)
+    # cmapNormalizer = CenterPreservingNormlizer(-maxRange, maxRange)
+    # for ax, taxId in zip([x[0] for x in axes], keysInOrder):
+    #     series = data[taxId]
+
+    #     imdata = np.array(series)
+    #     imdata = np.vstack((imdata,imdata))  # pretty crude trick borrowed from matplotlib examples...
+
+    #     #ax.axis(xmin=series.index[0], xmax=series.index[-1])
+
+    #     ax.imshow( imdata, cmap='coolwarm', aspect='auto', norm=cmapNormalizer )
+            
+    #     pos = list(ax.get_position().bounds)
+
+    #     taxname = getSpeciesFileName(taxId)
+    #     taxDescriptor = "%s.%s" % (taxname[0], taxname[1:9])
+    #     fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
+        
+    #     #ax.set_title(taxId)
+    #     ax.set_yticks(())
+    #     #ax.tick_params
+
+    # #plt.colorbar(im, ax=axes[0], norm=cmapNormalizer, orientation='horizontal')
+    # #plt.colorbar(im, cax=axes[-1], orientation='horizontal')
+    # cbarRange = np.expand_dims( np.linspace( valuesRange[0]+0.001, valuesRange[1], 200 ), 2)
+
+    # cbx = plt.subplot2grid((len(data),2), (0,1), rowspan=len(data))
+    # #cbx.imshow( np.hstack((cbarRange, cbarRange)), aspect='auto', cmap='coolwarm', norm=cmapNormalizer)
+    # #cbx.set_xticks(())
+
+
+    # corrDataForPlotting = corrData.rename( columns={'spearman_smfe_gc_rho':'GC%', 'spearman_smfe_Nc_rho':'ENc', 'spearman_smfe_CAI_rho':'CAI', 'spearman_smfe_Fop_rho':'Fop' } )
+    # del corrDataForPlotting['spearman_smfe_gc_pval']
+    # del corrDataForPlotting['spearman_smfe_Nc_pval']
+    # del corrDataForPlotting['spearman_smfe_CAI_pval']
+    # del corrDataForPlotting['spearman_smfe_Fop_pval']
+    # orderdf = pd.DataFrame({'order':range(len(keysInOrder))}, index=keysInOrder)
+    # df2 = pd.merge(corrDataForPlotting, orderdf, left_index=True, right_index=True, how='inner')
+    # df2.sort_values(by=['order'])
+    # del df2['order']
+
+    # corrsHeatmap = sns.heatmap(df2, annot=True, fmt=".2g", ax=cbx)
+    # #corrsHeatmap.savefig("heatmap_profile_correlations.pdf")
+    # #corrsHeatmap.savefig("heatmap_profile_correlations.svg")
+
+    # plt.savefig("heatmap_profile_test.pdf", orientation='portrait')
+    # plt.savefig("heatmap_profile_test.svg", orientation='portrait')
+    # plt.close(fig)
+
+    # return (-maxRange, maxRange)  # return the normalized range used
 
 
 def plotCorrelations(data, _labels, group_func=None, order=None):
@@ -801,3 +803,202 @@ def loadPhylosignalProfiles( phylosignalFile ):
     with open(phylosignalFile, 'r') as csvfile:
         df = pd.read_csv(csvfile, sep=',', dtype={"":np.int}, index_col=0 )
     return df
+
+
+def getTaxName(taxId):
+    return getSpeciesFileName(taxId)
+
+
+_shortTaxNames = None
+def getSpeciesShortestUniqueNamesMapping_memoized():
+    global _shortTaxNames
+    if( _shortTaxNames is None ):
+        _shortTaxNames = getSpeciesShortestUniqueNamesMapping()
+    return _shortTaxNames
+
+
+def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None):
+    X = np.vstack(biasProfiles.values()) # convert dict of vectors to matrix
+
+    shortNames = getSpeciesShortestUniqueNamesMapping_memoized()
+
+    pca = decomposition.PCA()
+    pca.fit(X)
+
+    pca.n_components = 2  # force 2 components
+    X_reduced = pca.fit_transform(X)
+    print(X_reduced.shape)
+
+    # Assign dimensions to plot axes
+    # TODO - test the other values...
+    D0 = 0 # D0 - component to show on Y scale 
+    D1 = 1 # D1 - component to show on X scale
+    assert(D0!=D1)
+    
+
+    #fig = matplotlib.figure.Figure(suppressComposite=True)
+    #ax = fig.subplots()
+    fig, ax = plt.subplots()    
+
+    cmapNormalizer = CenterPreservingNormlizer(profileValuesRange[0], profileValuesRange[1])
+
+
+    #plt.scatter(X_reduced[:,1], X_reduced[:,0], label=[shortNames[x] for x in biasProfiles.keys()])
+
+    # Calculate general scaling constants
+    scaleX = max(X_reduced[:,D1]) - min(X_reduced[:,D1])
+    scaleY = max(X_reduced[:,D0]) - min(X_reduced[:,D0])
+    ori1 =   max(X_reduced[:,D0])
+    ori2 =   max(X_reduced[:,D1])
+    #assert(scaleY>scaleX)  # We map the first PCA dimension to the Y axis (since portrait format better fits the figure layout)
+    scaleX = scaleY
+    imw = scaleX*0.100*profileScale
+    imh = scaleY*0.012*profileScale
+    imofy = profilesYOffsetWorkaround # 0.0 # 0.45 # TODO - FIX THIS
+
+    spIndex = Index(bbox=(min(X_reduced[:,D1]), min(X_reduced[:,D0]), max(X_reduced[:,D1]), max(X_reduced[:,D0]) ))
+    
+    #zorders = [x[0] for x in sorted(list(enumerate([sqrt((X_reduced[i,D1]-ori2)**2 + (X_reduced[i,D0]-ori1)**2) for i in range(len(X_reduced))])), key=lambda x:x[D1])]
+
+    dinfo = {}
+
+    highlightPatches = []
+
+    # Plot each profile 
+    for i, taxId in enumerate(biasProfiles.keys()):
+        # Determine the location for this profile
+        x = X_reduced[i,D1]
+        y = X_reduced[i,D0]
+
+        showProfile = True
+        label = shortNames[taxId]
+        
+        # is there overlap?
+        if overlapAction=="hide":
+            bbox = (x-imw, y-imh, x+imw, y+imh)
+            print("---"*10)
+            print("new: {} {}".format(label, bbox))
+            matches = spIndex.intersect( bbox )
+            for m in matches:
+                print("-X- {} {}".format(m, dinfo[m]))
+                
+            if matches and taxId not in highlightSpecies:
+                print( "Hiding profile at {}".format( (x,y) ) )
+                showProfile = False
+            else:
+                spIndex.insert( label, bbox )
+                dinfo[label] = bbox
+            
+        # plot the profile
+        #zorder = zorders[i]
+        if showProfile:      # skip this if we decided to hide this profile
+
+            # Show the text label
+            if fontSize > 0:
+                plt.annotate(label, (x - scaleX*0.03, y + scaleY*0.012), fontsize=fontSize, zorder=5)
+
+            if taxId in highlightSpecies:
+                rect = Rectangle((bbox[0]-0.03, bbox[1]+0.03+imh), imw*2+0.06, imh*2+0.06, edgecolor="blue", linewidth=4.0, facecolor="none", fill=False, linestyle="solid")
+                highlightPatches.append(rect)
+                
+
+            # Show the profile tile
+            if True:
+                plt.imshow( np.array( biasProfiles[taxId] ).reshape(1,-1), cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2005 )
+        
+
+    # Paint the highlights
+    if False:
+        ax.add_collection(PatchCollection(highlightPatches))
+        
+    ax.set_aspect("equal")
+    centerY = (max(X_reduced[:,D0]) + min(X_reduced[:,D0])) * 0.5
+    centerX = (max(X_reduced[:,D1]) + min(X_reduced[:,D1])) * 0.5
+    ax.set_xlim(( centerX - scaleY*0.55, centerX + scaleY*0.55 ))   # Use same scale for both axes
+    ax.set_ylim(( centerY - scaleY*0.55, centerY + scaleY*0.55 ))
+
+    if False:
+        tlx = max(X_reduced[:,D1])
+        tly = min(X_reduced[:,D0])
+        bry = max(X_reduced[:,D0])
+        cmapNormalizerForPCAvars = CenterPreservingNormlizer(-1, 1)
+        plt.imshow( pca.components_[0,:].reshape(1,-1), extent=(tlx-imw*2, tlx,  tly-imh*2, tly-imh*4 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=5 )
+        plt.imshow( pca.components_[1,:].reshape(1,-1), extent=(tlx-imw*2, tlx,  tly      , tly-imh*2 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=5 )
+        plt.annotate( "V1",                                               (tlx - imw*2.4, bry+imh*2), fontsize=fontSize )
+        plt.annotate( "V2",                                               (tlx - imw*2.4, bry),       fontsize=fontSize )
+        plt.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0] ), (tlx + imw*0.1, bry+imh*2), fontsize=fontSize )
+        plt.annotate( "{:.3g}".format( pca.explained_variance_ratio_[1] ), (tlx + imw*0.1, bry      ), fontsize=fontSize )
+
+    if False:
+        loadingScale = 5.4
+        plt.annotate( u"\u0394LFE[0nt]",   xy=(0,0), xytext=(pca.components_[D1,0 ]*loadingScale, pca.components_[D0,0 ]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.4, linewidth=1.5, color='red'), color='red', zorder=200 )
+        plt.annotate( u"\u0394LFE[100nt]", xy=(0,0), xytext=(pca.components_[D1,10]*loadingScale, pca.components_[D0,10]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.4, linewidth=1.5, color='red'), color='red', zorder=200 )
+
+
+    #plt.scatter(X_reduced[:,1], X_reduced[:,0] )
+    
+    
+    plt.grid(False)
+    ax.set_xticks(())
+    ax.set_yticks(())
+    #plt.xlim( (min(X_reduced[:,D1]) - scaleX*0.1, max(X_reduced[:,D1]) + scaleX*0.1) )
+    #plt.ylim( (min(X_reduced[:,D0]) - scaleY*0.1, max(X_reduced[:,D0]) + scaleY*0.1) )
+
+    plt.savefig("pca_profiles.pdf")
+    plt.savefig("pca_profiles.png", dpi=300, transparent=True)
+    plt.savefig("pca_profiles.svg")
+    plt.close(fig)
+
+
+    # Create separate density plot
+    fig, ax = plt.subplots()
+
+    if showDensity:
+        sns.kdeplot( X_reduced[:,D1].flatten(), X_reduced[:,D0].flatten(), n_levels=20, cmap="Blues", shade=True, shade_lowest=True, legend=False, ax=ax, zorder=1 )
+
+    #plt.scatter(X_reduced[:,1], X_reduced[:,0] )
+
+    ax.set_aspect("equal")
+    centerY = (max(X_reduced[:,D0]) + min(X_reduced[:,D0])) * 0.5
+    centerX = (max(X_reduced[:,D1]) + min(X_reduced[:,D1])) * 0.5
+    ax.set_xlim(( centerX - scaleY*0.55, centerX + scaleY*0.55 ))   # Use same scale for both axes
+    ax.set_ylim(( centerY - scaleY*0.55, centerY + scaleY*0.55 ))
+    
+    plt.grid(False)
+    ax.set_xticks(())
+    ax.set_yticks(())
+    #plt.xlim( (min(X_reduced[:,D1]) - scaleX*0.1, max(X_reduced[:,D1]) + scaleX*0.1) )
+    #plt.ylim( (min(X_reduced[:,D0]) - scaleY*0.1, max(X_reduced[:,D0]) + scaleY*0.1) )
+
+    
+    plt.savefig("pca_profiles_density.pdf")
+    plt.savefig("pca_profiles_density.png", dpi=300)
+    plt.savefig("pca_profiles_density.svg")
+    plt.close(fig)
+    
+    
+    print("Explained variance: {}".format(pca.explained_variance_ratio_))
+    print("            (Total: {})".format(sum(pca.explained_variance_ratio_)))
+    print("Components: {}".format(pca.components_[:2,:]))
+    
+    a = list(zip(biasProfiles.keys(), X_reduced[:,D0]))
+    a.sort(key=lambda x:x[1])
+    print("top:")
+    print(a[:3])
+    print("bottom:")
+    print(a[-3:])
+    return a
+
+
+#def drawPCAforTree( profilesAsMap, xdata ):
+#    arbitraryProfile =  profilesAsMap.values()[0]
+#    assert(arbitraryProfile.ndim == 1)
+#    profileLength = arbitraryProfile.shape[0]
+#    numProfiles = len(profilesAsMap)#
+#
+#    profilesArray = np.zeros((numProfiles, profileLength))
+#    for i, profile in enumerate(profilesAsMap.values()):
+#        profilesArray[i] = profile#
+#
+#    PCAForProfiles( profilesArray, xdata )
+
