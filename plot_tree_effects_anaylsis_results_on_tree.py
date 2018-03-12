@@ -8,10 +8,12 @@ from ncbi_taxa import ncbiTaxa
 
 # Configuration
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
-csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.dLFE.length.300.csv"
+#csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.dLFE.length.300.csv"
+csvRegressionEffectsByGroupCsv = "find_trait_values_outliers.out.dLFE.csv"
 baseFontSize = 25         # Scale factor for (most) text
 significanceLevel = 1e-2  # p-values smaller than this will be marked as significant
-barScale = 500            # Width of 100%-bar
+#barScale = 500            # Width of 100%-bar
+barScale = 20              # Width of 100%-bar
 
 
 
@@ -106,6 +108,8 @@ def plotRegressionEffectsByGroup():
 
                     row = None
                     rangeRows = None
+
+                    print(len(ranges))
                     
                     if( len(ranges) == 1 ):
                         row       =  df[(df['ExplanatoryVar'] == var) & (df['TaxGroup'] == taxid) & (df['Range'] == ranges[0]) ]
