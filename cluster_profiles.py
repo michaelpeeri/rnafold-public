@@ -29,12 +29,18 @@ def findMaxDistanceToCentroid( points, clusters, centers, metric=defaultMetric )
         if distToCentroid > maxDistanceToCentroid:
             maxDistanceToCentroid = distToCentroid
 
+        messageAlreadyPrinted = False
+
         for otherCentroid in centers:  # sanity test only
             x2 = metric( np.array(thisPoint).reshape(1,-1), np.array(otherCentroid).reshape(1,-1) )[0]
             #print("({})".format(x2))
             if( x2 < distToCentroid ):
                 #print("Warning: Distance to other centroid ({}) < dist to our centroid ({}) for point {} ({}), otherCentroid {}. Points: {} clusters{} centers {} ".format(x2, distToCentroid, i, thisPoint, otherCentroid, points, clusters, centers ))
-                print("Warning: Distance to other centroid ({}) < dist to our centroid ({}) for point {} ({}), otherCentroid {}. clusters{}".format(x2, distToCentroid, i, thisPoint, otherCentroid, clusters ))
+                #print("Warning: Distance to other centroid ({}) < dist to our centroid ({}) for point {} ({}), otherCentroid {}. clusters{}".format(x2, distToCentroid, i, thisPoint, otherCentroid, clusters ))
+                if not messageAlreadyPrinted:
+                    print("Warning: Distance to other centroid ({}) < dist to our centroid ({}) for point {}".format(x2, distToCentroid, i ))
+                    messageAlreadyPrinted = True
+                    
                 maxDistanceToCentroid = 1e9  # Make sure this solution isn't selected
                 
             #assert( metric( np.array(thisPoint).reshape(1,-1), np.array(otherCentroid).reshape(1,-1) )[0] >= distToCentroid ) # TODO RESTORE THIS !!!
@@ -43,7 +49,7 @@ def findMaxDistanceToCentroid( points, clusters, centers, metric=defaultMetric )
     return maxDistanceToCentroid
     
 
-def analyzeProfileClusters(profilesArray, n_init=10000, max_permissible_distance_centroid=0.2, max_clusters = 15, metric=defaultMetric ):
+def analyzeProfileClusters(profilesArray, n_init=5000, max_permissible_distance_centroid=0.2, max_clusters = 15, metric=defaultMetric ):
     if( profilesArray.shape[0] < 2 ):
         raise Exception("Can't cluster {} profiles".format( profilesArray.shape[0]) )
 
@@ -52,7 +58,7 @@ def analyzeProfileClusters(profilesArray, n_init=10000, max_permissible_distance
     results = None
 
     maxDistanceToCentroid = 0.0
-    
+
     for K in range_n_clusters:
 
         if K > profilesArray.shape[0]:  # Number of clusters must be >= number of points
@@ -61,21 +67,31 @@ def analyzeProfileClusters(profilesArray, n_init=10000, max_permissible_distance
         attempt = 1
         maxDistanceToCentroid = 1e9
         
-        while( maxDistanceToCentroid > max_permissible_distance_centroid and attempt <= 10 ):
+        while( maxDistanceToCentroid > max_permissible_distance_centroid and attempt <= 15 ):
         
             print("K={} N={} (attempt={})".format(K, profilesArray.shape[0], attempt ))
 
-            kmeans = KMeans(n_clusters=K, n_init = n_init, max_iter=1000, tol=1e-5, verbose=0 )
+            kmeans = KMeans( n_clusters=K,
+                             n_init = n_init if K>1 else 500,
+                             max_iter=10000*attempt,
+                             tol=1e-3,
+                             verbose=False )
+            
             model = kmeans.fit(profilesArray)
             labels = model.labels_
             centers = model.cluster_centers_
 
+            # ----------------------------------------------------------------------------------------------------
             # Sort the centeroids so they appear in a consistent order; update the labels accordingly
-            counts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each cluster
-            centers_order = np.argsort( -np.array(counts) ) # sort in descending order
-            assert(centers_order.shape == (K,))
-            centers = centers[centers_order,:]  # sort the centeroids
-            labels = [centers_order[x] for x in labels]  # update the labels to match the sorted centroids
+            # ----------------------------------------------------------------------------------------------------
+            # TODO - fix bug causing this to disrupt the correct order in some cases!
+            # ----------------------------------------------------------------------------------------------------
+            #counts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each cluster
+            #centers_order = np.argsort( -np.array(counts) ) # sort in descending order
+            #assert(centers_order.shape == (K,))
+            #centers = centers[centers_order,:]  # sort the centeroids
+            #labels = [centers_order[x] for x in labels]  # update the labels to match the sorted centroids
+            # ----------------------------------------------------------------------------------------------------
 
 
             #print("%d\t%g\t%g" % (K,
@@ -84,12 +100,11 @@ def analyzeProfileClusters(profilesArray, n_init=10000, max_permissible_distance
 
             maxDistanceToCentroid = findMaxDistanceToCentroid( profilesArray, labels, centers, metric=metric )
             
-            if K==1:
+            if K==1 or maxDistanceToCentroid < 1e8:
                 break   # for K==1, no use retrying (we should try larger K immediately)
             else:
                 print("...... {}".format( maxDistanceToCentroid ) )
                 attempt += 1
-        
         
         if maxDistanceToCentroid <= max_permissible_distance_centroid:
             return (centers, labels, maxDistanceToCentroid)
