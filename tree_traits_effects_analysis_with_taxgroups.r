@@ -15,6 +15,7 @@ library("phylosignal")
 library("grid")
 library("dplyr")
 library("rlang") # for duplicate
+library("kde1d")
 
 #---------------------------------------------------------------
 # Configuration
@@ -26,28 +27,40 @@ inputTree <- "test_tree.nw"   # TODO - verify this tree (the file is identical t
 
 redisConnect(host="power5", password="rnafold")
 
-profileStart <- 0
-profileStop <- 1000
+#profileStart <- 0
+#profileStop <- 1000
 profileStep <- 10
-profileReference <- "begin"
-profileLen <- (profileStop-profileStart)/profileStep
+#profileReference <- "begin"
+#profileLen <- (profileStop-profileStart)/profileStep
+seriesNumber     <- 102
 
-
+profileSpecifications <- list( list( start=0, stop=310, step=profileStep, reference="begin", series=102, len=31 ),
+                               list( start=0, stop=310, step=profileStep, reference="end",   series=102, len=32 ) )
+#profileSpecifications <- list( list( start=0, stop=1000, step=profileStep, reference="begin", series=102, len=100 ) )
+#profileLen <- 30
+                              
 taxidToKingdomFilename <- "TaxidToKingdom.csv"   # create file using: python2 create_taxid_kingdom_table.py
 
 
 #pyramidLength <- 30+1  # unit is single windows (not real nt when profileStep>1)
+#pyramidLength <- 30+1  # unit is single windows (not real nt when profileStep>1)
+
+#pyramidLength <- 99+1  # unit is single windows (not real nt when profileStep>1)
 pyramidLength <- 30+1  # unit is single windows (not real nt when profileStep>1)
 
+maxPyramidHeight <- 4
 
+profileMode <- "dLFE"
 #profileMode <- "nativeLFE"
 #profileMode <- "shuffledLFE"
-profileMode <- "dLFE"
+#profileMode <- "abs(dLFE)"
 
 
 #                                          -r1-  -r2-
-groupsTableOutputFile.limitRangeFromNt <- c( 0,   70)   # range is inclusive at either end
-groupsTableOutputFile.limitRangeToNt   <- c(60, 1000)   # range is inclusive at either end
+#groupsTableOutputFile.limitRangeFromNt <- c( 0,   70)   # range is inclusive at either end
+#groupsTableOutputFile.limitRangeToNt   <- c(60, 1000)   # range is inclusive at either end
+groupsTableOutputFile.limitRangeFromNt <- c( 0)   # range is inclusive at either end
+groupsTableOutputFile.limitRangeToNt   <- c(10)   # range is inclusive at either end
 stopifnot( length(groupsTableOutputFile.limitRangeFromNt) == length(groupsTableOutputFile.limitRangeToNt))
 stopifnot(groupsTableOutputFile.limitRangeFromNt <= groupsTableOutputFile.limitRangeToNt )
 stopifnot( c( groupsTableOutputFile.limitRangeFromNt, 1e8 ) > c( -1, groupsTableOutputFile.limitRangeToNt ) ) # ranges shouldn't overlap
@@ -64,21 +77,50 @@ lipaUseRankedValues <- TRUE
 
 significanceLevel <- 1e-2
 
+rankTransformResponse <- FALSE
+
+scale.dLFE <- 2.9
+
+
+getProfilePositions <- function( profileId=1 )
+{
+    spec <- profileSpecifications[[profileId]]
+    if( spec$reference == "begin" )
+    {
+        return( seq( spec$start, spec$stop, spec$step ) )
+    }
+    else if ( spec$reference == "end" )
+    {
+        return( seq( spec$stop-spec$step, spec$start, -(spec$step) ) )
+    }
+    else
+    {
+        # unsupported profile reference
+        stopifnot(FALSE);
+    }
+}
+
+
+# Big plot scale (tiny font)
+fontScale <- 8
+cdsScaleResolution <- 35
 
 # Standard scale
-fontScale <- 12
-cdsScaleResolution <- 50
+#fontScale <- 12
+#cdsScaleResolution <- 50
 
-# Tiny scale (large fonts)
-#fontScale <- 16
-#cdsScaleResolution <- 150
-
-
-
-minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
-#minimalTaxonSize <- 48 # Testing only
+## Tiny scale (large fonts)
+##fontScale <- 16
+##cdsScaleResolution <- 150
 
 
+
+
+#minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
+minimalTaxonSize <- 20 # Testing only
+
+
+#cairo_pdf(sprintf("tree_phenotypes_regression.out.%s.by.taxgroups.ranked.%%d.pdf", profileMode))
 cairo_pdf(sprintf("tree_phenotypes_regression.out.%s.by.taxgroups.%%d.pdf", profileMode))
 
 
@@ -87,14 +129,32 @@ speciesBlacklist <- c("470", "1280", "4932", "2850")  # Filter species that will
 
 #---------------------------------------------------------------
 
-getH5Filename <- function( taxId )
+getH5Filename <- function( taxId, profileSpec )
 {
-    sprintf("gcdata_v2_taxid_%d_profile_%d_%d_%s_%d.h5", taxId, profileStop, profileStep, profileReference, profileStart)
+    # Note: this heuristic will have to be changed when the files are recreated...
+    if( profileSpec$stop < 350 )
+    {
+        seriesId <- "_t11"
+    }
+    else
+    {
+        seriesId <- ""
+    }
+    ##seriesId <- "_t11"
+    
+    return( sprintf("gcdata_v2_taxid_%d_profile_%d_%d_%s_%d%s.h5", taxId, profileSpec$stop, profileSpec$step, profileSpec$reference, profileSpec$start, seriesId) )
 }
 
 # Read native and shuffled LFE profiles from the hdf files
+# returns numeric vector.
 readDeltaLFEProfile <- function( taxId, h5filename )
 {
+    if( !file.exists(h5filename) )
+    {
+        print(sprintf("Warning: file not found: %s", h5filename))
+        return( NA );
+    }
+    
     y <- h5ls(h5filename)
     key <- y[which(startsWith(y[,1], "/df_"))[1], 1]   # find the first element that starts with '/df_'
 
@@ -120,6 +180,10 @@ readDeltaLFEProfile <- function( taxId, h5filename )
     else if( profileMode == "shuffledLFE" )
     {
         return( shuffled )
+    }
+    else if( profileMode == "abs(dLFE)" )
+    {
+        return( abs(native - shuffled) )
     }
     else
     {
@@ -245,15 +309,67 @@ getOxygenReq <- function(taxId)
     }
 }
 
+getGenomeSizeMb <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:genome-size-mb", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val > 0.1 && val < 1000.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
 
-readAllProfiles <- function( taxIds )
+getProteinCount <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:protein-count", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.integer(val)
+        stopifnot( val > 100 && val < 100000 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+readAllProfiles <- function( taxIds, profileSpecifications )
 {
 
-    combined <- data.frame( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Profile=matrix( rep(0.0, profileLen), nrow=0, ncol=profileLen), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), row.names=integer() )
+    args <- list( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), GenomeSizeMb=double(), LogGenomeSize=double(), ProteinCount=integer(), row.names=integer() )
+    for (i in 1:length(profileSpecifications) )
+    {
+        newargs <- lapply(1:profileSpecifications[[i]]$len, function (i) numeric(0) )
+        names(newargs) <- sapply(1:length(newargs), function (j) { sprintf("Profile_%d.%d", i, j) } )
+        #print("/////\\\\\\")
+        #print(newargs)
+        
+        args <- c( args, newargs )
+    }
+    #print(args)
+    #print("///1///")
+    combined <- do.call( data.frame, args )
+    #newrow <- data.frame( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
+        
+        
+
+    #combined <- data.frame( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Profile=matrix( rep(0.0, profileLen), nrow=0, ncol=profileLen), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), row.names=integer() )
 
     for (taxId in taxIds)
     {
-        profile <- readDeltaLFEProfile( taxIds, getH5Filename( taxId ) )
+        #for (i in 1:length(profileSpecifications[[1]]))
+        #{
+        #    profile <- readDeltaLFEProfile( taxIds, getH5Filename( taxId, profileSpec ) ) # will return a numeric vector
+        #    print(dimnames(profile))
+        #}
+        profiles <- lapply( profileSpecifications, function(profileSpec) { readDeltaLFEProfile( taxIds, getH5Filename( taxId, profileSpec ) ); } )
+        #profile <- profiles[[1]]  # TODO FINISH THIS...
 
         gcContent <- getGenomicGCContent( taxId )
 
@@ -268,12 +384,54 @@ readAllProfiles <- function( taxIds )
         habitat <- getHabitat( taxId )
 
         oxygenReq <- getOxygenReq( taxId )
+
+        genomeSizeMb <- getGenomeSizeMb( taxId )
+
+        proteinCount <- getProteinCount( taxId )
+
+        #args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
+        args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, GenomeSizeMb=genomeSizeMb, LogGenomeSize=log(genomeSizeMb), ProteinCount=proteinCount, row.names=c(taxId) )
+        for (i in 1:length(profileSpecifications) )
+        {
+            #print("--//--//--")
+            #print(i)
+            #print(length(profiles[[i]]))
+            
+            if( !is.na(profiles[[i]][1]) )
+            {
+                #print("((a))")
+                newargs <- as.list(profiles[[i]])
+            }
+            else
+            {
+                #print("((b))")
+                newargs <- as.list(rep(NA, profileSpecifications[[i]]$len))
+            }
                 
-        newrow <- data.frame( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
+            names(newargs) <- sapply(1:length(newargs), function (j) { sprintf("Profile_%d.%d", i, j) } )
+
+            args <- c( args, newargs )
+        }
+        #print(args)
+
+        #print("///2///")
+        newrow <- do.call( data.frame, args )
+                                        #newrow <- data.frame( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
+        #print(colnames(newrow))
+        #print(colnames(combined))
+        #print(nrow(newrow))
+        #print(ncol(newrow))
+        #print(ncol(combined))
+        #print(taxId)
         
+        
+
+        #print(colnames(combined))
+        #print(colnames(newrow))
         combined <- rbind(combined, newrow)
     }
-    combined
+    #print(names(combined))
+    return(combined)
 }
 
 
@@ -281,7 +439,8 @@ readAllProfiles <- function( taxIds )
 getAllTaxIds <- function()
 {
     f <- function(s) { as.integer( strsplit(s, "_")[[1]][[4]] ) }
-    glob1 <- sprintf("gcdata_v2_taxid_*_profile_%d_%d_%s_%d.h5", profileStop, profileStep, profileReference, profileStart )
+    glob1 <- sprintf("gcdata_v2_taxid_*_profile_%d_%d_%s_%d_t11.h5", profileSpecifications[[1]]$stop, profileSpecifications[[1]]$step, profileSpecifications[[1]]$reference, profileSpecifications[[1]]$start )
+    #glob1 <- sprintf("gcdata_v2_taxid_*_profile_%d_%d_%s_%d.h5", profileSpecifications[[1]]$stop, profileSpecifications[[1]]$step, profileSpecifications[[1]]$reference, profileSpecifications[[1]]$start )   # work-around for old 1000nt profiles...
     lapply( list.files(pattern=glob2rx(glob1)), f )
 }
 
@@ -297,7 +456,7 @@ taxidToKingdom$Member_all_1 <- 1   # Add a special group which includes all spec
 allTaxIds <- getAllTaxIds() # get list of all taxids in the current dataset
 
 # Read profiles for all species
-traits <- readAllProfiles( allTaxIds )
+traits <- readAllProfiles( allTaxIds, profileSpecifications )
 traits$tax_id <- rownames(traits)  # create an explicit tax_id column (rather than an index), by which we'll be able to merge (since left_join can't merge using indices)
 
 taxidToKingdom$tax_id <- as.character(taxidToKingdom$tax_id)  # Convert the taxids column in the taxon memberships table to string, to match traits table
@@ -462,6 +621,17 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
         Ytrait <- normYtrait   # proceed in analysis using the normalized trait
 
     }
+
+    if( rankTransformResponse )
+    {
+        print(Ytrait)
+        rankedYtrait <- paste(Ytrait, ".ranks", sep="" )
+        traits[,rankedYtrait] <- rank(traits[,Ytrait], ties.method="average")
+        #print(traits[,rankedYtrait])
+        Ytrait <- rankedYtrait
+        print(traits[,Ytrait])
+    }
+    
     
     # Set the predictive (regression) and intecept-only formulas
     # 'predictiveFormula' is the actual regression. It uses an intercept when a continuous explanatory var is used (and none with a discrete var, as in one-way ANOVA)
@@ -677,8 +847,8 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
             
             if( nrow(traits) < 50 )  # add species names (if there aren't too many points that the graph becomes cluttered)
             {
-                p <- p + geom_text( data=traits,           aes( x=get(Xtrait), y=get(Ytrait), label=short.name), colour="#404040", size=3, hjust=0, nudge_x=1.5, alpha=0.7 ) +
-                         geom_text( data=traits.notintree, aes( x=get(Xtrait), y=get(Ytrait), label=short.name), colour="#30f050", size=3, hjust=0, nudge_x=1.5, alpha=0.7 )
+                p <- p + geom_text( data=traits,           aes( x=get(Xtrait), y=get(Ytrait), label=short.name), colour="#404040", size=3, hjust=0, nudge_x=0.05, alpha=0.7 ) +
+                         geom_text( data=traits.notintree, aes( x=get(Xtrait), y=get(Ytrait), label=short.name), colour="#30f050", size=3, hjust=0, nudge_x=0.05, alpha=0.7 )
             }
             
             print(p)
@@ -688,15 +858,24 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     return( data.frame( pvalue=pvalue, R2=R2 * slopeDirection, N=N, directionsIndicator=directionsIndicator ) )
 }
 
-performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange )
+getProfileVariables <- function( range, profileId=1 )
+{
+    return( vapply(range[1]:range[2], function(x) sprintf("Profile_%d.%d", profileId, x), character(1)) )
+}
+
+performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange, profileId=1, plotRegression=FALSE, caption="" )
 {
     #print("performGLSregression_profileRangeMean(): -->")
     #print(profileRange)
     #print(class(profileRange))
+    print("profileRange:")
+    print(profileRange)
+    print(class(profileRange))
     stopifnot(class(profileRange)=="integer")
     stopifnot(length(profileRange)==2)
     # Make list of the selected profile columns
-    variables <- vapply(profileRange[1]:profileRange[2], function(x) paste('Profile.', as.character(x), sep=""), character(1))
+    variables <- getProfileVariables( profileRange, profileId )
+    print(variables)
 
     ###########################################################################################
     ## DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ##
@@ -709,12 +888,12 @@ performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profile
     ## DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ### DEBUG ONLY ##
     ###########################################################################################
 
-    # Extract the select columns and compute the mean values
+    # Extract the selected columns and compute the mean values
     # TODO - learn dplyr...
     traits$RangeMean <- rowMeans( traits[variables] )
 
     # Perform the regression (for the mean values)
-    return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=FALSE ) )
+    return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=plotRegression, caption=caption ) )
 }
 
 # Extract legend from ggplot figure
@@ -729,7 +908,7 @@ getLegend <- function(a.gplot)
 }
 
 # Tested with R 3.4.1
-plotRotatedPyramid <- function( plotdf, dotsDF, valLabel, valScale, Xtrait, plotTitle )
+plotRotatedPyramid <- function( plotdf, dotsDF, valLabel, valScale, Xtrait, plotTitle, profileVisualization=NA )
 {
     # Create the main pyramid plot
     if( class(plotdf$value)=="factor")
@@ -774,7 +953,7 @@ plotRotatedPyramid <- function( plotdf, dotsDF, valLabel, valScale, Xtrait, plot
     # Draw heat-map pyramid on canvas
     
     grid.newpage()
-    pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.30, "npc"), angle=-45 ) )
+    pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.35, "npc"), angle=-45 ) )
 
     pyramidPlotGrob <- ggplotGrob( pyramidPlot + plot.elements )
     grid.draw( pyramidPlotGrob )
@@ -859,6 +1038,19 @@ plotRotatedPyramid <- function( plotdf, dotsDF, valLabel, valScale, Xtrait, plot
         grid.text(sprintf("min==%.3g", min(plotdf[,"value"])), x=unit(0.5, "npc"),                     y=unit(0.7, "npc"),                      just="right", gp=gpar( fontsize=round(fontScale) ) )
         grid.text(sprintf("max==%.3g", max(plotdf[,"value"])), x=unit(0.5, "npc") - unit(0, "points"), y=unit(0.7, "npc") + unit(15, "points"), just="right", gp=gpar( fontsize=round(fontScale) ) )
     }
+
+    #----------------------------------------------------------------------
+    # Draw profile visualization
+    if( !is.na(profileVisualization) )
+    {
+        upViewport()
+
+        vp5 <- viewport( x=unit(0.45, "npc"), y=unit(0.1, "npc"), h=unit(0.2, "npc"), w=unit(1.1, "npc"), angle=0 )
+        pushViewport( vp5 )
+        #grid.rect()
+        grid.draw( ggplotGrob( profileVisualization ) )
+    }
+    
     
     #fn <- sprintf("tree_phenotypes_regression.ranges.%s_vs_dLFE.out.pdf", Xtrait)
     #ggsave(fn, plot=p )
@@ -871,7 +1063,82 @@ plotRotatedPyramid <- function( plotdf, dotsDF, valLabel, valScale, Xtrait, plot
     ##unlink(fn)
 }
 
-glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plotCaption )
+
+
+getStatsForProfiles <- function( values, positions )
+{
+    stats <- data.frame( pos=integer(), iqr0=double(), p25=double(), p50=double(), p75=double(), iqr1=double() )
+    outliers <- data.frame( x=double(), y=double() )
+
+    for( rowId in 1:ncol(values))
+    {
+        xs <- values[,rowId]
+        fit <- kde1d( xs )
+        quarts <- qkde1d(c(0.25,0.5,0.75), fit)
+        iqr <- quarts[3]-quarts[1]
+        iqr.vals <- c(quarts[1]-1.5*iqr, quarts[3]+1.5*iqr)
+
+        stats <- rbind( stats, data.frame( pos=positions[rowId], iqr0=iqr.vals[1], p25=quarts[1], p50=quarts[2], p75=quarts[3], iqr1=iqr.vals[2] ) )
+
+        outliers <- c( xs[xs > iqr.vals[2]], xs[xs < iqr.vals[1]] )
+
+        for( i in outliers )
+        {
+            outliers <- rbind( outliers, data.frame( x=rowId, y=i ) )
+        }
+    }
+    return( list( stats, outliers ) )
+}
+
+profileColorScale <- function( vals )
+{
+    return( vapply( vals, function  (x) (x+scale.dLFE)/(2*scale.dLFE), FUN.VALUE=double(1) ) )
+}
+
+
+kdePlot <- function( values, positions )
+{
+    x <- getStatsForProfiles( values, positions )
+    stats    <- x[[1]]
+    outliers <- x[[2]]
+
+    print(positions)
+
+    interpolated <- approx( stats$pos, stats$p50, method="linear", n=1000 )
+    interpolated$color = profileColorScale( interpolated$y )
+
+    min.y = min( stats$iqr0 )
+    max.y = max( stats$iqr1 )
+    lines.y = seq(ceiling(min.y), floor(max.y), 1)
+    lines.y = lines.y[lines.y != 0]
+    
+    # create the plot...
+    p <- ggplot( data=stats, aes(x=pos) ) +
+        geom_hline( yintercept=0, color="#404040" ) +
+        geom_hline( yintercept=lines.y, color="#808080", size=0.3 ) +
+        geom_ribbon( aes(ymin=iqr0, ymax=iqr1), color=NA, fill="#a0a0a0" ) +
+        geom_ribbon( aes(ymin=p25, ymax=p75),   color=NA, fill="#707070" ) +
+        geom_point( data=data.frame(interpolated), aes( x=x, y=y, color=color ), size=0.7 ) +
+        guides( color=FALSE ) +  # Hide the legend (will be plotted separately)
+        scale_color_gradientn(
+            breaks=c(0.0, 0.5, 1.0),
+            limits=c(0.0, 1.0),
+            colors=        c(                                   "#ff9090", "#a00000", "#000000", "#0000a0", "#9090ff"),
+            values=rescale(c(                                         0.0,      0.45,       0.5,       0.55,      1.0) ) ) +
+         theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+               panel.grid.major = element_blank(),
+               panel.grid.minor = element_blank(),
+               panel.background = element_blank()
+               ) # +
+            #scale_x_discrete( labels=stats$pos )
+            
+        #geom_line( aes(y=p50) );
+    #print(p)
+    return( p );
+}
+
+# Perform regression for pyramid (range robustness) plot
+glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plotCaption, profileId=1 )
 {
     stopifnot(class(profileRange)=="numeric")
     stopifnot(length(profileRange)==2)
@@ -891,23 +1158,33 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
         #regressionResults <- apply( subranges, 1, function(v) performGLSregression_profileRangeMean(traits, tree, Xtrait, v) )
         #print("-->>")
         stopifnot(class(v)=="data.frame")
-        regressionResults <- performGLSregression_profileRangeMean(traits, tree, Xtrait, as.vector(v, mode="integer") )
-        v$Pvalue    <- regressionResults$pvalue
-        v$Buse.R2   <- regressionResults$R2
-        v$Logpval <- log10( v$Pvalue )
-        v$Var1 <- (v$Var1 - 1) * profileStep
-        v$Var2 <- (v$Var2 - 1) * profileStep
-        v$NumSpecies <- regressionResults$N
-        v$DirectionsIndicator <- regressionResults$directionsIndicator
+        stopifnot(v$Var2 >= v$Var1)
 
-        #print("regressionResults")
-        #print(regressionResults)
-        #print("out")
-        #print(out)
-        #print("v")
-        #print(v)
-        out <- rbind( out, v )
-        assign('out', out, parent.frame() )
+        if( v$Var2 - v$Var1 <= maxPyramidHeight )
+        {
+            regressionResults <- performGLSregression_profileRangeMean(traits, tree, Xtrait, as.integer(v), profileId=profileId, plotRegression=FALSE )
+            v$Pvalue    <- regressionResults$pvalue
+            v$Buse.R2   <- regressionResults$R2
+            v$Logpval <- log10( v$Pvalue )
+            v$Var1 <- (v$Var1 - 1) * profileStep
+            v$Var2 <- (v$Var2 - 1) * profileStep
+            v$NumSpecies <- regressionResults$N
+            v$DirectionsIndicator <- regressionResults$directionsIndicator
+
+            #print("regressionResults")
+            #print(regressionResults)
+            #print("out")
+            #print(out)
+            #print("v")
+            #print(v)
+            out <- rbind( out, v )
+            assign('out', out, parent.frame() )
+        }
+        ## else
+        ## {
+        ##     regressionResults <- data.frame( pvalue=c(NA), R2=c(NA), N=c(NA), directionsIndicator=c(NA) )
+        ## }
+        
         
         #print("->>->")
         #print(out)
@@ -950,7 +1227,7 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
 
     plotdf <- melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Logpval") )
     
-    plotRotatedPyramid( plotdf, dotsDF, "log(p-val)", valScale, Xtrait, paste(plotTitle, " (logPval)") )
+    ## plotRotatedPyramid( plotdf, dotsDF, "log(p-val)", valScale, Xtrait, paste(plotTitle, " (logPval)") )
 
     #----------------------------------------------
     
@@ -973,8 +1250,12 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
             colors=        c("#75c0ff", "#2240cc", "#112060",   "#000000", "#602011", "#cc4022", "#ffc075"),
             values=rescale(c(     -1.0,      -0.5,     -0.15,         0.0,      0.15,       0.5,       1.0) ) )
     }
+
+
+    print( getProfileVariables( profileRange, profileId ) )
+    kdePlot <- kdePlot( traits[, getProfileVariables( profileRange, profileId ) ], getProfilePositions( profileId )  )
     
-    plotRotatedPyramid( plotdf, dotsDF, "Buse R^2", valScale, Xtrait, plotTitle=paste(plotTitle, " (Buse R^2)") )
+    plotRotatedPyramid( plotdf, dotsDF, "Buse R^2", valScale, Xtrait, plotTitle=paste(plotTitle, " (Buse R^2)"), kdePlot )
 
 
     #----------------------------------------------
@@ -990,14 +1271,25 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
     #valScale <- scale_colour_manual( breaks=c("1","2"), labels=c("1","2"), values=c("#7799f0", "#f06666") )
     valScale <- scale_fill_hue( ) # plotdf, aes(fill=factor(value) ) )
 
-    #print("-------3-------")
-
-    #print(class(plotdf$value))
-    plotRotatedPyramid( plotdf, dotsDF, "Directions", valScale, Xtrait, plotTitle=paste(plotTitle, " (order)") )
+    ## plotRotatedPyramid( plotdf, dotsDF, "Directions", valScale, Xtrait, plotTitle=paste(plotTitle, " (order)") )
     
     
     return(subranges)
 }
+
+findUncorrectedVariableCorrelation <- function( traits, filterTrait, Xtrait, Ytrait )
+{
+    traits <- traits[ (traits[,filterTrait] & (!is.na(traits[,Xtrait])) & (!is.na(traits[,Ytrait]))  ), ]
+
+    d1 <- traits[,Xtrait]
+    d2 <- traits[,Ytrait]
+    N <- sum( !(is.na(d1) | is.na(d2)) )
+    ret <- cor.test( d1, d2, method="pearson", rm.na=TRUE )
+    print(ret$estimate)
+    return( data.frame( pvalue=ret$p.value, corr=ret$estimate, N=N, directionsIndicator=NA ) )
+}
+
+
 
 #performGLSregression( traits, tree, "GenomicGC",   "Profile.15" )
 #print(performGLSregression_profileRangeMean( traits, tree, "GenomicGC", c(15,15) ))
@@ -1030,7 +1322,7 @@ prepareFilteredTreeForGLS <- function( traits, tree, filterTrait, studyTrait )
 
     if( is.null(tree) )
     {
-        return( c(NA, NA ) )
+        return( list(NA, NA ) )
     }
     
     # Discard trait data for species missing from the tree
@@ -1043,7 +1335,7 @@ prepareFilteredTreeForGLS <- function( traits, tree, filterTrait, studyTrait )
 
     if( is.null(traits) || nrow(traits) < 3 )  # no sense in analyzing a tiny tree...
     {
-        return( c(NA, NA) )
+        return( list(NA, NA) )
     }
 
     # Check tree <-> data-frame correlation appears valid
@@ -1062,14 +1354,16 @@ performGLSregressionWithFilter <- function( traits, tree, filterTrait, Xtrait, Y
     stopifnot( any( filterTrait == colnames(traits)  ) )  # filterTrait not found
     stopifnot( any( Xtrait      == colnames(traits)  ) )  # studyTrait  not found
 
-    print(sum(!is.na(traits$GenomicGC)))
+    print("performGLSregressionWithFilter")
+
+    #print(sum(!is.na(traits$GenomicGC)))
     # Filter tree by trait
     orig.traits <- duplicate( traits)
     ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, Xtrait )
     traits.filtered <- ret[[1]]
     tree.filtered   <- ret[[2]]
-    print(sum(!is.na(traits.filtered$GenomicGC)))
-    print(sum(!is.na(orig.traits$GenomicGC)))
+    #print(sum(!is.na(traits.filtered$GenomicGC)))
+    #print(sum(!is.na(orig.traits$GenomicGC)))
 
     if( is.null(tree.filtered) )
     {
@@ -1078,10 +1372,10 @@ performGLSregressionWithFilter <- function( traits, tree, filterTrait, Xtrait, Y
 
     #N <- nTips(tree.filtered)
     
-    return( performGLSregression( traits.filtered, tree.filtered, Xtrait, Ytrait, plotRegression=TRUE, caption=sprintf("%s effect on %s (%s)", Xtrait, profileMode, filterTrait, traits), orig.traits ) )
+    return( performGLSregression( traits.filtered, tree.filtered, Xtrait, Ytrait, plotRegression=plotRegression, caption=sprintf("%s effect on %s (%s)", Xtrait, profileMode, filterTrait, traits), orig.traits ) )
 }
 
-glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, pyramidSpec )
+glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, pyramidSpec, profileId=1 )
 {
     stopifnot( any( filterTrait==colnames(traits) ) )  # filterTrait not found
     stopifnot( any( studyTrait==colnames(traits)  ) )  # studyTrait not found
@@ -1104,7 +1398,7 @@ glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, p
         return( NA )
     }
     
-    return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits) ) ) )
+    return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits.filtered) ), profileId=profileId ) )
 }
 
 testPhylosignal <- function( traits, tree, studyTrait, caption="" )
@@ -1317,50 +1611,288 @@ findValueOutliersWithFilter <- function( traits, filterTrait, valuesTrait, crite
 
 ## write.csv(out, file=phylosignalLipaOutputFile )
 
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.16", plotRegression=TRUE, caption="profile_150" )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.1" , plotRegression=TRUE, caption="profile_0"   )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile.16", plotRegression=TRUE, caption="profile_150" )
+##performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.1" , plotRegression=TRUE, caption="profile_0"   )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_2.1" , plotRegression=TRUE, caption="profile_0"   )
 
-#dev.off()
-#quit()
+## performGLSregression( traits, tree,   "Profile_1.1",   "Profile_2.1" , plotRegression=TRUE, caption="profile_0"   )
+
+## performGLSregression( traits, tree,   "Profile_1.1",   "Profile_2.16" , plotRegression=TRUE, caption="profile_1.1x2.16"   )
+
+#performGLSregression( traits, tree,   "Profile_1.14",   "Profile_1.15" , plotRegression=TRUE, caption="profile_1.14x1.15"   )
+
+#performGLSregression( traits, tree,   "Profile_2.1",   "Profile_2.2" , plotRegression=TRUE, caption="profile_2.1x2.2"   )
 
 
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_1.14",   "Profile_1.15" )
 
-for( gr in taxGroups )
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_2.1",   "Profile_2.2" )
+
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_1.1",   "Profile_2.16" )
+
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_1.14",   "Profile_2.1" )
+
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_1.1",   "Profile_1.15" )
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_2.1",   "Profile_2.16" )
+
+
+correlationBetweenRanges <- function( traits, tree, filterTrait, xRange, yRange, useUncorrectedCorrelation=FALSE )
 {
-    print(gr)
-    ret <- testPhylosignalWithFilter( traits, tree, gr, "Profile.15")
-    print( ret )
-    print(class(ret))
+    out <- data.frame( Var1=character(), Var2=character(), R2=double(), DirectionsIndicator=character() )
+    
+    for( xTrait in xRange )
+    {
+        for( yTrait in yRange )
+        {
+            if( xTrait != yTrait )
+            {
+                if( !useUncorrectedCorrelation )
+                {
+                    result <- performGLSregressionWithFilter( traits, tree, filterTrait, xTrait, yTrait, plotRegression=FALSE )
+                    method <- "Method: Corrected (GLS)"
+                }
+                else
+                {
+                    result <- findUncorrectedVariableCorrelation( traits, filterTrait, xTrait, yTrait )
+                    result$R2 <- result$corr  # compatibility hack...
+                    method <- "Method: Uncorrected (Pearson)"
+                }
+            }
+            else
+            {
+                result <- list(R2=1.0, directionsIndicator='+')
+            }
+            
+            out <- rbind( out, data.frame( Var1=xTrait, Var2=yTrait, Cor=result$R2, DirectionsIndicator=result$directionsIndicator ) )
+        }
+    }
+    print(out)
+                                        #                labs(y=Ytrait, x=Xtrait, title=caption) +
+
+    plotTitle <- sprintf("%s (N=%d)", filterTrait, result$N )
+
+    p <- ggplot( data=out, aes(x=Var1, y=Var2, fill=Cor) ) +
+        geom_tile( linetype=0, colour=NA ) +   # Use geom_tile (because geom_raster has poor pdf/svg output), with minimal borders
+        labs( title=plotTitle ) +
+        scale_fill_gradientn(
+            breaks=c(-1.0, -0.5, 0.0, 0.5, 1.0),
+            limits=c(-1.0, 1.0),
+            colors=        c("#75c0ff", "#2240cc", "#112060",   "#000000", "#602011", "#cc4022", "#ffc075"),
+            values=rescale(c(     -1.0,      -0.5,     -0.15,         0.0,      0.15,       0.5,       1.0) ) )
+    print(p)
 }
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=FALSE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=FALSE )
+
+## correlationBetweenRanges( traits, tree, "Member_Bacteria_2",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=FALSE )
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=FALSE )
+
+## correlationBetweenRanges( traits, tree, "Member_Bacteria_2",
+##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=FALSE )
+
+## dev.off()
+## quit()
+
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     correlationBetweenRanges( traits, tree, gr,
+##                              sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                              sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                              useUncorrectedCorrelation=TRUE )
+## }
+
+
+##quit()
+
+## performGLSregression_profileRangeMean( traits, tree, "Profile_1.1",  as.integer(c(8,15)), profileId=1, plotRegression=TRUE, caption="Start-referenced, 0nt vs mean(70-140nt)" )
+
+## performGLSregression_profileRangeMean( traits, tree, "Profile_2.31", as.integer(c(17,24)),  profileId=2, plotRegression=TRUE, caption="End-referenced, 0 nt vs mean(70-140nt)" )
+
+
+performGLSregression_profileRangeMean_withFilter <- function( traits, tree, filterTrait, studyTrait,  profileRange, profileId=1, plotRegression=TRUE , caption="")
+{
+    # Filter tree by trait
+    ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
+    if( is.na(ret[[1]]) ) { return( NA ) }
+    traits.filtered <- ret[[1]]
+    tree.filtered   <- ret[[2]]
+    stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
+        
+    if( is.null(tree.filtered) || nTips(tree.filtered) < minimalTaxonSize )
+    {
+        return( NA )
+    }
+
+    if( any(class(traits.filtered[,studyTrait])==c("factor")) && nlevels(as.factor(as.numeric(traits.filtered[,studyTrait]))) < 2 )
+    {
+        print("Only one level remaining...")
+        return( NA )
+    }
+    
+    ###return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits) ), profileId=profileId ) )
+    return( performGLSregression_profileRangeMean( traits.filtered, tree.filtered, studyTrait,  profileRange, profileId=profileId, plotRegression=plotRegression, caption=sprintf("%s - %s; %s (N=%d)", filterTrait, caption, studyTrait, nrow(traits.filtered) ) ) )
+}
+
+
+regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+    
+
+##     performGLSregression_profileRangeMean_withFilter( traits, tree, gr, "Profile_1.1",  as.integer(c(12,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced" )
+
+##     performGLSregression_profileRangeMean_withFilter( traits, tree, gr, "Profile_2.32", as.integer(c(1,15)),  profileId=2, plotRegression=TRUE, caption="End-referenced" )
+        
+##     #performGLSregressionWithFilter( traits, tree, gr,                  "Profile_1.1",   "Profile_1.15" )
+
+##     ## # Store peaks (for each range) for this group
+##     ## if( any( class(results) == "data.frame" ) && nrow(results) )
+##     ## {
+##     ##     results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##     ##     # Iterate over each range to find the relevant peak
+##     ##     for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##     ##     {
+##     ##         matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##     ##                     (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##     ##         maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+##     ##         regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##     ##     }
+##     ## }
+## }
+
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength),   profileId=1)
+
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength),   profileId=2)
+    
+##     #performGLSregressionWithFilter( traits, tree, gr,                  "Profile_1.1",   "Profile_1.15" )
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+
+##quit()
+
+
+##dev.off()
+##quit()
+
+
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     ret <- testPhylosignalWithFilter( traits, tree, gr, "Profile_1.15")
+##     print( ret )
+##     print(class(ret))
+## }
 
 
 #dev.off()
 #quit()
 
 # Why doesn't this have any effect?
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=1.0",  traits.full=NA, bm.gamma=1.0 )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=0.8",  traits.full=NA, bm.gamma=0.8 )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=0.6",  traits.full=NA, bm.gamma=0.6 )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=0.2",  traits.full=NA, bm.gamma=0.2 )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=0.1",  traits.full=NA, bm.gamma=0.1 )
-performGLSregression( traits, tree,   "GenomicGC",   "Profile.15", plotRegression=TRUE, caption="gamma=0.05", traits.full=NA, bm.gamma=0.05 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=1.0",  traits.full=NA, bm.gamma=1.0 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.8",  traits.full=NA, bm.gamma=0.8 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.6",  traits.full=NA, bm.gamma=0.6 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.2",  traits.full=NA, bm.gamma=0.2 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.1",  traits.full=NA, bm.gamma=0.1 )
+#performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.05", traits.full=NA, bm.gamma=0.05 )
 
 #quit()
 
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "OxygenReq",   "Profile.7" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "OxygenReq",   "Profile.14" )
-performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq",   "Profile.8" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OxygenReq",   "Profile.16" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "OxygenReq",   "Profile_1.7" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "OxygenReq",   "Profile_1.14" )
+## performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq",   "Profile_1.8" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",    "OxygenReq",   "Profile.19" )
-performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",    "OxygenReq",   "Profile.20" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OxygenReq",   "Profile.16" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile.9" )
-performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile.14" )
-performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq", "Profile.16" )
-performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq", "Profile.19" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",    "OxygenReq",   "Profile.19" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",    "OxygenReq",   "Profile.20" )
+
+## performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile_1.9" )
+## performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile_1.14" )
+#performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_1760", "OxygenReq",   "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq", "Profile.16" )
+#performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "OxygenReq", "Profile.19" )
 
 #performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "GenomicGC", "Profile.15" )
 #performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272", "Habitat",   "Profile.15" )
@@ -1370,36 +1902,36 @@ performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_178327
 #print(sum(!is.na(traits$HighGC)))
 #print(sum(!is.na(traits$Profile.1)))
 
-performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicGC", "Profile.15" )
+## performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicGC", "Profile_1.15" )
 
 
-performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "GenomicGC", "Profile.22" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "GenomicGC", "Profile.25" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "GenomicGC", "Profile.22" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "GenomicGC", "Profile.25" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.18" )
-performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.26" )
-performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.27" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.18" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.26" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Chloroflexi_200795", "GenomicGC", "Profile.27" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Fungi_4751", "GenomicGC", "Profile.8" )
-performGLSregressionWithFilter( traits, tree, "Member_Fungi_4751", "GenomicGC", "Profile.20" )
+## performGLSregressionWithFilter( traits, tree, "Member_Fungi_4751", "GenomicGC", "Profile_1.8" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Fungi_4751", "GenomicGC", "Profile.20" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OptimumTemp",   "Profile.10" )
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OptimumTemp",   "Profile.17" )
+## performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OptimumTemp",   "Profile_1.10" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",         "OptimumTemp",   "Profile.17" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157",         "OptimumTemp",   "Profile.11" )
-performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157",         "OptimumTemp",   "Profile.20" )
+## performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157",         "OptimumTemp",   "Profile_1.11" )
+## #performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157",         "OptimumTemp",   "Profile.20" )
 
-performGLSregressionWithFilter( traits, tree, "Member_all_1",                "OptimumTemp",   "Profile.11" )
-performGLSregressionWithFilter( traits, tree, "Member_all_1",                "OptimumTemp",   "Profile.20" )
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                "OptimumTemp",   "Profile_1.11" )
+## #performGLSregressionWithFilter( traits, tree, "Member_all_1",                "OptimumTemp",   "Profile.20" )
 
 
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.1" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.2" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.3" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.4" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.5" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.6" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile.27" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.1" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.2" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.3" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.4" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.5" )
+## performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.6" )
+#performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.27" )
 
 
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
@@ -1408,31 +1940,31 @@ performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",              
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
 
-regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
+##regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
 
 
-for( gr in taxGroups )
-{
-    print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength))
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength))
 
-    # Store peaks (for each range) for this group
-    if( any( class(results) == "data.frame" ) && nrow(results) )
-    {
-        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
 
-        # Iterate over each range to find the relevant peak
-        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
-        {
-            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
-                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
 
-            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
 
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
-        }
-    }
-}
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
 
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 ##write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )
@@ -1440,52 +1972,52 @@ for( gr in taxGroups )
 ##quit()
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
-for( gr in taxGroups )
-{
-    print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OptimumTemp", c(1,pyramidLength))
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OptimumTemp", c(1,pyramidLength))
 
-    # Store peaks (for each range) for this group
-    if( any( class(results) == "data.frame" ) && nrow(results) )
-    {
-        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
 
-        # Iterate over each range to find the relevant peak
-        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
-        {
-            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
-                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
 
-            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
 
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OptimumTemp"), Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
-        }
-    }
-}
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OptimumTemp"), Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
 
 
-for( gr in taxGroups )
-{
-    print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "TempHighLow75", c(1,pyramidLength))
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "TempHighLow75", c(1,pyramidLength))
 
-    # Store peaks (for each range) for this group
-    if( any( class(results) == "data.frame" ) && nrow(results) )
-    {
-        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
 
-        # Iterate over each range to find the relevant peak
-        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
-        {
-            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
-                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
 
-            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
 
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("TempHighLow75"), Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
-        }
-    }
-}
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("TempHighLow75"), Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
 
 
 
@@ -1496,10 +2028,162 @@ for( gr in taxGroups )
 #quit()    # TESTING ONLY
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Habitat", c(1,pyramidLength))
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Habitat"),    Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Salinity", c(1,pyramidLength) )
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R-squared 
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Salinity"),   Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OxygenReq", c(1,pyramidLength))
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OxygenReq"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+
+
+results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+
+results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336", "LogGenomeSize", c(1,pyramidLength), profileId=2)
+
+dev.off()
+quit()
+
+results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Proteobacteria_1224", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Gammaproteobacteria_1236", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+#results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "GenomeSizeMb",   "Profile_1.1" )
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "LogGenomeSize",  "Profile_1.1" )
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "ProteinCount",   "Profile_1.1" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "GenomeSizeMb",   "Profile_1.16" )
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "LogGenomeSize",  "Profile_1.16" )
+performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "ProteinCount",   "Profile_1.16" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "GenomeSizeMb",   "Profile_1.1" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "LogGenomeSize",  "Profile_1.1" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "ProteinCount",   "Profile_1.1" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "GenomeSizeMb",   "Profile_1.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "LogGenomeSize",  "Profile_1.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "ProteinCount",   "Profile_1.6" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "GenomeSizeMb",   "Profile_1.16" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "LogGenomeSize",  "Profile_1.16" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "ProteinCount",   "Profile_1.16" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",   "GenomeSizeMb",   "Profile_1.4" )
+performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",   "LogGenomeSize",  "Profile_1.4" )
+performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",   "ProteinCount",   "Profile_1.4" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",   "GenomeSizeMb",   "Profile_1.13" )
+performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",   "LogGenomeSize",  "Profile_1.13" )
+performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",   "ProteinCount",   "Profile_1.13" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",   "GenomeSizeMb",   "Profile_1.13" )
+performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",   "LogGenomeSize",  "Profile_1.13" )
+performGLSregressionWithFilter( traits, tree, "Member_Gammaproteobacteria_1236",   "ProteinCount",   "Profile_1.13" )
+
+performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336",   "GenomeSizeMb",   "Profile_1.17" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336",   "LogGenomeSize",  "Profile_1.17" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteroidetes_Chlorobi_group_68336",   "ProteinCount",   "Profile_1.17" )
+
+#results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+#results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Proteobacteria_1224", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+#results <- glsRangeAnalysisWithFilter( traits, tree, "Member_Eukaryota_2759", "LogGenomeSize", c(1,pyramidLength), profileId=1)
+
+
+
+##dev.off()
+##quit()
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomeSizeMb", c(1,pyramidLength), profileId=1)
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomeSizeMb"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+
 for( gr in taxGroups )
 {
     print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Habitat", c(1,pyramidLength))
+    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "LogGenomeSize", c(1,pyramidLength), profileId=1)
 
     # Store peaks (for each range) for this group
     if( any( class(results) == "data.frame" ) && nrow(results) )
@@ -1514,57 +2198,36 @@ for( gr in taxGroups )
 
             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
 
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Habitat"),    Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomeSizeMb"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
         }
     }
 }
 
-for( gr in taxGroups )
-{
-    print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "Salinity", c(1,pyramidLength) )
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "ProteinCount", c(1,pyramidLength), profileId=1)
 
-    # Store peaks (for each range) for this group
-    if( any( class(results) == "data.frame" ) && nrow(results) )
-    {
-        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
 
-        # Iterate over each range to find the relevant peak
-        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
-        {
-            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
-                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
 
-            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R-squared 
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
 
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("Salinity"),   Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
-        }
-    }
-}
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("ProteinCount"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
 
-for( gr in taxGroups )
-{
-    print(gr)
-    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "OxygenReq", c(1,pyramidLength))
-
-    # Store peaks (for each range) for this group
-    if( any( class(results) == "data.frame" ) && nrow(results) )
-    {
-        results <- results[results$Var1==results$Var2,]    # Only include single-window results
-
-        # Iterate over each range to find the relevant peak
-        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
-        {
-            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
-                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
-
-            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
-
-            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("OxygenReq"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
-        }
-    }
-}
-
+dev.off()
+quit()
 
 #glsRangeAnalysisWithFilter( traits, tree, "HighGC",    "OptimumTemp", c(1,pyramidLength) )
 #glsRangeAnalysisWithFilter( traits, tree, "LowGC",     "OptimumTemp", c(1,pyramidLength) )
@@ -1573,19 +2236,19 @@ for( gr in taxGroups )
 #glsRangeAnalysisWithFilter( traits, tree, "GC.60.100", "OptimumTemp", c(1,pyramidLength) )
 
 
-performGLSregressionWithFilter( traits, tree, "Member_Flavobacteriales_200644", "GenomicGC", "Profile.18" )
+performGLSregressionWithFilter( traits, tree, "Member_Flavobacteriales_200644", "GenomicGC", "Profile_1.18" )
 
 
-performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile.3" )
-performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile.8" )
-performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile.15" )
+performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile_1.3" )
+performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile_1.8" )
+performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "Habitat",   "Profile_1.15" )
 
 performGLSregressionWithFilter( traits, tree, "Member_TACK_group_1783275",                 "Habitat",   "Profile.8" )
 performGLSregressionWithFilter( traits, tree, "Member_TACK_group_1783275",                 "Habitat",   "Profile.11" )
-performGLSregressionWithFilter( traits, tree, "Member_TACK_group_1783275",                 "Habitat",   "Profile.27" )
+#performGLSregressionWithFilter( traits, tree, "Member_TACK_group_1783275",                 "Habitat",   "Profile.27" )
 
 performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "Habitat",   "Profile.13" )
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "Habitat",   "Profile.25" )
+#performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "Habitat",   "Profile.25" )
 
 performGLSregressionWithFilter( traits, tree, "Member_Firmicutes_1239",                    "Habitat",   "Profile.3" )
 performGLSregressionWithFilter( traits, tree, "Member_Firmicutes_1239",                    "Habitat",   "Profile.6" )
@@ -1593,21 +2256,21 @@ performGLSregressionWithFilter( traits, tree, "Member_Firmicutes_1239",         
 
 performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",        "OxygenReq", "Profile.8" )
 performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",        "OxygenReq", "Profile.10" )
-performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",        "OxygenReq", "Profile.19" )
+#performGLSregressionWithFilter( traits, tree, "Member_Terrabacteria_group_1783272",        "OxygenReq", "Profile.19" )
 
 performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_201174",              "OxygenReq", "Profile.14" )
-performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_201174",              "OxygenReq", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_201174",              "OxygenReq", "Profile.30" )
+#performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_201174",              "OxygenReq", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "Member_Actinobacteria_201174",              "OxygenReq", "Profile.30" )
 
 performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "OxygenReq", "Profile.8" )
 performGLSregressionWithFilter( traits, tree, "Member_FCB_group_1783270",                  "OxygenReq", "Profile.15" )
 
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.17" )
-performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.28" )
+#performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.17" )
+#performGLSregressionWithFilter( traits, tree, "Member_Proteobacteria_1224",                "OxygenReq", "Profile.28" )
 
 performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.15" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.18" )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.21" )
+#performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.18" )
+#performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile.21" )
 
 
 performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.1" )
@@ -1626,9 +2289,9 @@ performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Pr
 performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.15" )
 performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.15" )
 
-performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "Member_all_1", "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "HighGC",       "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "LowGC",        "OptimumTemp", "Profile.20" )
 
 
 performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.1" )
@@ -1643,17 +2306,17 @@ performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profi
 performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.15" )
 performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.15" )
 
-performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "GC.0.40",   "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "GC.40.60" , "OptimumTemp", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "GC.60.100", "OptimumTemp", "Profile.20" )
 
 performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.1"   )
 performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.5"   )
 performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.11"  )
 
 performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.15"  )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.19"  )
-performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.24"  )
+#performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.19"  )
+#performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",  "TempHighLow75", "Profile.24"  )
 
 performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.1"  )
 performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLow75", "Profile.5"  )
@@ -1667,8 +2330,8 @@ performGLSregressionWithFilter( traits, tree, "Member_Archaea_2157", "TempHighLo
 performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.1" )
 performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.8" )
 performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.14" )
-performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.20" )
-performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.26" )
+#performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.20" )
+#performGLSregressionWithFilter( traits, tree, "Member_Opisthokonta_33154", "GenomicGC", "Profile.26" )
 
 
 
