@@ -48,6 +48,52 @@ def plotMFEProfileWithGC(taxId, profileId, data):
     plt.close(fig)
 
 
+randomizationTypesLabels = {11:"Codon shuffle", 12:"Vertical shuffle"}  # TODO - move this to a good place (resolve dependency problem)
+def plotMFEProfileForMultipleRandomizations(taxId, profileId, data):
+    fig, ax1 = plt.subplots()
+
+    arbitraryKey = data.keys()[0]
+    data[arbitraryKey][['native']].plot(ax=ax1)
+    labels = []
+    labels.append("Native")
+    
+    for shuffleType in data.keys():
+        data[shuffleType][['shuffled']].plot(ax=ax1)
+        labels.append(randomizationTypesLabels[shuffleType])
+
+    ax1.legend(labels)
+    #L = plt.legend()
+    #for i, label in enumerate(labels):
+    #    L.get_texts()[i].set_text(label)
+        
+    #data[arbitraryKey][['shuffled75', 'shuffled25']].plot(ax=ax1, style='--')
+
+    speciesName = getSpeciesName(taxId)
+
+    plt.title(speciesName)
+
+    plt.xlabel('Position (nt, window start, from cds start)')
+
+    #tile = getProfileHeatmapTile(99991320, data[11], (-2.9,2.9) )
+    #print(tile)
+    #tileData = plt.imread(tile, format='png')
+    #
+    #cmapNormalizer        = CenterPreservingNormlizer(-2.9, 2.9)
+    #plt.imshow( np.array( tileData ).reshape(1,-1), cmap='bwr', norm=cmapNormalizer, extent=(1400,1900,-8,-7.5), interpolation='bilinear' )
+    #plt.imshow( tileData, cmap='bwr', norm=cmapNormalizer, extent=(1400,1900,-8,-7.5), interpolation='bilinear' )
+    
+
+    ax1.set_title("Mean LFE for %s" % speciesName)
+    ax1.set_ylabel('Mean LFE')
+    #ax1.legend(fontsize=8)
+    ax1.grid(True)
+
+    #profileId = "tbd" # str(args.profile.ProfileId).replace(':', '-')
+    plt.savefig("mfe_v2_40nt_cds_%s_allshuffles_%s.pdf" % (profileId, getSpeciesFileName(taxId)) )
+    plt.savefig("mfe_v2_40nt_cds_%s_allshuffles_%s.svg" % (profileId, getSpeciesFileName(taxId)) )
+    plt.close(fig)
+
+    
 def plotMFEProfileMultiple(taxId, profileId, data, additionalVars, scaleBar=None):
     fig, axes = plt.subplots(2+len(additionalVars), sharex=True)
 
@@ -236,7 +282,7 @@ Plot the profile for a single species (contained in 'data'), save into a file, a
  data    - profile data for multiple species (including the one specified by taxId...)
  yrange  - y-range scale (this allows all tiles to have the same scale)
 """
-def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None):
+def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None, profilesGroup=0):
     if not taxId in data:
         print("getProfileHeatmapTile(): taxId {} not found".format(taxId))
         return None
@@ -245,7 +291,11 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
     assert(yrange[0] < yrange[1])
     
     #fig, ax = plt.subplots()
-    fig, (ax1,ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+    if not phylosignalProfiles is None:
+        fig, (ax1,ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+    else:
+        fig, ax1 = plt.subplots()
+        ax2 = None
 
     # read profile data
     series = data[taxId]
@@ -276,6 +326,9 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
 
     if( not phylosignalProfile is None ):
         ax2.imshow( phylosignalProfile.values.reshape(1,-1), cmap='bwr', aspect='auto', norm=phylosignalNormalizer, interpolation="bilinear" )
+        
+    #else:  # if phylosignal is not shown, the profile will be also be plotted on the 2nd axis 
+    #    ax2.imshow( imdata, cmap='bwr', aspect='auto', norm=cmapNormalizer, interpolation="bilinear" )
 
 
     #pos = list(ax1.get_position().bounds)
@@ -284,7 +337,10 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
     #fig.text(pos[0]-0.01, pos[1]+pos[3]/2., taxDescriptor, va='center', ha='right', fontsize=8)
 
     ax1.set_yticks(())
-    ax2.set_yticks(())
+    
+    if not ax2 is None:
+        ax2.set_yticks(())
+        
     if ticks:
         tickValues = range(10, len(series)-10, 10)
         ax1.set_xticks(tickValues)
@@ -293,7 +349,10 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
         ax1.set_xticks(())
             
 
-    tileFilename = "heatmap_profile_taxid_%d.png" % taxId
+    if profilesGroup == 0:
+        tileFilename = "heatmap_profile_taxid_{}.png".format(taxId)
+    else:
+        tileFilename = "heatmap_profile_taxid_{}_g{}.png".format(taxId, profilesGroup)
     plt.savefig(tileFilename, orientation='portrait', bbox_inches='tight')
     #plt.savefig("heatmap_profile_taxid_%d.svg" % taxId, orientation='portrait')
     plt.close(fig)
@@ -314,6 +373,7 @@ def getLegendHeatmapTile(yrange):
     fig, ax = plt.subplots()
 
     series = np.linspace( 10**yrange[0], 1 - 10**(-yrange[1]), 100)  # Create a range whose logit image will cover the range yrange...
+    print(series)
     #series = np.linspace( yrange[0], yrange[1], 100)   # linear scale
     series = np.log10(series/(1-series))  # Logit function (inverse if logistic function)
     #print(series)
@@ -344,10 +404,31 @@ def getLegendHeatmapTile(yrange):
     ax.set_xticklabels( ["%.2g" % x for x in tick_values], size="xx-large" )  # set tick labels
 
     tileFilename = "heatmap_profile_legend.png"
-    plt.savefig(tileFilename, orientation='landscape', bbox_inches='tight', dpi=600)
+    plt.savefig(tileFilename, orientation='landscape', bbox_inches='tight', dpi=1000)
     plt.close(fig)
 
     return tileFilename
+
+
+def getNodeDiversityPlot(clusterRadius, groupRadius, identifier):
+    fig, ax = plt.subplots()
+
+    scale=50.0
+    shapeScale=400.0
+
+    ax.scatter(0, 0, s=clusterRadius*scale*shapeScale, facecolors="none", edgecolors="black" )
+    ax.scatter(0, 0, s=groupRadius*scale*shapeScale, facecolors="none", edgecolors="blue" )
+
+    ax.set_aspect("equal")
+    ax.set_xticks( [] )
+    ax.set_yticks( [] )
+    ax.set_xlim((-scale*0.2, scale*0.2))
+    ax.set_ylim((-scale*0.2, scale*0.2))
+
+    tileName = "node_diversity_{}.png".format(identifier)
+    plt.savefig( tileName, bbox_inches='tight', dpi=100)
+    plt.close(fig)
+    return tileName
     
 
 
@@ -362,7 +443,7 @@ def getHeatmaplotProfilesValuesRange(data, dummy1=None, dummy2=None):
 
     # Find the overall range that will be used to normalize all values
     # Todo - allow some "over-exposure" to expand the mid range at the cost of losing detail at the extremes
-    valuesRange = [10.0, -10.0]
+    valuesRange = [0.0, 0.0]
     for taxId in keysInOrder:
         series = data[taxId]
 
@@ -373,8 +454,9 @@ def getHeatmaplotProfilesValuesRange(data, dummy1=None, dummy2=None):
             valuesRange[0] = currMin
         if(currMax > valuesRange[1] ):
             valuesRange[1] = currMax
-    assert(valuesRange[0] < 0.0)
-    assert(valuesRange[1] > 0.0)
+    print(valuesRange)
+    #assert(valuesRange[0] < 0.0)
+    #assert(valuesRange[1] > 0.0)
     maxRange = max(-valuesRange[0], valuesRange[1])
     
     return (-maxRange, maxRange)  # return the normalized range used
@@ -441,7 +523,7 @@ def plotCorrelations(data, _labels, group_func=None, order=None):
     #map  = sns.heatmap()
     #keysInOrder = data.keys()
 
-def scatterPlotWithColor(taxId, profileId, data, xvar, yvar, colorvar, title):
+def scatterPlotWithColor(taxId, profileId, shuffleType, data, xvar, yvar, colorvar, title):
     fig, ax1 = plt.subplots()
 
     #data.plot(x=xvar, y=yvar, c=colorvar, size=3, ax=ax1, kind='scatter')
@@ -474,8 +556,8 @@ def scatterPlotWithColor(taxId, profileId, data, xvar, yvar, colorvar, title):
     plt.grid(True)
     #plt.legend(loc=(0,1), scatterpoints=1, ncol=3, fontsize='small')
 
-    plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_with_%s_%s_%s.pdf" % (yvar, xvar, colorvar, profileId, getSpeciesFileName(taxId)))
-    plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_with_%s_%s_%s.svg" % (yvar, xvar, colorvar, profileId, getSpeciesFileName(taxId)))
+    plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_with_%s_%s_t%d_%s.pdf" % (yvar, xvar, colorvar, profileId, shuffleType, getSpeciesFileName(taxId)))
+    plt.savefig("mfe_v2_40nt_genelevel_%s_vs_%s_with_%s_%s_t%d_%s.svg" % (yvar, xvar, colorvar, profileId, shuffleType, getSpeciesFileName(taxId)))
     plt.close(fig)
     
 
@@ -691,7 +773,11 @@ def loadProfileData(files):
                 deltas_df = store["/deltas_"+key[4:]]
                 genes_df = store["/deltas_"+key[4:]]
                 summary_df = store["/statistics_"+key[4:]]
-                profileCorrelations_df = store["/profiles_spearman_rho_"+key[4:]]
+                
+                profileCorrelations_df = None
+                if "/profiles_spearman_rho_"+key[4:] in store:
+                    profileCorrelations_df = store["/profiles_spearman_rho_"+key[4:]]
+                    
 
 
                 df['MFEbias'] = pd.Series(df['native']-df['shuffled'], index=df.index)
@@ -703,6 +789,16 @@ def loadProfileData(files):
 
                 cdsCount = int(summary_df.iloc[0]['cds_count'])
                 assert(cdsCount >= 100)
+                print("--------")
+                firstPos = (deltas_df['pos'].min())
+                lastPos = (deltas_df['pos'].min())
+                numSamplesIncludedInProfile = min( pd.isnull(deltas_df[deltas_df['pos']==firstPos]['delta']).sum(),
+                                                   pd.isnull(deltas_df[deltas_df['pos']==lastPos ]['delta']).sum() )
+
+                print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
+                    continue
+                
                 #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
                 meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
 
@@ -818,7 +914,15 @@ def getSpeciesShortestUniqueNamesMapping_memoized():
 
 
 def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None):
+    filteredProfiles = {}
+    for key, profile in biasProfiles.items():
+        if not np.any(np.isnan(profile)):
+            filteredProfiles[key] = profile
+    biasProfiles = filteredProfiles
+    
     X = np.vstack(biasProfiles.values()) # convert dict of vectors to matrix
+    #X = X[~np.any(np.isnan(X), axis=1)]  # remove points containig NaN
+    print("Creating PCA plot...")
 
     shortNames = getSpeciesShortestUniqueNamesMapping_memoized()
 

@@ -6,10 +6,10 @@ from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, AttrFace, PhyloTree
 #from PyQt4 import QtCore, QtGui
 import numpy as np
-from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange
+from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange, getNodeDiversityPlot
 from reference_trees import pruneReferenceTree_Nmicrobiol201648, pruneTreeByTaxonomy, extendTreeWithSpecies, getTaxidsFromTree
 from ncbi_taxa import ncbiTaxa
-from cluster_profiles import analyzeProfileClusters
+from cluster_profiles import analyzeProfileClusters, calcDiversityMetrics
 
 
 # ---------------------------------------------------------
@@ -28,6 +28,8 @@ fontScale = 16
 # Dimensions for drawing profiles
 profileDrawingWidth  = 150
 profileDrawingHeight = fontScale*1.5
+#diversityIconDrawingWidth = 150
+diverScale = 15
 
 #
 profileStepNt  = 10
@@ -38,9 +40,11 @@ profileWidthNt = 40
 #
 # Distance threshold for deciding how many clusters to use for a given taxon
 #max_distance_to_split_clusters = 1.30  # previous level (with 4 levels)
-max_distance_to_split_clusters = 1.60
+#max_distance_to_split_clusters = 1.60
+max_distance_to_split_clusters = 1.03  # ===> Aquificae  d=1.02908593205
+#max_distance_to_split_clusters = 0.9
 # Maximum number of clusters (for each taxon)
-max_clusters = 9
+max_clusters = 18
 # Taxons below this level will be merged
 collapedTaxonomicTreeLevel = 3
 # Font-size for the taxon name at each level
@@ -110,13 +114,12 @@ habitatToColor = {'HostAssociated': 'LightPink' , 'Aquatic': 'LightSeaGreen', 'S
 
 algaeToColor = {'Yes': 'MediumTurquoise', 'No': 'LemonChiffon'}
 
-def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=False):
+def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=False, highlightSpecies=frozenset(), numProfileGroups=1):
     nstyle = NodeStyle()
     node.set_style(nstyle)
     
     nstyle["size"] = 0     # hide node symbols
-    
-    
+
     level = len(node.get_ancestors())
     if not node.is_leaf():
         if( level==1 or level==2 or level==3):
@@ -135,23 +138,31 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
 
     else: #node.is_leaf():
         assert(node.name)
-        name = AttrFace("name", fsize=fontScale, fstyle="italic")
+
+        textColor = "black"
+        if node.taxId in highlightSpecies:  # highlight species specified with --highlight-species
+            textColor = "IndianRed"
+            
+        name = AttrFace("name", fsize=fontScale, fstyle="italic", fgcolor=textColor)
         faces.add_face_to_node(name, node, column=0)
 
-        #-------------------------------
-        # LFE profile
-        #
-        tile = None
-        if not tileFunc is None:
-            print("Getting tile for {}...".format(node.taxId))
-            tile = tileFunc(node.taxId)
-            print("...{}".format(tile))
-            
-        if not tile is None:
-            profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False) # no support for margin_right?
-            faces.add_face_to_node(profileFace, node, column=1, aligned=True)
-        else:
-            print("No tile for node {}".format(node.taxId))
+        for group in range(numProfileGroups):
+            #-------------------------------
+            # LFE profile
+            #
+            tile = None
+            if not tileFunc is None:
+                print("Getting tile for taxid {} group {}...".format(node.taxId, group))
+                tile = tileFunc(node.taxId, group)
+                print("...{}".format(tile))
+
+            if not tile is None:
+                profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False) # no support for margin_right?
+                profileFace.margin_right = 10
+                #profileFace.margin_left  = 10
+                faces.add_face_to_node(profileFace, node, column=group+1, aligned=True)
+            else:
+                print("No tile for node {}".format(node.taxId))
 
         #proteinCount = getSpeciesProperty(taxId, 'protein-count')
         #if not proteinCount[0] is None:
@@ -173,7 +184,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
             genomicGC = float(genomicGC)
             genomicGCFace = faces.RectFace( width= (genomicGC-18.0)/(73.0-18.0)*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%genomicGC, "fontsize":8, "color":"Black"} )
             genomicGCFace.margin_right = 5
-            faces.add_face_to_node(genomicGCFace, node, column=2, aligned=True)
+            faces.add_face_to_node(genomicGCFace, node, column=2+numProfileGroups-1, aligned=True)
         
 
         if( not hideEnvironmentalVars):
@@ -185,7 +196,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 temperatureColor = temperatureRangeToColor[categoricalProp[0]]
                 temperatureFace = faces.RectFace( width=25, height=10, fgcolor=temperatureColor, bgcolor=temperatureColor )
                 temperatureFace.margin_right = 5
-                faces.add_face_to_node(temperatureFace, node, column=3, aligned=True)
+                faces.add_face_to_node(temperatureFace, node, column=3+numProfileGroups-1, aligned=True)
 
             #-------------------------------
             # Salinity
@@ -198,7 +209,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 salinityColor = salinityToColor[salinity]
                 salinityFace = faces.RectFace( width=25, height=10, fgcolor=salinityColor, bgcolor=salinityColor )
                 salinityFace.margin_right = 5
-                faces.add_face_to_node(salinityFace, node, column=4, aligned=True)
+                faces.add_face_to_node(salinityFace, node, column=4+numProfileGroups-1, aligned=True)
 
 
             #-------------------------------
@@ -212,7 +223,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 oxygenReqColor = oxygenReqToColor[oxygenReq]
                 oxygenReqFace = faces.RectFace( width=25, height=10, fgcolor=oxygenReqColor, bgcolor=oxygenReqColor )
                 oxygenReqFace.margin_right = 5
-                faces.add_face_to_node(oxygenReqFace, node, column=5, aligned=True)
+                faces.add_face_to_node(oxygenReqFace, node, column=5+numProfileGroups-1, aligned=True)
 
             #-------------------------------
             # Habitat
@@ -225,7 +236,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 habitatColor = habitatToColor[habitat]
                 habitatFace = faces.RectFace( width=25, height=10, fgcolor=habitatColor, bgcolor=habitatColor )
                 habitatFace.margin_right = 5
-                faces.add_face_to_node(habitatFace, node, column=6, aligned=True)
+                faces.add_face_to_node(habitatFace, node, column=6+numProfileGroups-1, aligned=True)
 
             #-------------------------------
             # Algae
@@ -238,7 +249,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 algaeColor = algaeToColor[algae]
                 algaeFace = faces.RectFace( width=25, height=10, fgcolor=algaeColor, bgcolor=algaeColor )
                 algaeFace.margin_right = 5
-                faces.add_face_to_node(algaeFace, node, column=7, aligned=True)
+                faces.add_face_to_node(algaeFace, node, column=7+numProfileGroups-1, aligned=True)
 
             #-------------------------------
             # paired fraction
@@ -248,7 +259,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
                 pairedFraction = float(pairedFraction)
                 pairedFractionFace = faces.RectFace( width= pairedFraction*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%(pairedFraction*100), "fontsize":8, "color":"Black"} )
                 pairedFractionFace.margin_right = 5
-                faces.add_face_to_node(pairedFractionFace, node, column=8, aligned=True)
+                faces.add_face_to_node(pairedFractionFace, node, column=8+numProfileGroups-1, aligned=True)
 
         # Hide the lines of dummyTopology nodes (i.e., nodes for which the tree topology is unknown and were added under the top node)
         if "dummyTopology" in node.features and node.dummyTopology:
@@ -261,8 +272,9 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
 Return unary layout function that also receives a tile function (for getting image to plot along each node)
 TODO - are there other parameters to layout funcs that should be passed?
 """
-def makeNodeLayoutFuncWithTiles( layoutfn, tileFunc=None, hideEnvironmentalVars=False):
-    return lambda node: layoutfn(node, tileFunc=tileFunc, hideEnvironmentalVars=hideEnvironmentalVars)
+def makeNodeLayoutFuncWithTiles( layoutfn, tileFunc=None, hideEnvironmentalVars=False, highlightSpecies=frozenset(), numProfileGroups=1):
+    print("makeNodeLayoutFuncWithTiles: {}".format(len(highlightSpecies)))
+    return lambda node: layoutfn(node, tileFunc=tileFunc, hideEnvironmentalVars=hideEnvironmentalVars, highlightSpecies=highlightSpecies, numProfileGroups=numProfileGroups)
 
         
 
@@ -334,17 +346,17 @@ def drawTrees(completeTree, prunedTree, args=None):
 
     files = []
     if not args is None and args.use_profile_data:
-        files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
+        files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
     
-    print("Loading profile data for %d files..." % len(files))
-    (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+    #print("Loading profile data for %d files..." % len(files))
+    #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
             
     phylosignalProfiles = None
     if( args.use_phylosignal_data ):
         phylosignalProfiles = loadPhylosignalProfiles( args.use_phylosignal_data )
         
     print("(initializing tile-gen)")
-    tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
+    tileGenerator = ProfileDataCollection(files, phylosignalProfiles)
 
     ts = TreeStyle()
     #ts.mode = "c"
@@ -362,7 +374,7 @@ def drawTrees(completeTree, prunedTree, args=None):
     profilesForPCA = collectProfilesFromTree(prunedTree, biasProfiles )
 
     PCAForProfiles( profilesForPCA, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species )
-    return
+    return   # TODO remove me
 
     if args.X_server:
         _disp = Display
@@ -391,25 +403,69 @@ def drawTrees(completeTree, prunedTree, args=None):
 """
 Plot each profile separataly, and return the filename of a 'tile' that can be included in other graphs.
 """
-class ProfileDataTileGenerator(object):
-    def __init__(self, files, biasProfiles, corrData, phylosignalProfiles=None):
-        self._biasProfiles = biasProfiles
+class ProfileDataCollection(object):
+    #def __init__(self, files, biasProfiles, phylosignalProfiles=None):
+    def __init__(self, files, phylosignalProfiles=None, externalYrange=None):
 
-        self._yrange = getHeatmaplotProfilesValuesRange(biasProfiles)  # plot all profiles once, to determine a single color-scale that will fit them all
+        self.xdata = []
+        self.ydata = []
+        self.ydata_nativeonly = []
+        self.ydata_shuffleonly = []
+        self.label = []
+        self.groups = []
+        self.filesUsed = []
+        self.biasProfiles = []
+        self.dfProfileCorrs = []
+        self.summaryStatistics = []
+        self.numProfileGroups = len(files)
+
+        if externalYrange is None:
+            yrange = [0.0, 0.0]
+        else:
+            yrange = [-externalYrange, externalYrange]
+        
+        for group, files in enumerate(files):
+            (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+            self.xdata.append( xdata )
+            self.ydata.append( ydata )
+            self.ydata_nativeonly.append( ydata_nativeonly )
+            self.ydata_shuffleonly.append( ydata_shuffledonly )
+            self.label.append( labels )
+            self.groups.append( groups )
+            self.filesUsed.append( filesUsed )
+            self.biasProfiles.append( biasProfiles )
+            self.dfProfileCorrs.append( dfProfileCorrs )
+            self.summaryStatistics.append( summaryStatistics )
+            if externalYrange is None:
+                yrangeForThisGroup = getHeatmaplotProfilesValuesRange(biasProfiles)  # plot all profiles once, to determine a single color-scale that will fit them all
+                if yrangeForThisGroup[0] < yrange[0]:
+                    yrange[0] = yrangeForThisGroup[0]
+                if yrangeForThisGroup[1] > yrange[1]:
+                    yrange[1] = yrangeForThisGroup[1]
+
+        assert(len(self.biasProfiles) == self.numProfileGroups)
+
+        self._yrange = tuple(yrange)
 
         self._phylosignalProfiles = phylosignalProfiles
 
-    def getProfileTile(self, taxid):
-        return getProfileHeatmapTile(taxid, self._biasProfiles, self._yrange, phylosignalProfiles=self._phylosignalProfiles)
+    def getProfileTile(self, taxid, profilesGroup=0):
+        return getProfileHeatmapTile(taxid, self.biasProfiles[profilesGroup], self._yrange, phylosignalProfiles=self._phylosignalProfiles, profilesGroup=profilesGroup)
 
     """
     Return a free function that will return a tile based on the taxid
     """
     def getProfileTileFunc(self):
-        return lambda x: self.getProfileTile(x)
+        return lambda x, profilesGroup=0: self.getProfileTile(x, profilesGroup)
                 
     def getYRange(self):
         return self._yrange
+
+    def getNumProfileGroups(self):
+        return self.numProfileGroups
+
+    def getBiasProfiles(self, profilesGroup=0):
+        return self.biasProfiles[profilesGroup]
         
 
 def testTileFunc(taxId):
@@ -420,31 +476,37 @@ def testTileFunc(taxId):
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
 """
-def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile="", hideLegend=False, hideEnvironmentalVars=False, ownXserver=False, treeScale=100):
+def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile="", hideLegend=False, hideEnvironmentalVars=False, ownXserver=False, treeScale=100, highlightSpecies=frozenset(), numProfileGroups=1, limitTaxonomy=None ):
     taxa = getSpeciesToInclude()
 
     if tree is None:
         # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
         # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
         tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
+
+    # TODO - impl pruning of taxonomic trees.
+    if( not limitTaxonomy is None ):  # limit taxonomy to specified taxon
+        tree = pruneTreeByTaxonomy( tree, limitTaxonomy  )
+        
     
     ts = TreeStyle()
     ts.show_leaf_name = False
     ts.show_scale = False
     ts.scale = treeScale
     #ts.branch_vertical_margin = 10  # Y-axis spacing
-    ts.layout_fn = makeNodeLayoutFuncWithTiles( nodeLayoutWithTaxonomicNames, tileFunc, hideEnvironmentalVars=hideEnvironmentalVars )
+    ts.layout_fn = makeNodeLayoutFuncWithTiles( nodeLayoutWithTaxonomicNames, tileFunc, hideEnvironmentalVars=hideEnvironmentalVars, highlightSpecies=highlightSpecies, numProfileGroups=numProfileGroups )
 
     # Add header (with a caption above each column)
-    ts.aligned_header.add_face(TextFace("LFE"), column=1)
-    ts.aligned_header.add_face(TextFace("GC%"), column=2)
+    for group in range(numProfileGroups):
+        ts.aligned_header.add_face(TextFace("LFE-{}".format(group)), column=group+1)
+    ts.aligned_header.add_face(TextFace("GC%"), column=2+numProfileGroups-1)
     if( not hideEnvironmentalVars):
-        ts.aligned_header.add_face(TextFace("Tmp"), column=3)
-        ts.aligned_header.add_face(TextFace("Hal"), column=4)
-        ts.aligned_header.add_face(TextFace("Oxy"), column=5)
-        ts.aligned_header.add_face(TextFace("Hab"), column=6)
-        ts.aligned_header.add_face(TextFace("Alg"), column=7)
-        ts.aligned_header.add_face(TextFace("Paired"), column=8)
+        ts.aligned_header.add_face(TextFace("Tmp"),    column=3+numProfileGroups-1)
+        ts.aligned_header.add_face(TextFace("Hal"),    column=4+numProfileGroups-1)
+        ts.aligned_header.add_face(TextFace("Oxy"),    column=5+numProfileGroups-1)
+        ts.aligned_header.add_face(TextFace("Hab"),    column=6+numProfileGroups-1)
+        ts.aligned_header.add_face(TextFace("Alg"),    column=7+numProfileGroups-1)
+        ts.aligned_header.add_face(TextFace("Paired"), column=8+numProfileGroups-1)
 
     
     if( not hideLegend ):
@@ -530,7 +592,8 @@ def makeProfilesArray(keys, biasProfiles):
     # Filter keys with missing profiles
     keysFound = [key for key in keys if key in biasProfiles]
     if( not keysFound ):
-        raise Exception("No profiles found matching requested keys: %s..." % str(keys))
+        return None
+        #raise Exception("No profiles found matching requested keys: %s..." % str(keys))
 
     # Find out the length of the profile
     profileLength = biasProfiles[keysFound[0]].shape[0]  # We will use the length of the first profile, and later verify the following profiles match
@@ -543,7 +606,7 @@ def makeProfilesArray(keys, biasProfiles):
 
     return out
 
-def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
+def nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection): #biasProfiles, tileFunc=None):
     level = len(node.get_ancestors())
     taxId = int(node.name)
     nodeName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
@@ -563,11 +626,13 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
 
         tile = None
 
-        profilesArray = makeProfilesArray( members, biasProfiles )
+        profilesArray = makeProfilesArray( members, profileDataCollection.getBiasProfiles( profilesGroup=0 ) )  # TODO add groups
+        if profilesArray is None:
+            pass
 
         #print("//// %d %s" % (level, profilesArray.shape))
 
-        if( profilesArray.shape[0] == 1 ):
+        elif( profilesArray.shape[0] == 1 ):
             #if not taxId in biasProfiles:
             #    print("TaxId %d not found" % taxId)
                 
@@ -590,8 +655,20 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
                 
         else:
             # Perform clustering
-            centers, labels, dist = analyzeProfileClusters( profilesArray, n_init, max_distance_to_split_clusters, max_clusters )  # use default metric
+            centers, labels, dist, distThreshold = analyzeProfileClusters( profilesArray, n_init, max_distance_to_split_clusters, max_clusters )  # use default metric
+            print("===> {}  d={}".format( nodeName, dist ) )
             groupCounts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each group
+
+            #diversityTile = getNodeDiversityPlot(distThreshold, dist, taxId)
+
+            #diversityFace = faces.ImgFace( diversityTile, width=diversityIconDrawingWidth, height=diversityIconDrawingWidth, is_url=False )
+            #faces.add_face_to_node( diversityFace, node, 0, position="float" )
+
+            diversityMetric = calcDiversityMetrics( profilesArray )
+            df1 = faces.CircleFace( radius=diversityMetric*diverScale, color="RoyalBlue" )
+            faces.add_face_to_node( df1, node, 0, aligned=False, position="float-behind" )
+            df1.opacity=0.3
+
             
             for i in range(centers.shape[0]):
                 tileDummyId = 1900000000+taxId*10+i
@@ -632,7 +709,7 @@ def nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles, tileFunc=None):
         
 
 
-def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
+def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
     allTaxa = getSpeciesToInclude()
 
     # ---------------------------------------------------------
@@ -664,7 +741,8 @@ def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
         return out
 
     global yScale
-    yScale = getHeatmaplotProfilesValuesRange( biasProfiles )
+    if yScale is None:
+        yScale = profileDataCollection.getYRange()
 
     if ownXserver:
         _disp = Display
@@ -686,7 +764,7 @@ def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
             ts = TreeStyle()
             ts.show_leaf_name = False
             ts.branch_vertical_margin = 6  # Y-axis spacing
-            ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, biasProfiles)
+            ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection)
             ts.show_scale = False
             ts.margin_top = 25
             ts.margin_bottom = 50
@@ -698,7 +776,9 @@ def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
 
                 ts.legend_position = 1 #=top left
 
-                lastProfileStart = (biasProfiles[biasProfiles.keys()[0]].shape[0] - 1) * profileStepNt
+                profiles = profileDataCollection.getBiasProfiles( profilesGroup=0 )
+
+                lastProfileStart = (profiles[profiles.keys()[0]].shape[0] - 1) * profileStepNt
                 widthFor100nt = profileDrawingWidth * (100. / lastProfileStart)
                 scaleFace = faces.RectFace( width=widthFor100nt, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
                 scaleFace.margin_top     = 10
@@ -732,10 +812,16 @@ def plotCollapsedTaxonomicTree(biasProfiles, ownXserver=False):
                 unitsFace = TextFace("kcal/mol/window", fsize=fontScale*1.5 )
                 unitsFace.margin_top = 0
                 ts.legend.add_face( unitsFace, column=2 )
-                
+
+                print(yScale)
                 legendColorScaleTile = getLegendHeatmapTile(yScale)
                 legendColorScaleFace = faces.ImgFace(legendColorScaleTile, width=480, height=80, is_url=False) # no support for margin_right?
                 ts.legend.add_face( legendColorScaleFace, column=3 )
+
+                df2 = faces.CircleFace( radius=max_distance_to_split_clusters*diverScale, color="RoyalBlue" )
+                ts.legend.add_face( df2, column=4 )
+                df2.opacity=0.3
+                
 
                 # Test rich text plotting, using Qt (this didn't work...)
                 #txtItem = QtGui.QGraphicsTextItem( "Hello, World! " + unichr(0x1d6ab)+ "LFE" )
@@ -807,7 +893,7 @@ def standalone():
     import os
 
     argsParser = argparse.ArgumentParser()
-    argsParser.add_argument("--use-profile-data", type=str, default="")
+    argsParser.add_argument("--use-profile-data", type=parseList(str), default=())
     argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed"), default="taxonomic")
     argsParser.add_argument("--use-phylosignal-data", type=str, default="")
     argsParser.add_argument("--limit-taxonomy", type=int, default=None)
@@ -820,11 +906,13 @@ def standalone():
     argsParser.add_argument("--font-size", type=float, default=7)
     argsParser.add_argument("--X-server", action="store_true", default=False)
     argsParser.add_argument("--highlight-species", type=parseList(int), default=())
-
-
-
-    
+    argsParser.add_argument("--use-Y-range", type=float, default=None)
     args = argsParser.parse_args()
+
+
+    global yScale
+    if not args.use_Y_range is None:
+        yScale = [-args.use_Y_range, args.use_Y_range]
 
     phylosignalProfiles = None
     if( args.use_phylosignal_data ):
@@ -853,26 +941,45 @@ def standalone():
         if( not args.use_profile_data ):
             raise Exception()
         
-        files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
+        files = []
 
-        print("Loading profile data for %d files..." % len(files))
-        (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+        if args.use_profile_data:
+            files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
+
+        print(files)
         
-        return plotCollapsedTaxonomicTree(biasProfiles, ownXserver=args.X_server)
+        #print("Loading profile data for %d files..." % len(files))
+        #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+
+        tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
+        
+        return plotCollapsedTaxonomicTree(tileGenerator, ownXserver=args.X_server)
     
     elif( args.use_tree=="taxonomic" ):
         files = []
 
         if args.use_profile_data:
-            files = [x for x in glob(args.use_profile_data) if os.path.exists(x)]
+            files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
 
-        print("Loading profile data for %d files..." % len(files))
-        (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
-
-        tileGenerator = ProfileDataTileGenerator(files, biasProfiles, dfProfileCorrs, phylosignalProfiles)
+        print(files)
         
+        #print("Loading profile data for %d files..." % len(files))
+        #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+
+        tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
+
+
+        PCAForProfiles( tileGenerator.getBiasProfiles(profilesGroup=0), tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species )
+        
+
         #return plotSpeciesOnTaxonomicTree()
-        return plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, ownXserver=args.X_server, treeScale=7 )
+        ret = plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, ownXserver=args.X_server, treeScale=7, highlightSpecies=frozenset(args.highlight_species), numProfileGroups=tileGenerator.getNumProfileGroups(), limitTaxonomy=args.limit_taxonomy )
+
+        print( "--"*20 )
+        print( "Y scale used: {} (external: {})".format(tileGenerator.getYRange(), bool(not args.use_Y_range is None) ) )
+        print( "--"*20 )
+        
+        return ret
 
 
 if __name__=="__main__":
