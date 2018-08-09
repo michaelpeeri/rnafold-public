@@ -7,24 +7,27 @@ library("reshape")
 library("scales")
 library("rhdf5")
 library("rredis")
+#library("redux")
 library("phylobase")
 library("ape")
-library("adephylo")
+#library("adephylo")
 library("phytools")  # for read.newick
 library("phylosignal")
 library("grid")
+library("gridExtra")
 library("dplyr")
 library("rlang") # for duplicate
 library("kde1d")
+library("minerva")
 
 #---------------------------------------------------------------
 # Configuration
 
 # Source: http://www2.math.su.se/PATHd8/
 # Created using: ~/src/PATHd8/PATHd8 ./data/nmicrobiol201648-s6.txt ./data/nmicrobiol201648-s6.txt.nw.PATHd8.nw
-#inputTree <- "nmicro_s6_pruned_with_taxids.nw"
-inputTree <- "test_tree.nw"   # TODO - verify this tree (the file is identical to nmicro_s6_pruned_with_taxids.nw)
+inputTree <- "nmicro_s6_pruned_with_taxids.nw"
 
+#redis <- redux::hiredis(host="power5", password="rnafold")
 redisConnect(host="power5", password="rnafold")
 
 #profileStart <- 0
@@ -48,19 +51,21 @@ taxidToKingdomFilename <- "TaxidToKingdom.csv"   # create file using: python2 cr
 #pyramidLength <- 99+1  # unit is single windows (not real nt when profileStep>1)
 pyramidLength <- 30+1  # unit is single windows (not real nt when profileStep>1)
 
-maxPyramidHeight <- 4
+maxPyramidHeight <- 1-1
 
 profileMode <- "dLFE"
 #profileMode <- "nativeLFE"
 #profileMode <- "shuffledLFE"
 #profileMode <- "abs(dLFE)"
+#profileMode <- "gc"
 
+loadDeltas <- FALSE
 
 #                                          -r1-  -r2-
-#groupsTableOutputFile.limitRangeFromNt <- c( 0,   70)   # range is inclusive at either end
-#groupsTableOutputFile.limitRangeToNt   <- c(60, 1000)   # range is inclusive at either end
-groupsTableOutputFile.limitRangeFromNt <- c( 0)   # range is inclusive at either end
-groupsTableOutputFile.limitRangeToNt   <- c(10)   # range is inclusive at either end
+groupsTableOutputFile.limitRangeFromNt <- c( 0,   70)   # range is inclusive at either end
+groupsTableOutputFile.limitRangeToNt   <- c(20, 1000)   # range is inclusive at either end
+#groupsTableOutputFile.limitRangeFromNt <- c( 0)   # range is inclusive at either end
+#groupsTableOutputFile.limitRangeToNt   <- c(10)   # range is inclusive at either end
 stopifnot( length(groupsTableOutputFile.limitRangeFromNt) == length(groupsTableOutputFile.limitRangeToNt))
 stopifnot(groupsTableOutputFile.limitRangeFromNt <= groupsTableOutputFile.limitRangeToNt )
 stopifnot( c( groupsTableOutputFile.limitRangeFromNt, 1e8 ) > c( -1, groupsTableOutputFile.limitRangeToNt ) ) # ranges shouldn't overlap
@@ -79,7 +84,7 @@ significanceLevel <- 1e-2
 
 rankTransformResponse <- FALSE
 
-scale.dLFE <- 2.9
+scale.dLFE <- 2.85
 
 
 getProfilePositions <- function( profileId=1 )
@@ -100,24 +105,36 @@ getProfilePositions <- function( profileId=1 )
     }
 }
 
+getProfileReference <- function( profileId )
+{
+    return( profileSpecifications[[profileId]]$reference )
+}
+
+
+
+getProfileVariables <- function( range, profileId=1 )
+{
+    return( vapply(range[1]:range[2], function(x) sprintf("Profile_%d.%d", profileId, x), character(1)) )
+}
+
 
 # Big plot scale (tiny font)
-fontScale <- 8
-cdsScaleResolution <- 35
+#fontScale <- 8
+#cdsScaleResolution <- 35
 
 # Standard scale
-#fontScale <- 12
-#cdsScaleResolution <- 50
+fontScale <- 12
+cdsScaleResolution <- 50
 
 ## Tiny scale (large fonts)
-##fontScale <- 16
-##cdsScaleResolution <- 150
+#fontScale <- 16
+#cdsScaleResolution <- 150
 
 
 
 
-#minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
-minimalTaxonSize <- 20 # Testing only
+minimalTaxonSize <- 9 # Note - should match the value in create_taxid_kingdom_table.py
+#minimalTaxonSize <- 100 # Testing only
 
 
 #cairo_pdf(sprintf("tree_phenotypes_regression.out.%s.by.taxgroups.ranked.%%d.pdf", profileMode))
@@ -156,6 +173,7 @@ readDeltaLFEProfile <- function( taxId, h5filename )
     }
     
     y <- h5ls(h5filename)
+    # Read the profile data
     key <- y[which(startsWith(y[,1], "/df_"))[1], 1]   # find the first element that starts with '/df_'
 
     x <- h5read(h5filename, key )
@@ -166,31 +184,109 @@ readDeltaLFEProfile <- function( taxId, h5filename )
     stopifnot(x$block0_items[[3]]=="shuffled")
     shuffled <- x$block0_values[3,]
 
-    stopifnot(x$block0_items[[1]]=="gc")
-    gc <- x$block0_values[1,]
-
-    if(      profileMode == "dLFE" )
+    gc <- NA
+    if( profileMode == "gc" )
     {
-        return( native - shuffled )
+        stopifnot(x$block0_items[[1]]=="gc")
+        gc <- x$block0_values[1,]
+    }
+
+    diag.d <- NA
+    
+    if( loadDeltas )
+    {
+        # Read the raw differences (for Wilcoxon test)
+        key <- y[which(startsWith(y[,1], "/deltas_"))[1], 1]   # find the first element that starts with '/deltas_'
+        d <- h5read(h5filename, key )
+
+        #print(d$block0_items)
+        #print(d$block1_items)
+        stopifnot(d$block0_items[[1]]=="delta")
+        deltas <- d$block0_values[1,]
+        #print(length(deltas))
+        stopifnot(d$block1_items[[1]]=="pos")
+        poss <- d$block1_values[1,]
+        #print(length(poss))
+
+        if( length(deltas)==length(poss))
+        {
+            data <- data.frame(delta=deltas, pos=poss)
+            print("--")
+            p0 <- min(poss)
+            p1 <- max(poss)
+            N <- sort(unique(poss))
+            diag.d <- data.frame( pos=N, count=integer(length(N)), p.val=double(length(N)), mean.delta=double(length(N)) )
+
+            for( i in N )
+            {
+                sample <- data[data$pos==i,]
+                sample <- sample[!is.na(sample$delta),]
+                #print( sprintf( "%d] %f", i, mean(data[data$pos==i,]$delta) ) )
+                #print( length(sample$delta) )
+                #print( mean(sample$delta) )
+                diag.d[diag.d$pos==i,]$count <- length(sample$delta)
+                diag.d[diag.d$pos==i,]$p.val = wilcox.test(sample$delta, alternative="two.sided")$p.value
+                diag.d[diag.d$pos==i,]$mean.delta = mean(sample$delta)
+
+                diag.d$realval  <- native - shuffled
+                diag.d$native   <- native
+                diag.d$shuffled <- shuffled
+            }
+
+            if( length(deltas) > 0 )
+            {
+                #d <- data.frame(melt( diag.p, id.vars=c("pos") ))
+                #print(colnames(d))
+
+                p <- ggplot( data=diag.d, aes(x=pos) ) +
+                    geom_line( aes(y=log10(p.val)), color="red" ) +
+                    geom_hline( yintercept=-2 )
+                print(p)
+
+                p <- ggplot( data=diag.d, aes(x=pos) ) +
+                    geom_line( aes(y=count), color="grey" )
+                print(p)
+
+                p <- ggplot( data=diag.d, aes(x=pos) ) +
+                    geom_line( aes(y=mean.delta), color="grey",  size=2,   alpha=0.3 ) +
+                    geom_line( aes(y=realval),    color="black", size=0.6 ) +
+                    geom_line( aes(y=native),     color="green" ) +
+                    geom_line( aes(y=shuffled),   color="red" ) +
+                    geom_hline( yintercept=0 ) +
+                    scale_y_continuous( limits=c(-2.84,2.84) ) +
+                    labs(title=taxId)
+                print(p)
+            }
+        }
+    }
+
+    # Return values as configured...
+    if(   profileMode == "dLFE" )
+    {
+        vals <- native - shuffled
     }
     else if( profileMode == "nativeLFE" )
     {
-        return( native )
+        vals <- native 
     }
     else if( profileMode == "shuffledLFE" )
     {
-        return( shuffled )
+        vals <-  shuffled
     }
     else if( profileMode == "abs(dLFE)" )
     {
-        return( abs(native - shuffled) )
+        vals <- abs(native - shuffled)
+    }
+    else if( profileMode == "gc" )
+    {
+        vals <- gc
     }
     else
     {
         stopifnot(FALSE)
-        return( NA )
+        vals <- NA 
     }
-    #return( gc )
+    return( list(vals, diag.d) )
 }
 
 
@@ -339,10 +435,117 @@ getProteinCount <- function(taxId)
     }
 }
 
+getGenomicENc <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:ENc", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val > 10.0 && val < 75.0 )  # The extreme values for ENc are not clear to me...
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+getGenomicENc.prime <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:ENc-prime", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val > 10.0 && val < 75.0 )  # The extreme values for ENc are not clear to me...
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+getGenomicCAI <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:genomic-CAI", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val >= 0.0 && val <= 1.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+getGenomicCBI <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:genomic-CBI", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val >= -0.5 && val <= 1.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+getGenomicFop <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:genomic-Fop", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val >= 0.0 && val <= 1.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+getGenomicNc <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:genomic-Nc-codonw", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val >= 10.0 && val <= 75.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+
+getGenomicDCBS <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:DCBS-geomean", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val > -1.0 && val < 5.0 )  # I don't know what are the extreme values for DCBS
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
+
 readAllProfiles <- function( taxIds, profileSpecifications )
 {
 
-    args <- list( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), GenomeSizeMb=double(), LogGenomeSize=double(), ProteinCount=integer(), row.names=integer() )
+    args <- list( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), GenomeSizeMb=double(), LogGenomeSize=double(), ProteinCount=integer(), GenomicENc=double(), GenomicENc.prime=double(), GenomicCAI=double(), GenomicCBI=double(), GenomicFop=double(), GenomicNc=double(), GenomicDCBS=double(), row.names=integer() )
     for (i in 1:length(profileSpecifications) )
     {
         newargs <- lapply(1:profileSpecifications[[i]]$len, function (i) numeric(0) )
@@ -368,7 +571,7 @@ readAllProfiles <- function( taxIds, profileSpecifications )
         #    profile <- readDeltaLFEProfile( taxIds, getH5Filename( taxId, profileSpec ) ) # will return a numeric vector
         #    print(dimnames(profile))
         #}
-        profiles <- lapply( profileSpecifications, function(profileSpec) { readDeltaLFEProfile( taxIds, getH5Filename( taxId, profileSpec ) ); } )
+        profiles <- lapply( profileSpecifications, function(profileSpec) { readDeltaLFEProfile( taxIds, getH5Filename( taxId, profileSpec ) )[[1]]; } )
         #profile <- profiles[[1]]  # TODO FINISH THIS...
 
         gcContent <- getGenomicGCContent( taxId )
@@ -389,15 +592,30 @@ readAllProfiles <- function( taxIds, profileSpecifications )
 
         proteinCount <- getProteinCount( taxId )
 
+        genomicENc <- getGenomicENc( taxId )
+        
+        genomicENc.prime <- getGenomicENc.prime( taxId )
+
+        genomicCAI <- getGenomicCAI( taxId )
+        
+        genomicCBI <- getGenomicCBI( taxId )
+        
+        genomicFop <- getGenomicFop( taxId )
+
+        genomicNc <- getGenomicNc( taxId )
+
+        genomicDCBS <- getGenomicDCBS( taxId )
+        
+
         #args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
-        args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, GenomeSizeMb=genomeSizeMb, LogGenomeSize=log(genomeSizeMb), ProteinCount=proteinCount, row.names=c(taxId) )
+        args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, GenomeSizeMb=genomeSizeMb, LogGenomeSize=log(genomeSizeMb), ProteinCount=proteinCount, GenomicENc=c(genomicENc), GenomicENc.prime=c(genomicENc.prime), GenomicCAI=c(genomicCAI), GenomicCBI=c(genomicCBI), GenomicFop=c(genomicFop), GenomicNc=c(genomicNc), GenomicDCBS=c(genomicDCBS), row.names=c(taxId) )
         for (i in 1:length(profileSpecifications) )
         {
             #print("--//--//--")
             #print(i)
             #print(length(profiles[[i]]))
             
-            if( !is.na(profiles[[i]][1]) )
+            if( !isTRUE(is.na(profiles[[i]][1])) )
             {
                 #print("((a))")
                 newargs <- as.list(profiles[[i]])
@@ -471,12 +689,48 @@ traits$GC.0.40   <- (traits$GenomicGC <= 40) + 0
 traits$GC.40.60  <- (traits$GenomicGC >= 40) & (traits$GenomicGC <= 60) + 0
 traits$GC.60.100 <- (traits$GenomicGC >= 60) + 0
 
-traits$TempHighLow75   <- as.factor(traits$OptimumTemp > 75)
-print(traits$TempHighLow75)
+traits$TempHighLow75   <- as.factor(traits$OptimumTemp >= 75)
+traits$TempOver75    <- (traits$OptimumTemp >=  75)
+traits$TempUnder75   <- (traits$OptimumTemp <   75)
 
+stopifnot(sum(traits[!is.na(traits$TempOver75),]$TempOver75   + 0) > 10)
+stopifnot(sum(traits[!is.na(traits$TempUnder75),]$TempUnder75 + 0) > 100)
+
+traits$Noise <- rnorm(nrow(traits))
 
 stopifnot(nrow(traits) > 300 )  # sanity test
 #stopifnot(ncol(traits) == profileLen+7 )
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Scale-shape decomposition
+#        matching <- apply( traits[test.res], MARGIN=1, FUN=all)
+
+profile.vars <- getProfileVariables( c(1,31), profileId=1 )
+#profile.vars <- sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } )
+dLFE.sd <- apply( traits[,profile.vars], MARGIN=1, FUN=sd )
+
+#print(dLFE.sd)
+traits.normalized <- traits
+
+#traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] <- traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] * (1/dLFE.sd)
+traits.normalized[,profile.vars] <- traits.normalized[,profile.vars] * (1/dLFE.sd)
+
+#dLFE.normalized.sd <- apply( traits.normalized[,sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } )], MARGIN=1, FUN=sd )
+dLFE.normalized.sd <- apply( traits.normalized[,profile.vars], MARGIN=1, FUN=sd )
+
+#print(dLFE.normalized.sd)
+
+#print(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE  ))
+#print(isTRUE(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE )))
+stopifnot(isTRUE(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE )))
+traits.normalized$Profile_1.sd <- dLFE.sd
+#traits.normalized$Profile_2.sd <- dLFE.sd
+
+remove(profile.vars)
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 #----------------------------------
@@ -538,23 +792,30 @@ summary(tree)
 #----------------------------------
 
 
-performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=TRUE, caption="", traits.full=NA, bm.gamma=1.0 )
+performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=TRUE, caption="", traits.full=NA, bm.gamma=1.0, extras="" )
 {
     # ==========================================================================================
-    # ============================== Part 1 - Prapre Tree ======================================
+    # ============================== Part 1 - Prapare Tree ======================================
     # ==========================================================================================
     # Discard tree tips for species missing data
-    speciesWithMissingData <- row.names(traits[(is.na(traits[Xtrait]) | is.na(traits[Ytrait])),])
+
+    extraVars = c('Member_all_1')
+    if( nchar(extras) )
+    {
+        extraVars <- all.vars(as.formula(paste(" ~ ", extras, sep="")))
+    }
+    
+    speciesWithMissingData <- row.names(traits[(is.na(traits[Xtrait]) | is.na(traits[Ytrait]) | apply(is.na(traits[extraVars]), MARGIN=1, FUN=any) ),])
     tree <- drop.tip( tree, speciesWithMissingData )   # Filter species that will prevent analysis from being performed from the tree
     treeSpecies <- tree$tip.label
 
     # Create separate data-frame containing species excluded only because they are not found in the tree (this is for display only and is not related to the regression)
     #print(sum(!is.na(traits.full$GenomicGC)))
-    if( is.na( traits.full ) )
+    if( isTRUE(is.na( traits.full )) )
     {
         traits.full <- duplicate( traits )
     }
-    print(sum(!is.na(traits.full$GenomicGC)))
+    ###print(sum(!is.na(traits.full$GenomicGC)))
     traits.total.count <- nrow(traits.full)
     #print(length(row.names(traits.full)))
     #print(length(treeSpecies))
@@ -585,7 +846,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     print(sprintf("%s -> %s (N=%d)", Xtrait, Ytrait, N))
 
     # Calculate the correlation matrix (for a BM process)
-    print(bm.gamma)
+    ###print(bm.gamma)
     #bmcorr <- corBrownian( value=bm.gamma, phy=tree )
     bmcorr <- corBrownian( phy=tree )
     
@@ -624,16 +885,16 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
 
     if( rankTransformResponse )
     {
-        print(Ytrait)
+        ###print(Ytrait)
         rankedYtrait <- paste(Ytrait, ".ranks", sep="" )
         traits[,rankedYtrait] <- rank(traits[,Ytrait], ties.method="average")
         #print(traits[,rankedYtrait])
         Ytrait <- rankedYtrait
-        print(traits[,Ytrait])
+        ####print(traits[,Ytrait])
     }
     
     
-    # Set the predictive (regression) and intecept-only formulas
+    # Set the predictive (regression) and intercept-only formulas
     # 'predictiveFormula' is the actual regression. It uses an intercept when a continuous explanatory var is used (and none with a discrete var, as in one-way ANOVA)
     # 'inteceptFormula' is an intecept-only model, used as the baseline for calculation of R^2
     predictiveFormula <- NA    
@@ -643,9 +904,21 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     }
     else
     {
-        predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait) )          # model with intercept term
+        #predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait) )          # model with intercept term
+        if( nchar(extras) )
+        {
+            predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait, " + ", extras ) )          # model with intercept term
+        }
+        else
+        {
+            predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait ) )                         # model with intercept term
+        }
+        
     }
-    interceptFormula <- as.formula( paste(Ytrait, " ~ ", "1") )
+    #interceptFormula <- as.formula( paste(Ytrait, " ~ ", "1") )
+    interceptFormula <- as.formula( paste(Ytrait, " ~ ", " 1 ") )
+
+    ###print( all.vars(predictiveFormula) )
     
     
     # Perform OLS regression (used as a reference for comparison)
@@ -659,19 +932,8 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
                 na.action=na.omit,
                 method="REML"); #print( summary(gls1))
     co2 <- coef(gls1)
-    #print(dimnames(gls1))
-    #print(attributes(gls1))
-    #print(slotNames(gls1))
-    #print(gls1$modelStruct)
-    #print(attributes(gls1$modelStruct))
-    #print(gls1$modelStruct$corStruct)
-    #print(gls1$fitted)
-    #print(gls1$sigma)
-    #print(gls1$parAssign)
-    #print(gls1$apVar)
-    #print(names(gls1$apVar))
-    #print(attributes(gls1$apVar))
-    #print(attr(gls1$apVar))
+    #print(summary(gls1))
+    #print(anova(gls1))
 
     gls0 <- gls( interceptFormula,
                  traits,
@@ -691,7 +953,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
                    correlation=oucorr,
                    na.action=na.omit,
                    method="REML") );
-    print(summary(gls1.ou))
+    ###print(summary(gls1.ou))
     
     #
     # Buse's R^2
@@ -704,6 +966,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     #           e := first column in design matrix X (i.e., rep(1, N) if intercepts are used). See above eq. (11) p. 107.
     #
     u.hat <- residuals(gls1)
+    #print(u.hat)
     #V <- getVarCov( gls1 )   # this doesn't work (bug?)
     V <- corMatrix( gls1$modelStruct$corStruct )
     inv.V <- solve(V)   # invert V (=Omega). Every positive-definite matrix is invertible (https://en.wikipedia.org/wiki/Positive-definite_matrix#cite_note-5)
@@ -750,20 +1013,20 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
         pvalue.OLS <- summary(m1)$coefficients[2,4]
     }
 
-    print("////////////////////////////")
-    print(sprintf("AIC(m1):         %.3g", AIC(m1)))
-    print(sprintf("AIC(gls1):       %.3g", AIC(gls1)))
-    print(sprintf("AIC(gls0):       %.3g", AIC(gls0)))
-    print(sprintf("AIC(gls.nocorr): %.3g", AIC(gls.nocorr)))
-    if( !is.na(gls1.ou) )
-    {
-        print(sprintf("AIC(gls1.ou):    %.3g", AIC(gls1.ou)))
-    }
-    else
-    {
-        print(sprintf("AIC(gls1.ou):    N/A"))
-    }
-    print("////////////////////////////")
+    ## print("////////////////////////////")
+    ## print(sprintf("AIC(m1):         %.3g", AIC(m1)))
+    ## print(sprintf("AIC(gls1):       %.3g", AIC(gls1)))
+    ## print(sprintf("AIC(gls0):       %.3g", AIC(gls0)))
+    ## print(sprintf("AIC(gls.nocorr): %.3g", AIC(gls.nocorr)))
+    ## if( !is.na(gls1.ou) )
+    ## {
+    ##     print(sprintf("AIC(gls1.ou):    %.3g", AIC(gls1.ou)))
+    ## }
+    ## else
+    ## {
+    ##     print(sprintf("AIC(gls1.ou):    N/A"))
+    ## }
+    ## print("////////////////////////////")
 
     # direction indicator (this is used by glsRegressionRangeAnalysis() to create the third plot in each series, which shows the effect of the different levels)
     directionsIndicator <- NA
@@ -788,6 +1051,17 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
             directionsIndicator <- c("-", "0", "+")[(signs+2)]
         }
     }
+
+
+    mine.results <- NA
+    if( !any(class(traits[,Xtrait])==c("factor")) )
+    {
+        mine.results <- mine( traits[,Xtrait], traits[,Ytrait])
+        mine.results$Pearson.r <- cor( traits[,Xtrait], traits[,Ytrait], use="complete.obs", method="pearson" )
+    }
+    
+
+    
     
     # ==========================================================================================
     # ========================= Part 3 (optional) - Plot Regression ============================
@@ -824,7 +1098,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
               geom_text( data=significanceMarkers, aes(x=x, y=y, label=label),     colour="black",  size=10 ) +
               geom_hline( yintercept = 0 ) +
               annotate( "text", x=Inf,  y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "lm",  sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" ==  %.3g', pvalue.OLS), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
-              annotate( "text", x=-Inf, y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" ==  %.3g', pvalue), sprintf("italic(N) == %d", nrow(traits))),     hjust=0, vjust=0, colour=clr2,  parse=TRUE )
+                annotate( "text", x=-Inf, y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" ==  %.3g', pvalue), sprintf("italic(N) == %d", nrow(traits))),     hjust=0, vjust=0, colour=clr2,  parse=TRUE )
 
             if( nrow(traits) < 50 )  # add species names (if there aren't too many points that the graph becomes cluttered)
             {
@@ -842,8 +1116,10 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
                 geom_hline( yintercept = 0 ) +
                 geom_abline( aes( slope=co[Xtrait],  intercept=co["(Intercept)"]),  colour="red"  ) +
                 geom_abline( aes( slope=co2[Xtrait], intercept=co2["(Intercept)"]), colour=clr2   ) +
-                annotate( "text", x=Inf,  y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "lm",  sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" == %.3g', pvalue.OLS), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
-                annotate( "text", x=-Inf, y=max.y+c(0, 1, 2, 3) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" == %.3g', pvalue),     sprintf("italic(N) == %d", nrow(traits))), hjust=0, vjust=0, colour=clr2,  parse=TRUE )
+                annotate( "text", x=Inf,  y=max.y+c(3, 2, 1, 0) * line.y, label=c(  "lm",  sprintf("italic(R) ^ 2 == %.3g", summary(m1)$r.squared), sprintf('italic(p)*"-val" == %.3g', pvalue.OLS), sprintf("italic(N) == %d", nrow(traits))), hjust=1, vjust=0, colour="red", parse=TRUE ) +
+                annotate( "text", x=-Inf, y=max.y+c(3, 2, 1, 0) * line.y, label=c(  "gls", sprintf("italic(R) ^ 2 == %.3g", R2),                    sprintf('italic(p)*"-val" == %.3g', pvalue),     sprintf("italic(N) == %d", nrow(traits))), hjust=0, vjust=0, colour=clr2,  parse=TRUE ) +
+                annotate( "text", x=Inf, y=max.y+c(7, 6, 5, 4) * line.y, label=c(  "MINE", sprintf("MIC == %.3g", mine.results$MIC),                    sprintf("MAS == %.3g", mine.results$MAS),    sprintf("Pearson-r == %.3g", mine.results$Pearson.r )), hjust=1, vjust=0, colour='#4444cc',  parse=TRUE )
+                    
             
             if( nrow(traits) < 50 )  # add species names (if there aren't too many points that the graph becomes cluttered)
             {
@@ -855,15 +1131,10 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
         }
     }
 
-    return( data.frame( pvalue=pvalue, R2=R2 * slopeDirection, N=N, directionsIndicator=directionsIndicator ) )
+    return( data.frame( pvalue=pvalue, R2=R2 * slopeDirection, N=N, directionsIndicator=directionsIndicator, MIC=mine.results$MIC, MAS=mine.results$MAS, pearson.r=mine.results$Pearson.r ) )
 }
 
-getProfileVariables <- function( range, profileId=1 )
-{
-    return( vapply(range[1]:range[2], function(x) sprintf("Profile_%d.%d", profileId, x), character(1)) )
-}
-
-performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange, profileId=1, plotRegression=FALSE, caption="" )
+performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange, profileId=1, plotRegression=FALSE, caption="", extras="" )
 {
     #print("performGLSregression_profileRangeMean(): -->")
     #print(profileRange)
@@ -893,7 +1164,7 @@ performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profile
     traits$RangeMean <- rowMeans( traits[variables] )
 
     # Perform the regression (for the mean values)
-    return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=plotRegression, caption=caption ) )
+    return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=plotRegression, caption=caption, extras=extras ) )
 }
 
 # Extract legend from ggplot figure
@@ -1096,6 +1367,15 @@ profileColorScale <- function( vals )
 }
 
 
+expand_scale <- function(mult = 0, add = 0) {
+  stopifnot(is.numeric(mult) && is.numeric(add))
+  stopifnot((length(mult) %in% 1:2) && (length(add) %in% 1:2))
+
+  mult <- rep(mult, length.out = 2)
+  add <- rep(add, length.out = 2)
+  c(mult[1], add[1], mult[2], add[2])
+}
+
 kdePlot <- function( values, positions )
 {
     x <- getStatsForProfiles( values, positions )
@@ -1109,27 +1389,30 @@ kdePlot <- function( values, positions )
 
     min.y = min( stats$iqr0 )
     max.y = max( stats$iqr1 )
-    lines.y = seq(ceiling(min.y), floor(max.y), 1)
+    lines.y = seq(ceiling(min.y), floor(max.y), 0.5)
     lines.y = lines.y[lines.y != 0]
     
     # create the plot...
     p <- ggplot( data=stats, aes(x=pos) ) +
-        geom_hline( yintercept=0, color="#404040" ) +
-        geom_hline( yintercept=lines.y, color="#808080", size=0.3 ) +
+        #geom_hline( yintercept=lines.y, color="#808080", size=0.3 ) +
         geom_ribbon( aes(ymin=iqr0, ymax=iqr1), color=NA, fill="#a0a0a0" ) +
         geom_ribbon( aes(ymin=p25, ymax=p75),   color=NA, fill="#707070" ) +
         geom_point( data=data.frame(interpolated), aes( x=x, y=y, color=color ), size=0.7 ) +
-        guides( color=FALSE ) +  # Hide the legend (will be plotted separately)
+            guides( color=FALSE ) +  # Hide the legend (will be plotted separately)
+            labs(y="dLFE", x="") +
         scale_color_gradientn(
             breaks=c(0.0, 0.5, 1.0),
             limits=c(0.0, 1.0),
-            colors=        c(                                   "#ff9090", "#a00000", "#000000", "#0000a0", "#9090ff"),
-            values=rescale(c(                                         0.0,      0.45,       0.5,       0.55,      1.0) ) ) +
-         theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
-               panel.grid.major = element_blank(),
-               panel.grid.minor = element_blank(),
-               panel.background = element_blank()
-               ) # +
+            colors=        c(                                   "#ff9090", "#a00000", "#ffffff", "#0000a0", "#9090ff"),
+            values=rescale(c(                                         0.0,      0.35,       0.5,       0.65,      1.0) ) ) + 
+            scale_y_continuous( limits=c( min(min.y, -0.5), max(max.y, 0.5)), breaks=lines.y ) +
+            scale_x_continuous( expand=expand_scale( mult=c(0,0) ) ) +
+        geom_hline( yintercept=0, color="#404040", alpha=0.8 )
+       #  theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+       #        panel.grid.major = element_blank(),
+       #        panel.grid.minor = element_blank(),
+       #        panel.background = element_blank()
+       #        ) # +
             #scale_x_discrete( labels=stats$pos )
             
         #geom_line( aes(y=p50) );
@@ -1138,7 +1421,7 @@ kdePlot <- function( values, positions )
 }
 
 # Perform regression for pyramid (range robustness) plot
-glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plotCaption, profileId=1 )
+glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plotCaption, profileId=1, addKdePlot=TRUE, extras=extras )
 {
     stopifnot(class(profileRange)=="numeric")
     stopifnot(length(profileRange)==2)
@@ -1162,7 +1445,7 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
 
         if( v$Var2 - v$Var1 <= maxPyramidHeight )
         {
-            regressionResults <- performGLSregression_profileRangeMean(traits, tree, Xtrait, as.integer(v), profileId=profileId, plotRegression=FALSE )
+            regressionResults <- performGLSregression_profileRangeMean(traits, tree, Xtrait, as.integer(v), profileId=profileId, plotRegression=FALSE, extras=extras )
             v$Pvalue    <- regressionResults$pvalue
             v$Buse.R2   <- regressionResults$R2
             v$Logpval <- log10( v$Pvalue )
@@ -1170,6 +1453,9 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
             v$Var2 <- (v$Var2 - 1) * profileStep
             v$NumSpecies <- regressionResults$N
             v$DirectionsIndicator <- regressionResults$directionsIndicator
+            v$MIC <- regressionResults$MIC
+            v$MAS <- regressionResults$MAS
+            v$pearson.r <- regressionResults$pearson.r
 
             #print("regressionResults")
             #print(regressionResults)
@@ -1225,7 +1511,7 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
         colors=c("#7799ff", "#355080", "#000000" ),
         values=rescale(c(y.min, -1.0, 0.0)) )
 
-    plotdf <- melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Logpval") )
+    #plotdf <- melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("Logpval") )
     
     ## plotRotatedPyramid( plotdf, dotsDF, "log(p-val)", valScale, Xtrait, paste(plotTitle, " (logPval)") )
 
@@ -1252,9 +1538,16 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
     }
 
 
-    print( getProfileVariables( profileRange, profileId ) )
-    kdePlot <- kdePlot( traits[, getProfileVariables( profileRange, profileId ) ], getProfilePositions( profileId )  )
-    
+    if( addKdePlot )
+    {
+        print( getProfileVariables( profileRange, profileId ) )
+        kdePlot <- kdePlot( traits[, getProfileVariables( profileRange, profileId ) ], getProfilePositions( profileId )  )
+    }
+    else
+    {
+        kdePlot <- NA
+    }
+       
     plotRotatedPyramid( plotdf, dotsDF, "Buse R^2", valScale, Xtrait, plotTitle=paste(plotTitle, " (Buse R^2)"), kdePlot )
 
 
@@ -1284,14 +1577,124 @@ findUncorrectedVariableCorrelation <- function( traits, filterTrait, Xtrait, Ytr
     d1 <- traits[,Xtrait]
     d2 <- traits[,Ytrait]
     N <- sum( !(is.na(d1) | is.na(d2)) )
-    ret <- cor.test( d1, d2, method="pearson", rm.na=TRUE )
-    print(ret$estimate)
+    ret <- cor.test( d1, d2, method="spearman", rm.na=TRUE )
+    #print(ret$estimate)
     return( data.frame( pvalue=ret$p.value, corr=ret$estimate, N=N, directionsIndicator=NA ) )
 }
 
 
 
-#performGLSregression( traits, tree, "GenomicGC",   "Profile.15" )
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras="", plotRegression=FALSE ))
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb", plotRegression=FALSE ) )
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI", plotRegression=FALSE ) )
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI + GenomicCBI + GenomicFop", plotRegression=FALSE ) )
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI + GenomicCBI + GenomicFop + Noise", plotRegression=FALSE ) )
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI + GenomicCBI + GenomicFop + Profile_1.14", plotRegression=FALSE ) )
+
+print(cor( traits$GenomicGC, traits$GenomicCAI, use="complete.obs"  ) )
+print(cor( traits$GenomicGC, traits$GenomicCBI, use="complete.obs"  ) )
+print(cor( traits$GenomicGC, traits$GenomicFop, use="complete.obs"  ) )
+print(cor( traits$GenomicGC, traits$GenomicNc,  use="complete.obs"  ) )
+
+print(cor( traits$GenomicCAI, traits$GenomicCBI, use="complete.obs"  ) )
+print(cor( traits$GenomicCAI, traits$GenomicFop, use="complete.obs"  ) )
+print(cor( traits$GenomicCBI, traits$GenomicFop, use="complete.obs"  ) )
+print(cor( traits$GenomicCBI, traits$GenomicNc,  use="complete.obs"  ) )
+
+print(cor( traits$GenomicENc, traits$GenomicNc,   use="complete.obs"  ) )
+print(cor( traits$GenomicGC,  traits$GenomicNc,   use="complete.obs"  ) )
+print(cor( traits$GenomicGC,  traits$GenomicENc,  use="complete.obs"  ) )
+print(cor( traits$GenomicGC,  traits$GenomicENc.prime,  use="complete.obs"  ) )
+print(cor( traits.normalized$GenomicENc.prime, traits.normalized$Profile_1.sd, use="complete.obs"  ) )
+#print(cor( traits.normalized$GenomicENc.prime, traits.normalized$Profile_2.sd, use="complete.obs"  ) )
+
+
+
+#------------------------------------------------------------------------------------------------------------------------
+# Compare R^2 of GC and ENc' at different points in the native and "sigma-normalized" profiles
+
+## print(performGLSregression( traits, tree, "GenomicENc.prime",   "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicENc.prime",   "Profile_1.26", extras=" GenomicGC ", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.26", extras=" GenomicENc.prime ", plotRegression=FALSE ) )
+
+
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",         "Profile_1.sd",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",  "Profile_1.sd",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",  "Profile_1.sd",  extras="GenomicGC", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicCAI",        "Profile_1.sd",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicDCBS",       "Profile_1.sd",  extras="", plotRegression=FALSE ) )
+
+
+## print(performGLSregression( traits, tree, "GenomicGC",                "Profile_1.26",  extras="", plotRegression=TRUE ) )
+## print(performGLSregression( traits, tree, "GenomicENc.prime",         "Profile_1.26",  extras="", plotRegression=TRUE ) )
+
+
+
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",  "Profile_2.sd",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",  "Profile_2.sd",  extras="GenomicGC", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicCAI",        "Profile_2.sd",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicDCBS",       "Profile_2.sd",  extras="", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits           , tree, "GenomicGC",          "Profile_1.1",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",          "Profile_1.1",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.1",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",   "Profile_1.1",  extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.1",  extras="GenomicGC", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits           , tree, "GenomicGC",          "Profile_1.15", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",          "Profile_1.15", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.15", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",   "Profile_1.15", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.15", extras="GenomicGC", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits           , tree, "GenomicGC",          "Profile_1.22", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",          "Profile_1.22", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.22", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",   "Profile_1.22", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.22", extras="GenomicGC", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits           , tree, "GenomicGC",          "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",          "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",   "Profile_1.26", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.26", extras="GenomicGC", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits           , tree, "GenomicGC",          "Profile_1.29", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicGC",          "Profile_1.29", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.29", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits.normalized, tree, "GenomicENc.prime",   "Profile_1.29", extras="", plotRegression=FALSE ) )
+## print(performGLSregression( traits           , tree, "GenomicENc.prime",   "Profile_1.29", extras="GenomicGC", plotRegression=FALSE ) )
+##quit()
+#------------------------------------------------------------------------------------------------------------------------
+
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI + GenomicCBI + GenomicFop", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + Noise", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + Profile_1.14", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits, tree, "GenomeSizeMb",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomeSizeMb",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + GenomicGC", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomeSizeMb",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + Noise", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomeSizeMb",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + Profile_1.14", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + GenomeSizeMb", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + Noise", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomicCAI + GenomicCBI + GenomicFop + Profile_1.14", plotRegression=FALSE ) )
+
+
+## print(performGLSregression( traits, tree, "GenomicCAI",   "GenomicGC", extras=" + GenomicCBI + GenomicFop", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicCBI",   "GenomicGC", extras=" + GenomicCAI + GenomicFop", plotRegression=FALSE ) )
+## print(performGLSregression( traits, tree, "GenomicFop",   "GenomicGC", extras=" + GenomicCAI + GenomicCBI", plotRegression=FALSE ) )
+
+## print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras="", plotRegression=FALSE ) )
+
+
+
+
+#print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras=" + GenomeSizeMb + GenomicCAI + GenomicCBI + GenomicFop + GenomicENc.prime", plotRegression=FALSE ) ))
 #print(performGLSregression_profileRangeMean( traits, tree, "GenomicGC", c(15,15) ))
 #print(performGLSregression_profileRangeMean( traits, tree, "GenomicGC", c(15,19) ))
 
@@ -1306,18 +1709,13 @@ findUncorrectedVariableCorrelation <- function( traits, filterTrait, Xtrait, Ytr
 #performGLSregression( traits, tree, "TemperatureRange", "GenomicGC" )
 
 
-#dev.off()
-#quit()
-#--------------------
-
-
-prepareFilteredTreeForGLS <- function( traits, tree, filterTrait, studyTrait )
+prepareFilteredTreeForGLS <- function( traitsx, tree, filterTrait, studyTrait )
 {
-    stopifnot( any( filterTrait == colnames(traits) ) )  # filterTrait not found
-    stopifnot( any( studyTrait  == colnames(traits) ) )  # filterTrait not found
+    stopifnot( any( filterTrait == colnames(traitsx) ) )  # filterTrait not found
+    stopifnot( any( studyTrait  == colnames(traitsx) ) )  # filterTrait not found
         
     # Filter by the requested trait, and also discard tree tips for species missing data
-    speciesWithMissingData <- row.names(traits[ (!traits[,filterTrait] | is.na(traits[,studyTrait])), ])
+    speciesWithMissingData <- row.names(traitsx[ (!traitsx[,filterTrait] | is.na(traitsx[,studyTrait])), ])
     tree <- drop.tip( tree, speciesWithMissingData )   # Filter species that will prevent analysis from being performed from the tree
 
     if( is.null(tree) )
@@ -1329,21 +1727,21 @@ prepareFilteredTreeForGLS <- function( traits, tree, filterTrait, studyTrait )
     # DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!!
     # DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!!
     treeSpecies <- tree$tip.label
-    traits <- traits[treeSpecies,]   # Discard traits not found in the tree
+    traitsx <- traitsx[treeSpecies,]   # Discard traits not found in the tree
     # DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!!
     # DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!! DISABLED FOR TESTING ONLY !!!!!
 
-    if( is.null(traits) || nrow(traits) < 3 )  # no sense in analyzing a tiny tree...
+    if( is.null(traitsx) || nrow(traitsx) < 3 )  # no sense in analyzing a tiny tree...
     {
         return( list(NA, NA) )
     }
 
     # Check tree <-> data-frame correlation appears valid
-    x <- phylo4d(tree, tip.data=traits, rownamesAsLabels=TRUE)
+    x <- phylo4d(tree, tip.data=traitsx, rownamesAsLabels=TRUE)
     tipsOk <- hasTipData( x )
     stopifnot(tipsOk)
     
-    return( list( traits, tree ) )
+    return( list( traitsx, tree ) )
 }
 
 
@@ -1375,30 +1773,32 @@ performGLSregressionWithFilter <- function( traits, tree, filterTrait, Xtrait, Y
     return( performGLSregression( traits.filtered, tree.filtered, Xtrait, Ytrait, plotRegression=plotRegression, caption=sprintf("%s effect on %s (%s)", Xtrait, profileMode, filterTrait, traits), orig.traits ) )
 }
 
-glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, pyramidSpec, profileId=1 )
+glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, pyramidSpec, profileId=1, plotCaption="", extras="" )
 {
     stopifnot( any( filterTrait==colnames(traits) ) )  # filterTrait not found
     stopifnot( any( studyTrait==colnames(traits)  ) )  # studyTrait not found
 
     # Filter tree by trait
     ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
-    if( is.na(ret[[1]]) ) { return( NA ) }
+    if( isTRUE( is.na(ret[[1]]) ) ) { return( NA ) }
     traits.filtered <- ret[[1]]
     tree.filtered   <- ret[[2]]
     stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
         
     if( is.null(tree.filtered) || nTips(tree.filtered) < minimalTaxonSize )
     {
-        return( NA )
+        #return( NA )
+        return( data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character(), MIC=double(), MAS=double(), Pearson.r=double() ) )
     }
 
     if( any(class(traits.filtered[,studyTrait])==c("factor")) && nlevels(as.factor(as.numeric(traits.filtered[,studyTrait]))) < 2 )
     {
         print("Only one level remaining...")
-        return( NA )
+        #return( NA )
+        return( data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character(), MIC=double(), MAS=double(), Pearson.r=double() ) )
     }
     
-    return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits.filtered) ), profileId=profileId ) )
+    return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits.filtered) ), profileId=profileId, addKdePlot=FALSE, extras=extras ) )
 }
 
 testPhylosignal <- function( traits, tree, studyTrait, caption="" )
@@ -1519,7 +1919,7 @@ testPhylosignalWithFilter <- function( traits, tree, filterTrait='Member_all_1',
     
     # Filter tree by trait
     ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
-    if( is.na(ret[[1]]) ) { return( NA ) }
+    if( isTRUE( is.na(ret[[1]])) ) { return( NA ) }
     traits.filtered <- ret[[1]]
     tree.filtered   <- ret[[2]]
     stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
@@ -1548,29 +1948,6 @@ taxGroupToTaxId <- vapply(taxGroups, function (x) as.integer(tail(strsplit(x[[1]
 
                                         #testPhylosignal( traits, tree )
 
-findValueOutliersWithFilter <- function( traits, filterTrait, valuesTrait, criterion, pvalThreshold=0.01 )
-{
-    stopifnot( any( filterTrait == colnames(traits)  ) )  # filterTrait not found
-    stopifnot( any( valuesTrait == colnames(traits)  ) )  # studyTrait  not found
-
-    # Filter by the filter trait
-    traits <- traits[ traits[,filterTrait], ]
-
-    if( criterion==">0" )
-    {
-        matchingRows <- traits[ (traits[,valuesTrait] > 0), ]
-    }
-    else
-    {
-        matchingRows <- traits[ (traits[,valuesTrait] < 0), ]
-    }
-
-    matchingRows <- traits[ (traits[,valuesTrait] < 0), ]
-    
-    
-    #print(class(samples))
-    #print(dim(samples))
-}
 
 
 ## for( gr in taxGroups )
@@ -1585,6 +1962,7 @@ findValueOutliersWithFilter <- function( traits, filterTrait, valuesTrait, crite
 ##     # Store peaks (for each range) for this group
 
 ## }
+
 
 #dev.off()
 #quit()
@@ -1636,15 +2014,384 @@ findValueOutliersWithFilter <- function( traits, filterTrait, valuesTrait, crite
 ## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_2.1",   "Profile_2.16" )
 
 
-correlationBetweenRanges <- function( traits, tree, filterTrait, xRange, yRange, useUncorrectedCorrelation=FALSE )
+
+
+#------------------------------------------------------------------------------------------------------------------------
+# Measure the effects of GC vs. ENc' as predictors of dLFE
+#------------------------------------------------------------------------------------------------------------------------
+
+# get fast data - compatible with glsRegressionRangeAnalysis
+testDataForRegressionAnalysis <- function( traits, tree, Xtrait, filterTrait, profileRange, plotCaption, profileId=1, addKdePlot=TRUE, extras=extras )
 {
-    out <- data.frame( Var1=character(), Var2=character(), R2=double(), DirectionsIndicator=character() )
-    
-    for( xTrait in xRange )
+    # returns df:
+    #    Var1 Var2       Pvalue      Buse.R2     Logpval NumSpecies DirectionsIndicator
+    out <- data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character() )
+
+    phase <- runif(n=1)*15
+    testVals <- sin( (seq(profileRange[1], profileRange[2], 1) + phase) * 0.40 )
+    pvals <- (1-abs(testVals))*0.05
+    positions <- getProfilePositions( profileId=profileId )
+    for( i in seq(profileRange[1], profileRange[2], 1))
     {
-        for( yTrait in yRange )
+        out <- rbind( out, data.frame( Var1=c(positions[i]), Var2=c(positions[i]), Pvalue=pvals[i], Buse.R2=testVals[i], Logpval=log(pvals[i]), NumSpecies=c(99), DirectionsIndicator=c("0") ) )
+    }
+    return( out );
+}
+
+
+make.group <- function(v)
+{
+    group <- 0;
+    in.group <- FALSE;
+
+    if( length(v)==0)
+        return( c());
+
+    out <- rep(0, length(v))
+
+    for( i in 1:length(v) )
+    {
+        if( v[i] )
         {
-            if( xTrait != yTrait )
+            if( !in.group )
+            {
+                in.group <- TRUE
+                group <- group + 1
+            }
+            out[i] <- group
+        }
+        else
+        {
+            in.group <- FALSE
+            out[i] <- 0
+        }
+    }
+    return(out)
+}
+
+
+## glsRegressionRangeAnalysis( traits, tree, "GenomicGC",  c(1,pyramidLength), plotCaption="GenomicGC", extras="")
+## glsRegressionRangeAnalysis( traits, tree, "GenomicENc", c(1,pyramidLength), plotCaption="GenomicENc", extras="")
+## glsRegressionRangeAnalysis( traits, tree, "GenomicENc.prime", c(1,pyramidLength), plotCaption="GenomicENc.prime", extras="")
+## glsRegressionRangeAnalysis( traits, tree, "GenomicGC",  c(1,pyramidLength), plotCaption="GC+ENc'", extras=" GenomicENc.prime ")
+#------------------------------------------------------------------------------------------------------------------------
+
+# TODO FIX THIS (COMPLETE REFACTORING)
+partialDeterminationAnalysis <- function( traits, tree, trait, pyramidSpec, profileId=1, extras="", yrange=NA)
+{
+    if( isTRUE(is.na(yrange)) )
+    {
+        yrange <- c(-1.0, 1.0)
+    }
+    stopifnot(yrange[2] > yrange[1])
+    stopifnot(length(yrange)==2)
+
+    ps <- list(NA,NA)
+    
+    results.t1       <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    results.t2       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    results.t3       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Eukaryota_2759", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    results.t4       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Fungi_4751", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    results.t5       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Archaea_2157", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.t1       <- testDataForRegressionAnalysis( traits, tree, "Member_all_1", trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.t2       <- testDataForRegressionAnalysis( traits, tree, "Member_Bacteria_2", trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.t3       <- testDataForRegressionAnalysis( traits, tree, "Member_Eukaryota_2759", trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+
+                                        #results.t1       <- glsRegressionRangeAnalysis( traits, tree, trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.t1       <- testDataForRegressionAnalysis( traits, tree, trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.t2       <- glsRegressionRangeAnalysis( traits, tree, trait2, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    #results.combined <- glsRegressionRangeAnalysis( traits, tree, trait1, pyramidSpec, plotCaption=trait2, profileId=profileId, extras=trait2)
+    # returns df:
+    #    Var1 Var2       Pvalue      Buse.R2     Logpval NumSpecies DirectionsIndicator
+
+
+    print("pret1")
+    if( nrow(results.t1) > 0 ) {
+        print("t1")
+        ##with(results.t1, {
+        ##    T <- "All"
+        ##    significant <- Pvalue<significanceLevel
+        ##    significant.group <- make.group(significant)
+        ##})
+        results.t1$T <- "All"
+        results.t1$significant <- results.t1$Pvalue<significanceLevel
+
+        results.t1$significant.group <- make.group( results.t1$significant )
+    }
+
+    print("pret2")
+    if( nrow(results.t2) > 0 ) {
+        print("t2")
+        ##with(results.t2, {
+        ##    T <- "Bacteria"
+        ##    significant <- Pvalue<significanceLevel
+        ##    significant.group <- make.group(significant)
+        ##})
+        results.t2$T <- "Bacteria"
+        results.t2$significant <- results.t2$Pvalue<significanceLevel
+
+        results.t2$significant.group <- make.group( results.t2$significant )
+    }
+
+    print("pret3")
+    if( nrow(results.t3) > 0 ) {
+        print("t3")
+        results.t3$T <- "Eukaryota"
+        results.t3$significant <- results.t3$Pvalue<significanceLevel
+
+        results.t3$significant.group <- make.group( results.t3$significant )
+    }
+
+    print("pret4")
+    if( nrow(results.t4) > 0 ) {
+        print("t4")
+        results.t4$T <- "Fungi"
+        results.t4$significant <- results.t4$Pvalue<significanceLevel
+
+        results.t4$significant.group <- make.group( results.t4$significant )
+    }
+
+    print("pret5")
+    if( nrow(results.t5) > 0 ) {
+        print("t5")
+        results.t5$T <- "Archaea"
+        results.t5$significant <- results.t5$Pvalue<significanceLevel
+
+        results.t5$significant.group <- make.group( results.t5$significant )
+    }
+
+
+    ## results.t2$T <- trait2
+    ## results.t2$significant <- results.t2$Pvalue<significanceLevel
+    ## results.combined$T <- "both"
+    ## results.combined$significant <- results.combined$Pvalue<significanceLevel
+    ## results.all <- rbind( results.t1, results.t2, results.combined )
+    results.all <- rbind( results.t1, results.t2, results.t3, results.t4, results.t5 )
+    ## print(results.all)
+    #print(results.t1$significant)
+                                    #print(results.t1$significant.group)
+
+    return(results.all)
+}    
+        
+
+plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrange=NA)
+{
+    if( isTRUE(is.na(yrange)) )
+    {
+        yrange <- c(-1.0, 1.0)
+    }
+    stopifnot(yrange[2] > yrange[1])
+    stopifnot(length(yrange)==2)
+    
+    xlabels <- NA
+    if( profileId==1 )
+    {
+        xlabels <- c(0,100,200,300)
+    }
+    else
+    {
+        xlabels <- c(-300,-200,-100,0)
+    }
+
+
+
+    ## print("---------1---------")
+    ## p <- ggplot(results.t1, aes(x=Var1) ) + 
+    ##     geom_area( data=results.t1[(results.t1$Buse.R2>0) & (results.t1$significant),], aes(x=Var1, y=Buse.R2, group=significant.group), position="identity", fill="#cc5533", color=NA,  alpha=0.5 ) +
+    ##     geom_area( data=results.t1[(results.t1$Buse.R2<0) & (results.t1$significant),], aes(x=Var1, y=Buse.R2, group=significant.group), position="identity", fill="#3355cc", color=NA, alpha=0.5 ) +
+    ##     geom_hline( yintercept=0 ) +
+    ##     geom_line( aes(y=Buse.R2), alpha=0.8, size=1 ) +
+    ##     geom_line( aes(y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.3, color="white", linetype="dotted" ) +
+    ##     scale_alpha_manual( values=c(0.0, 1.0) ) +
+    ##     scale_y_continuous( limits=yrange ) +
+    ##     scale_x_continuous( breaks=c(0,100,200,300),
+    ##                         labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
+    ##     labs(title="R^2 comparison", x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
+    ##     guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+    ## ggsave(sprintf("R2comparison_%s.pdf", trait), plot=p, width=20, height=8, units="cm")
+
+    p <- ggplot(results.all, aes(x=Var1) ) + 
+        geom_area( data=results.all[(results.all$T=="All") & (results.all$Buse.R2>0) & (results.all$significant),], aes(x=Var1, y=Buse.R2, group=significant.group), position="identity", fill="#cc5533", color=NA,  alpha=0.5 ) +
+        geom_area( data=results.all[(results.all$T=="All") & (results.all$Buse.R2<0) & (results.all$significant),], aes(x=Var1, y=Buse.R2, group=significant.group), position="identity", fill="#3355cc", color=NA, alpha=0.5 ) +
+    geom_hline( yintercept=0 ) +
+        geom_line( aes(y=Buse.R2, color=T, size=T), alpha=0.8 ) +
+        geom_line( data=results.all[results.all$T=="All",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=results.all[results.all$T=="Bacteria",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=results.all[results.all$T=="Eukaryota",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=results.all[results.all$T=="Fungi",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=results.all[results.all$T=="Archaea",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        scale_alpha_manual( values=c(0.0, 1.0) ) +
+        scale_colour_manual( values=c("All"="black", "Bacteria"="blue", "Eukaryota"="darkgreen", "Fungi"="darkgreen", "Archaea"="orange") ) +
+        scale_size_manual(   values=c("All"=1.6, "Bacteria"=1.0, "Eukaryota"=1.0, "Fungi"=0.4, "Archaea"=1.0) ) +
+        scale_y_continuous( limits=yrange ) +
+        scale_x_continuous( breaks=c(0,100,200,300),
+                           labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
+        labs(title=traitName, x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    p1 <- ggplot(results.all, aes(x=Var1) ) + 
+        geom_hline( yintercept=0 ) +
+        geom_line( aes(y=MIC, color=T, size=T), alpha=1 ) +
+        scale_colour_manual( values=c("All"="black", "Bacteria"="blue", "Eukaryota"="darkgreen", "Fungi"="darkgreen", "Archaea"="orange") ) +
+        scale_size_manual(   values=c("All"=1.6, "Bacteria"=1.0, "Eukaryota"=1.0, "Fungi"=0.4, "Archaea"=1.0) ) +
+        scale_y_continuous( limits=c(0.0, 1.0) ) +
+        scale_x_continuous( breaks=c(0,100,200,300),
+                           labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
+        labs(title=traitName, x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="MIC") +
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    p2 <- ggplot(results.all, aes(x=Var1) ) + 
+        geom_hline( yintercept=0 ) +
+        geom_line( aes(y=MAS, color=T, size=T), alpha=1 ) +
+        scale_colour_manual( values=c("All"="black", "Bacteria"="blue", "Eukaryota"="darkgreen", "Fungi"="darkgreen", "Archaea"="orange") ) +
+        scale_size_manual(   values=c("All"=1.6, "Bacteria"=1.0, "Eukaryota"=1.0, "Fungi"=0.4, "Archaea"=1.0) ) +
+        scale_y_continuous( limits=c(0.0, 1.0) ) +
+        scale_x_continuous( breaks=c(0,100,200,300),
+                           labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
+        labs(title=traitName, x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="MAS") +
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    p3 <- ggplot(results.all, aes(x=Var1) ) + 
+        geom_hline( yintercept=0 ) +
+        geom_line( aes(y=pearson.r, color=T, size=T), alpha=1 ) +
+        scale_colour_manual( values=c("All"="black", "Bacteria"="blue", "Eukaryota"="darkgreen", "Fungi"="darkgreen", "Archaea"="orange") ) +
+        scale_size_manual(   values=c("All"=1.6, "Bacteria"=1.0, "Eukaryota"=1.0, "Fungi"=0.4, "Archaea"=1.0) ) +
+        scale_y_continuous( limits=c(-1.0, 1.0) ) +
+        scale_x_continuous( breaks=c(0,100,200,300),
+                           labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
+        labs(title=traitName, x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="pearson.r") +
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+    
+    if( profileId==1 )
+    {
+        p <- p +
+            geom_line( data=data.frame(x=c(250,250+40),y=c(0.75,0.75)), aes(x=x,y=y), color="black", size=3) + # window scale
+            annotate( "text", x=250+5, y=0.75, label="window", hjust=0, vjust=-1, color="black")
+    }
+
+    ## if( trait==trait1)
+    ## {
+    ##     ps[[1]] <- p
+    ## }
+    ## else if ( trait==trait2)
+    ## {
+    ##     ps[[2]] <- p
+    ## }
+    ## else
+    ## {
+    ##     stopifnot(FALSE)
+    ## }
+        
+    # }
+    
+                                        #grid.draw( ggplotGrob( kdePlot ) )
+    #grid.newpage()
+                                        #pushViewport( viewport( x=unit(0.0, "npc"), y=unit(0.0, "npc"), width=unit(1.0, "npc"), height=unit(1.0, "npc") ) )
+
+    #######kdePlot1 <- kdePlot( traits[, getProfileVariables( pyramidSpec, profileId ) ], getProfilePositions( profileId )  )
+
+    #grid.arrange( ggplotGrob( kdePlot1 ), ps[[1]], ps[[2]], ncol=1, heights=c(unit(0.32, "npc"), unit(0.34, "npc"), unit(0.34, "npc") ) )
+
+    grid.newpage()
+    grid.arrange( p, p1, p2, p3, ncol=1, heights=c(unit(0.34, "npc"), unit(0.22, "npc"), unit(0.22, "npc"), unit(0.22, "npc") ) )
+    
+    #pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.25, "npc") ) )
+    #grid.draw(ggplotGrob( kdePlot ) )
+    #print("--1--")
+    #upViewport()
+    #print("--2--")
+
+    #pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.75, "npc") ) )
+    #print("--3--")
+    #grid.draw(p)
+    #upViewport()
+    
+    ggsave(sprintf("R2comparison_%s_all.pdf", traitName), plot=p, width=20, height=8, units="cm")
+
+
+    ## print("---------2---------")
+    ## p <- ggplot(results.t2, aes(x=Var1) ) +
+    ##     geom_hline( yintercept=0 ) +
+    ##     geom_area( aes(y=Buse.R2), position="identity", color="grey", alpha=0.2 ) +
+    ##     geom_line( aes(y=Buse.R2), alpha=0.8, size=1 ) +
+    ##     #geom_line( aes(y=Buse.R2, alpha=factor(significant)), size=0.3, color="white", linetype="solid" ) +
+    ##     #scale_alpha_manual( values=c(0.0, 1.0) ) +
+    ##     labs(title="R^2 comparison", x="CDS position (relative to start) (nt)", y="R^2") 
+    ## ggsave(sprintf("R2comparison_%s.pdf", trait2), plot=p, width=20, height=5, units="cm")
+    
+    ## print("---------3---------")
+    ## p <- ggplot(results.all, aes(x=Var1) ) +
+    ##     geom_hline( yintercept=0 ) +
+    ##     geom_area( data=results.all[results.all$T=="both",], aes(x=Var1,y=abs(Buse.R2)), position="identity", color="grey", alpha=0.2 ) +
+    ##     geom_line( aes(y=abs(Buse.R2), color=T), alpha=0.8, size=1 ) +
+    ##     #geom_line( aes(y=abs(Buse.R2), alpha=factor(significant)), size=0.3, color="white", linetype="solid" ) +
+    ##     #scale_alpha_manual( values=c(0.0, 1.0) ) +
+    ##     labs(title="R^2 comparison", x="CDS position (relative to start) (nt)", y="R^2")
+    ## ggsave(sprintf("R2comparison_%s_%s.pdf", trait1, trait2), plot=p, width=20, height=5, units="cm")
+    ## print(p)
+    
+}
+
+
+d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicGC", c(1,pyramidLength), profileId=1, extras="", yrange=c(-0.40,1.00) )
+
+print(d1)
+
+
+plotPartialDetermination( d1, "GenomicGC", profileId=1, yrange=c(-0.40,1.00) )
+
+##partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", "GenomicGC", c(1,pyramidLength), profileId=2, extras="")
+
+##partialDeterminationAnalysis( traits,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="", yrange=c(-0.3,0.6) )
+##partialDeterminationAnalysis( traits,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="", yrange=c(-0.40,1.00) )
+##partialDeterminationAnalysis( traits,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=2, extras="", yrange=c(-0.40,1.00) )
+
+
+#partialDeterminationAnalysis( traits,            tree, "OptimumTemp", "GenomicNc", c(1,pyramidLength), profileId=2, extras="")
+
+## dres1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="", yrange=c(-0.40,1.00) )
+## partialDeterminationAnalysis( dres1 )
+##partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=2, extras="", yrange=c(-0.40,1.00) )
+
+
+##dev.off()
+##quit()
+#------------------------------------------------------------------------------------------------------------------------
+
+
+
+correlationBetweenRanges <- function( traits, tree, filterTrait, xRange, xCoor, yRange, yCoor, useUncorrectedCorrelation=FALSE, marks=NA, halfOnly=0 )
+{
+    # 1=top 0=both -1=bottom
+    stopifnot( length(xRange)==length(xCoor) )
+    stopifnot( length(yRange)==length(yCoor) )
+    stopifnot( (halfOnly <= 1) && (halfOnly >= -1) )
+    corValues <- data.frame( Var1=character(), Var2=character(), Cor=double(), DirectionsIndicator=character(), Pval=double() )
+    
+    for( xi in 1:length(xRange) )
+    {
+        xTrait <- xRange[xi]
+        xPos   <- xCoor[xi]
+        
+        for( yi in 1:length(yRange) )
+        {
+            yTrait <- yRange[yi]
+            yPos   <- yCoor[yi]
+
+
+            skip <- FALSE
+            if( xPos>yPos )
+            {
+                skip <- halfOnly > 0
+            }
+            else if( xPos<yPos )
+            {
+                skip <- halfOnly < 0
+            }
+            
+            
+            if( xTrait != yTrait && (!skip) )
             {
                 if( !useUncorrectedCorrelation )
                 {
@@ -1655,70 +2402,237 @@ correlationBetweenRanges <- function( traits, tree, filterTrait, xRange, yRange,
                 {
                     result <- findUncorrectedVariableCorrelation( traits, filterTrait, xTrait, yTrait )
                     result$R2 <- result$corr  # compatibility hack...
-                    method <- "Method: Uncorrected (Pearson)"
+                    #result$pvalue = result$pvalue
+                    method <- "Method: Uncorrected (Spearman)"
                 }
             }
             else
             {
-                result <- list(R2=1.0, directionsIndicator='+')
+                result <- list(R2=1.0, directionsIndicator='+', pvalue=0.0)
             }
+            print(result)
             
-            out <- rbind( out, data.frame( Var1=xTrait, Var2=yTrait, Cor=result$R2, DirectionsIndicator=result$directionsIndicator ) )
+            corValues <- rbind( corValues, data.frame( Var1=xPos, Var2=yPos, Cor=result$R2, DirectionsIndicator=result$directionsIndicator, Pval=result$pvalue ) )
         }
     }
-    print(out)
-                                        #                labs(y=Ytrait, x=Xtrait, title=caption) +
+    print(corValues)
 
     plotTitle <- sprintf("%s (N=%d)", filterTrait, result$N )
 
-    p <- ggplot( data=out, aes(x=Var1, y=Var2, fill=Cor) ) +
-        geom_tile( linetype=0, colour=NA ) +   # Use geom_tile (because geom_raster has poor pdf/svg output), with minimal borders
+    p <- ggplot( corValues, aes(x=Var1, y=Var2 ) ) + #, fill=Cor) ) +
+        geom_tile( aes(fill=Cor), linetype=0, colour=NA ) +   # Use geom_tile (because geom_raster has poor pdf/svg output), with minimal borders
         labs( title=plotTitle ) +
         scale_fill_gradientn(
             breaks=c(-1.0, -0.5, 0.0, 0.5, 1.0),
             limits=c(-1.0, 1.0),
             colors=        c("#75c0ff", "#2240cc", "#112060",   "#000000", "#602011", "#cc4022", "#ffc075"),
-            values=rescale(c(     -1.0,      -0.5,     -0.15,         0.0,      0.15,       0.5,       1.0) ) )
+            values=rescale(c(     -1.0,      -0.5,     -0.15,         0.0,      0.15,       0.5,       1.0) ) ) +
+        theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              panel.background = element_blank()
+              )
+
+    dotsDF <- data.frame(melt( corValues, id.vars=c("Var1", "Var2"), measure.vars=c("Pval") ))
+    dotsDF <- dotsDF[dotsDF$value<=0.01,]
+    
+    p <- p +
+        geom_point( data=dotsDF, aes(x=Var1,y=Var2), position=position_nudge(y=4, x=-4), color="white", size=((fontScale/12)**2)*0.6 )  # Significance markers (white dots)
+    
+    
+    if( !all(is.na(marks)) )
+    {
+        marksDf <- data.frame(t(matrix(data=marks, nrow=2, ncol=length(marks)/2)))
+        marksDf$label <- letters[1:(length(marks)/2)];
+        print(marksDf)
+       
+        # Overlay the "points of interest" on the plot
+        p <- p + 
+            geom_text(  data=marksDf, aes(x=X1, y=X2, label=label), color="black", size=6, position=position_nudge(y=0.5, x=-0.5) ) + 
+            geom_text(  data=marksDf, aes(x=X1, y=X2, label=label), color="white", size=6 )
+        #    geom_point( data=marksDf, aes(x=X1, y=X2), position=position_nudge(y=4, x=-4), color="yellow" ) +
+
+        marksDf <- rename(marksDf, Var1=X1, Var2=X2)
+        tblDf <- marksDf %>% left_join(corValues) %>% select(-DirectionsIndicator)
+        tblDf$Cor.fmt  <- format(round(tblDf$Cor,  digit=3))
+        tblDf$Pval.fmt <- format(round(tblDf$Pval, digit=6))
+        print(tblDf)
+        
+        grid.newpage()
+        tbl <- tableGrob( tblDf %>% select(-Cor, -Pval), cols=c("Pos1 (nt)", "Pos2 (nt)", "Label", "Correlation", "p-val") )  # , cols=c("label","X1","X2","Cor") )
+        grid.draw(tbl)
+        
+    }
+    
     print(p)
+
 }
 
-## correlationBetweenRanges( traits, tree, "Member_all_1",
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
 
 
-## correlationBetweenRanges( traits, tree, "Member_all_1",
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
 
+##performGLSregressionWithFilter( traits, tree, "Member_all_1",      "GenomicGC",   "Profile_1.1" )
+##performGLSregressionWithFilter( traits, tree, "Member_all_1",      "GenomicGC",   "Profile_1.26" )
+##performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC",   "Profile_1.26" )
 
-## correlationBetweenRanges( traits, tree, "Member_all_1",
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
+##dev.off()
+##quit()
 
-## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
-
-
-## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
-
-
-## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
-##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
-##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
-##                          useUncorrectedCorrelation=TRUE )
+## Autocorrelation plots, showing the correlation between different points along the profile
 
 ## correlationBetweenRanges( traits, tree, "Member_all_1",
 ##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
 ##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+## correlationBetweenRanges( traits.normalized, tree, "Member_all_1",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Bacteria_2", 
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759", 
+                         sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+                         seq(0,300,10),
+                         sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+                         seq(0,300,10),
+                         useUncorrectedCorrelation=TRUE,
+                         marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+                         halfOnly=1 )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Archaea_2157", 
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Proteobacteria_1224", 
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+## correlationBetweenRanges( traits, tree, "Member_Proteobacteria_1224", 
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=FALSE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=-1 )
+
+
+
+## correlationBetweenRanges( traits, tree, "Member_Opisthokonta_33154",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=TRUE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=1 )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Opisthokonta_33154",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=FALSE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100, 0, 10, 0, 200, 0, 300, 100, 300),
+##                          halfOnly=-1 )
+
+## dev.off()
+## quit()
+
+
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(seq(1,31,1), function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          useUncorrectedCorrelation=FALSE,
+##                          marks=c(10,  0, 200, 0, 300, 0, 300, 100),
+##                          halfOnly=-1)
+
+## dev.off()
+## quit()
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          seq(300,0,-10),
+##                          sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          seq(300,0,-10),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(2:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          seq(300,0,-10),
+##                          useUncorrectedCorrelation=TRUE )
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+
+## correlationBetweenRanges( traits, tree, "Member_Eukaryota_2759",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          sapply(1:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          useUncorrectedCorrelation=TRUE )
+
+## correlationBetweenRanges( traits, tree, "Member_all_1",
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
+##                          sapply(1:31, function (j) { sprintf("Profile_1.%d", j) } ),
+##                          seq(0,300,10),
 ##                          useUncorrectedCorrelation=FALSE )
 
 
@@ -1733,8 +2647,10 @@ correlationBetweenRanges <- function( traits, tree, filterTrait, xRange, yRange,
 ##                          useUncorrectedCorrelation=FALSE )
 
 ## correlationBetweenRanges( traits, tree, "Member_all_1",
-##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
-##                          sapply(seq(1,32,1), function (j) { sprintf("Profile_2.%d", j) } ),
+##                          sapply(2:32, function (j) { sprintf("Profile_2.%d", j) } ),c
+##                          seq(300,0,-10),
+##                          sapply(2:32, function (j) { sprintf("Profile_2.%d", j) } ),
+##                          seq(300,0,-10),
 ##                          useUncorrectedCorrelation=FALSE )
 
 ## correlationBetweenRanges( traits, tree, "Member_Bacteria_2",
@@ -1767,7 +2683,7 @@ performGLSregression_profileRangeMean_withFilter <- function( traits, tree, filt
 {
     # Filter tree by trait
     ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
-    if( is.na(ret[[1]]) ) { return( NA ) }
+    if( isTRUE(is.na(ret[[1]])) ) { return( NA ) }
     traits.filtered <- ret[[1]]
     tree.filtered   <- ret[[2]]
     stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
@@ -1820,12 +2736,14 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 ## }
 
 
+# Side-by-side comparison of begin- and end-referenced profiles
+
 ## for( gr in taxGroups )
 ## {
 ##     print(gr)
-##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength),   profileId=1)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,31),   profileId=1)
 
-##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(1,pyramidLength),   profileId=2)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicGC", c(2,32),   profileId=2)
     
 ##     #performGLSregressionWithFilter( traits, tree, gr,                  "Profile_1.1",   "Profile_1.15" )
 
@@ -1848,13 +2766,233 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 ## }
 
 
-##quit()
+## dev.off()
+## quit()
 
 
-##dev.off()
-##quit()
+performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicGC",  as.integer(c(12,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced" )
+performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Eukaryota_2759", "GenomicGC",  as.integer(c(12,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced" )
+performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Fungi_4751", "GenomicGC",  as.integer(c(12,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced" )
+performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Bacteria_2", "GenomicGC",  as.integer(c(12,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced" )
 
 
+## performGLSregressionWithFilter( traits, tree, "Member_all_1",                  "Profile_2.1",   "Profile_2.16" )
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicGC", "Profile_1.26" )
+performGLSregressionWithFilter( traits, tree, "Member_Eukaryota_2759", "GenomicGC", "Profile_1.26" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile_1.26" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicGC", "Profile_2.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Eukaryota_2759", "GenomicGC", "Profile_2.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC", "Profile_2.6" )
+
+##performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicGC",   "Profile_1.26" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicENc.prime", "Profile_1.26" )
+performGLSregressionWithFilter( traits, tree, "Member_Eukaryota_2759", "GenomicENc.prime", "Profile_1.26" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicENc.prime", "Profile_1.26" )
+
+performGLSregressionWithFilter( traits, tree, "Member_all_1", "GenomicENc.prime", "Profile_2.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Eukaryota_2759", "GenomicENc.prime", "Profile_2.6" )
+performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2", "GenomicENc.prime", "Profile_2.6" )
+
+
+
+dev.off()
+quit()
+
+
+findValueOutliersWithFilter <- function( traits, filterTrait, criteria, pvalThreshold=0.01, logical="all", epsilon=0.1 )
+{
+    stopifnot( any( filterTrait == colnames(traits)  ) )  # filterTrait not found
+
+    # Filter by the filter trait
+    traits <- traits[ (traits[,filterTrait]>0), ]
+
+    numSpecies <- nrow(traits)
+
+    
+    #print(nrow(traits))
+    test.val <- sapply(1:length(criteria), function(i) sprintf("test.val.%d", i) )
+    test.res <- sapply(1:length(criteria), function(i) sprintf("test.res.%d", i) )
+    descr <- sapply(1:length(criteria), function(i) sprintf("profile%d (%d-%d) %s ", criteria[[i]][[1]], criteria[[i]][[2]], criteria[[i]][[3]], criteria[[i]][[4]]) )
+    #print(test.val)
+    #print(test.res)
+
+    for( i in 1:length(criteria) )
+    {
+        criterion <- criteria[[i]]
+
+
+        variables <- getProfileVariables( c(criterion[[2]], criterion[[3]]), profileId=criterion[[1]] )
+        #print(variables)
+
+        traits[,test.val[i]] <- rowMeans( traits[variables] )
+                                        #traits$RangeMean <- rowMeans( traits[variables] )
+        stopifnot( any( test.val[i] == colnames(traits)  ) )  # studyTrait  not found
+        condition  <-  criterion[[4]]
+        stopifnot(condition==">0" || condition=="<0")
+        #ccol <- crits[i]
+
+        total=nrow(traits)
+        
+        if( condition==">0" )
+        {
+            traits[,test.res[i]] <- traits[,test.val[i]] >  epsilon
+        }
+        else
+        {
+            traits[,test.res[i]] <- traits[,test.val[i]] <  -epsilon
+        }
+    }
+
+    #print(dimnames(traits))
+    #print(dim(traits[test.res]))
+    #print(dim(traits[crits]))
+    
+
+    if( logical == "all")
+    {
+        matching <- apply( traits[test.res], MARGIN=1, FUN=all)
+    }
+    else
+    {
+        matching <- apply( traits[test.res], MARGIN=1, FUN=any)
+    }
+
+    #print(class(matching))
+    #print(matching)
+    #print(rownames(matching))
+
+    posBDQA <- paste0( sample( names(matching[ matching]), size=min(10, length(matching[ matching])), replace=FALSE ), collapse=",")
+    negBDQA <- paste0( sample( names(matching[!matching]), size=min(10, length(matching[!matching])), replace=FALSE ), collapse=",")
+    
+
+    return( data.frame( Filter=c(filterTrait), Descr=c(descr), Matches=c(sum(matching>0)), Percent=c(sum(matching>0)/total*100), Total=c(total), BDQA.pos=c(posBDQA), BDQA.neg=c(negBDQA) ) )
+}
+
+
+print(sum(traits[!is.na(traits$TempOver75),]$TempOver75   + 0))
+print(sum(traits[!is.na(traits$TempUnder75),]$TempUnder75 + 0))
+
+#quit()
+
+
+#results <- glsRangeAnalysisWithFilter( traits, tree, "TempOver75",  "OptimumTemp", c(1,31),   profileId=1)
+#results <- glsRangeAnalysisWithFilter( traits, tree, "TempUnder75", "OptimumTemp", c(1,31),   profileId=1)
+
+#results <- glsRangeAnalysisWithFilter( traits, tree, "TempUnder75", "GenomicGC", c(2,32),   profileId=2)
+
+
+outliers <- data.frame( Filter=character(), Descr=character(), Matches=integer(), Percent=double(), Total=integer(), BDQA.pos=character(), BDQA.net=character() )
+
+
+#--1--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 1, 3,  ">0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 1, 3,  "<0")) ) )
+
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 1, 1,  ">0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 2, 2,  ">0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 3, 3,  ">0")) ) )
+
+
+#--2--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(2, 32, 32, ">0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(2, 32, 32, "<0")) ) )
+
+#--3--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "TempOver75",  list(list(1,  1,  3,  ">0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "TempUnder75", list(list(1, 31, 31, ">0")) ) )
+
+#--4--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Bacteria_2",  list(list(1,  1,  3,  "<0")) ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Bacteria_2",  list(list(2, 32, 32, "<0")) ) )
+
+#--5--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list( list(1, 1, 1, ">0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list( list(1, 15, 31, "<0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 1, 1, ">0"), list(1, 15, 31, "<0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",  list(list(1, 1, 1, "<0"), list(1, 15, 31, ">0") ), logical="any" ) )
+
+
+
+#--6--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Bacteria_2",  list(list(1, 1, 1, ">0"), list(1, 15, 31, "<0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Bacteria_2",  list(list(1, 1, 1, "<0"), list(1, 15, 31, ">0") ), logical="any" ) )
+
+#--7--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Eukaryota_2759",  list(list(1, 1, 1, ">0"), list(1, 15, 31, "<0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Eukaryota_2759",  list(list(1, 1, 1, "<0"), list(1, 15, 31, ">0") ), logical="any" ) )
+
+#--8--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Archaea_2157",  list(list(1, 1, 1, ">0"), list(1, 15, 31, "<0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Archaea_2157",  list(list(1, 1, 1, "<0"), list(1, 15, 31, ">0") ), logical="any" ) )
+
+
+#--9--
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_all_1",          list(list(2, 2, 16, "<0"), list(2, 32, 32, ">0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Bacteria_2",     list(list(2, 2, 16, "<0"), list(2, 32, 32, ">0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Eukaryota_2759", list(list(2, 2, 16, "<0"), list(2, 32, 32, ">0") ), logical="all" ) )
+outliers <- rbind( outliers, findValueOutliersWithFilter( traits, "Member_Archaea_2157",   list(list(2, 2, 16, "<0"), list(2, 32, 32, ">0") ), logical="all" ) )
+
+
+print(outliers)
+
+
+############################################################################################################################################3
+# Find the common position of the "0-crossing" (the point at which the positive profile becomes negative
+
+
+## get.mode <- function(v)
+## {
+##     uniqv <- unique(v)
+##     uniqv[which.max(tabulate(match(v, uniqv)))]
+## }
+
+
+plotPositiveStretchLengths <- function(data)
+{
+    stopifnot(profileMode=="dLFE")
+    
+    variables <- getProfileVariables( c(1, 31), profileId=1 )
+    #print(variables)
+    #print(traits[,variables])
+
+    #print(".1.1.1.1.1.1.")
+    values <- traits[,variables]
+    #print(length(values))
+    #print(values)
+    #print(vals[5,])
+    #x <- values[5:10]
+    #print(x)
+    #print(x<0)
+    
+    
+    vals <- apply( values, MARGIN=1, FUN=function (x) min(c(1:31)[x<0]) )
+    vals <- (vals-1)*10
+
+    p <- ggplot( data.frame(v=vals), aes(v) ) +
+        geom_histogram( ) +
+        geom_histogram( aes(y=cumsum(..count..)), alpha=0.3 ) +
+        labs(title="0-crossing position (cummulative)", x="Position relative to CDS start (nt)", y="Number of species")
+    print(p)
+
+    p <- ggplot( data.frame(v=vals), aes(v) ) +
+        geom_histogram() +
+        labs(title="0-crossing position", x="Position relative to CDS start (nt)", y="Number of species")
+    print(p)
+    
+    
+    return( vals)
+}
+
+plotPositiveStretchLengths(traits)
+
+
+
+dev.off()
+quit()
+
+############################################################################################################################################3
 
 ## for( gr in taxGroups )
 ## {
@@ -1876,6 +3014,13 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 #performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.1",  traits.full=NA, bm.gamma=0.1 )
 #performGLSregression( traits, tree,   "GenomicGC",   "Profile_1.15", plotRegression=TRUE, caption="gamma=0.05", traits.full=NA, bm.gamma=0.05 )
 
+#quit()
+
+
+###glsRangeAnalysisWithFilter( traits, tree, "Member_all_1", "GenomicGC", c(1,pyramidLength), profileId=1)
+#glsRangeAnalysisWithFilter( traits, tree, "Member_all_1", "GenomicGC", c(2,32), profileId=2)
+
+#dev.off()
 #quit()
 
 
@@ -1934,13 +3079,16 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 #performGLSregressionWithFilter( traits, tree, "Member_Bacteria_2",                  "Habitat",   "Profile_1.27" )
 
 
+####glsRangeAnalysisWithFilter( traits, tree, "Member_All_1", "GenomicGC", c(1,pyramidLength), xxxxxxxxxxx)
+
+
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 #dev.off()
 #quit()
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
 
-##regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
+regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
 
 
 ## for( gr in taxGroups )
@@ -1952,6 +3100,9 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 ##     if( any( class(results) == "data.frame" ) && nrow(results) )
 ##     {
 ##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##         results$Pvalue.adj <- p.adjust( results$Pvalue, method="fdr" )
+
+##         print(results)
 
 ##         # Iterate over each range to find the relevant peak
 ##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
@@ -1960,16 +3111,122 @@ regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=int
 ##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
 
 ##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             medianR2  <- median( results[matching, "Buse.R2"] )
 
-##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(maxResult$Buse.R2), Pvalue=c(maxResult$Pvalue), NumSpecies=c(maxResult$NumSpecies) ) )
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicGC"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(medianR2), Pvalue=c(maxResult$Pvalue.adj), NumSpecies=c(maxResult$NumSpecies) ) )
 ##         }
 ##     }
 ## }
 
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicENc.prime", c(1,pyramidLength))
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##         results$Pvalue.adj <- p.adjust( results$Pvalue, method="fdr" )
+
+##         print(results)
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             medianR2  <- median( results[matching, "Buse.R2"] )
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicENc.prime"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(medianR2), Pvalue=c(maxResult$Pvalue.adj), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+
+# Plots dependence of ENc and ENc' on GC%
+#p <- ggplot(
+#    data=data.frame(melt(traits, measure.vars=c("GenomicENc", "GenomicENc.prime"))),
+#    aes(x=GenomicGC, y=value, color=variable) ) + geom_point();
+                                        #print(p)
+
+
+#dev.off()
+#quit()
+
+## for( gr in taxGroups )
+## {
+##     print(gr)
+##     results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicENc", c(1,pyramidLength))
+
+##     # Store peaks (for each range) for this group
+##     if( any( class(results) == "data.frame" ) && nrow(results) )
+##     {
+##         results <- results[results$Var1==results$Var2,]    # Only include single-window results
+##         results$Pvalue.adj <- p.adjust( results$Pvalue, method="fdr" )
+
+##         print(results)
+
+##         # Iterate over each range to find the relevant peak
+##         for( i in 1:length(groupsTableOutputFile.limitRangeFromNt
+##         {
+##             matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+##                         (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+##             maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+##             medianR2  <- median( results[matching, "Buse.R2"] )
+
+##             regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicENc"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(medianR2), Pvalue=c(maxResult$Pvalue.adj), NumSpecies=c(maxResult$NumSpecies) ) )
+##         }
+##     }
+## }
+
+# Plots dependence of DCBS on ENc, etc.
+p <- ggplot(
+    data=data.frame(melt(traits, measure.vars=c("GenomicENc", "GenomicENc.prime", "GenomicDCBS") ) ),
+    aes(x=GenomicGC, y=value, color=variable) ) + geom_point();
+print(p)
+
+p <- ggplot(
+    data=data.frame(melt(traits, measure.vars=c("GenomicENc", "GenomicENc.prime") ) ),
+    aes(x=GenomicDCBS, y=value, color=variable) ) + geom_point();
+print(p)
+
+
+for( gr in taxGroups )
+{
+    print(gr)
+    results <- glsRangeAnalysisWithFilter( traits, tree, gr, "GenomicDCBS", c(1,pyramidLength))
+
+    # Store peaks (for each range) for this group
+    if( any( class(results) == "data.frame" ) && nrow(results) )
+    {
+        results <- results[results$Var1==results$Var2,]    # Only include single-window results
+        results$Pvalue.adj <- p.adjust( results$Pvalue, method="fdr" )
+
+        print(results)
+
+        # Iterate over each range to find the relevant peak
+        for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+        {
+            matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+                        (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+            maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+            medianR2  <- median( results[matching, "Buse.R2"] )
+
+            regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c("GenomicDCBS"),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(medianR2), Pvalue=c(maxResult$Pvalue.adj), NumSpecies=c(maxResult$NumSpecies) ) )
+        }
+    }
+}
+
+
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
-##write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )
-##dev.off()
-##quit()
+write.csv(regressionResultsByTaxGroup, file=groupsTableOutputFile )
+dev.off()
+quit()
 # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
 ## for( gr in taxGroups )
@@ -2226,8 +3483,8 @@ for( gr in taxGroups )
 ##     }
 ## }
 
-dev.off()
-quit()
+##dev.off()
+##quit()
 
 #glsRangeAnalysisWithFilter( traits, tree, "HighGC",    "OptimumTemp", c(1,pyramidLength) )
 #glsRangeAnalysisWithFilter( traits, tree, "LowGC",     "OptimumTemp", c(1,pyramidLength) )
