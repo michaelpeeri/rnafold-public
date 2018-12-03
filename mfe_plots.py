@@ -1,7 +1,8 @@
 import sys
 import numpy as np
+import numpy.linalg
 import pandas as pd
-from math import log10, sqrt
+from math import log10, sqrt, exp
 from bisect import bisect_left
 from scipy.stats import pearsonr, spearmanr, kendalltau, linregress, wilcoxon
 import matplotlib
@@ -12,7 +13,11 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
 from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty, getSpeciesShortestUniqueNamesMapping
 from sklearn import decomposition
+from sklearn.neighbors import KernelDensity
+from sklearn.grid_search import GridSearchCV
+from sklearn.cross_validation import KFold
 import seaborn as sns
+import cairo
 from pyqtree import Index
 from ncbi_entrez import getTaxonomicGroupForSpecies
 from rate_limit import RateLimit
@@ -789,15 +794,17 @@ def loadProfileData(files):
 
                 cdsCount = int(summary_df.iloc[0]['cds_count'])
                 assert(cdsCount >= 100)
-                print("--------")
+                #print("--------")
                 firstPos = (deltas_df['pos'].min())
                 lastPos = (deltas_df['pos'].min())
                 numSamplesIncludedInProfile = min( pd.isnull(deltas_df[deltas_df['pos']==firstPos]['delta']).sum(),
                                                    pd.isnull(deltas_df[deltas_df['pos']==lastPos ]['delta']).sum() )
 
-                print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                #print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
                 if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
-                    continue
+                    print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                    print("Skipping {} (taxId={}): not enough data is available".format(longTaxName, taxId))
+                    #continue  # Skip sequences with very limited data available
                 
                 #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
                 meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
@@ -913,7 +920,193 @@ def getSpeciesShortestUniqueNamesMapping_memoized():
     return _shortTaxNames
 
 
-def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None):
+
+def addPanel(ctx, filename, h, w):
+    ctx.save()
+
+    im1 = cairo.ImageSurface.create_from_png( file( filename, 'r') )
+
+    # Set origin for this layer
+    ctx.translate( 0, 0 )
+
+    imgpat = cairo.SurfacePattern( im1 )
+
+    imh = im1.get_height()
+    imw = im1.get_width()
+
+    #scale_w = imw/w
+    #scale_h = imh/h
+    #compromise_scale = max(scale_w, scale_h)
+    
+
+    # Scale source image
+    #scaler = cairo.Matrix()
+    #scaler.scale(compromise_scale, compromise_scale)
+    #imgpat.set_matrix(scaler)
+    #imgpat.set_filter(cairo.FILTER_BEST)
+
+
+    ctx.set_source(imgpat)
+
+    ctx.rectangle( 0, 0, w, h )
+
+    ctx.fill()
+    ctx.restore()
+
+def overlayImages(images, outputFile):
+    fo = file(outputFile, 'w')
+
+    h=2400
+    w=1800
+
+    surface = cairo.ImageSurface(cairo.Format.RGB24, w, h)
+    ctx = cairo.Context( surface )
+
+    # ------------------------- Background -------------------------
+    ctx.set_source_rgb( 1.0, 1.0, 1.0 )
+    ctx.paint()
+
+    for image in images:
+        addPanel(ctx, image, h, w)
+
+    surface.write_to_png(fo)
+
+    surface.finish()
+
+
+def estimateModeUsingKDE(xs):
+    xs = np.expand_dims(xs, 1)
+    assert(xs.ndim==2)
+
+    bandwidths = 10 ** np.linspace(-2.0, 1, 500)
+    
+    cv = KFold(len(xs), n_folds=10)
+    #cv = LeaveOneOut(len(x1))
+    
+    grid = GridSearchCV(KernelDensity(kernel='gaussian'),
+                        {'bandwidth': bandwidths},
+                        cv=cv )
+    grid.fit(xs)
+    bw = grid.best_params_['bandwidth']
+    
+    kde = KernelDensity(bandwidth=bw, kernel='gaussian')
+    kde.fit(xs)  # calculate the KDE
+    print(xs.shape)
+
+    x_d = np.linspace( min(xs), max(xs), 500 )  # This must cover the range of values.. TODO - fix this...
+    print( np.expand_dims(x_d, 1).shape)
+    
+    logprob = kde.score_samples( np.expand_dims(x_d, 1) )  # score the KDE over a range of values
+
+    pos = np.argmax(logprob)
+    peak = x_d[pos]
+    peakVal = logprob[pos]
+    assert(all(logprob <= peakVal))
+    return (peak, peakVal)
+    
+
+class LayerConfig(object):
+    _defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False, showTickMarks=False )
+
+    def __init__(self, **kw):
+        self._kw = LayerConfig._defaults.copy()
+        
+        self._kw.update(**kw)
+
+    def __str__(self):
+        return str(self._kw)
+
+    def __getattr__(self, name):
+        return self._kw.get(name)
+
+# Source: https://stackoverflow.com/a/13849249
+def unitVector(v):
+    return v/np.linalg.norm(v)
+
+# Source: https://stackoverflow.com/a/13849249
+def angleBetween(v1,v2):
+    v1_u = unitVector(v1)
+    v2_u = unitVector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
+assert(abs(angleBetween(np.array([1,0,0,0]),np.array([-1,0,0,0])) - np.pi  ) < 1e-6)
+assert(abs(angleBetween(np.array([1,0,0,0]),np.array([ 0,1,0,0])) - np.pi/2) < 1e-6)
+assert(abs(angleBetween(np.array([1,0,0,0]),np.array([10,0,0,0])) - 0.0    ) < 1e-6)
+
+def testPCArobustness(vectors, repeat=1000, sampleSize=500):
+
+    def testIteration():
+        ixs = np.random.randint(vectors.shape[0], size=sampleSize)
+        sample = vectors.take(ixs, axis=0)
+        
+        # Perform the PCA
+        pca = decomposition.PCA()
+        pca.n_components = 3  # force 3 components
+        pca.fit(sample)
+
+
+        v1 = pca.components_[0,:]
+        v2 = pca.components_[1,:]
+        v3 = pca.components_[2,:]
+
+        assert( abs(angleBetween(v1,v2) - np.pi/2) <= 1e-6 )
+        assert( abs(angleBetween(v1,v3) - np.pi/2) <= 1e-6 )
+        assert( abs(angleBetween(v2,v3) - np.pi/2) <= 1e-6 )
+
+        c_0nt_2d   = np.array( (pca.components_[0, 0], pca.components_[1, 0]) )
+        c_250nt_2d = np.array( (pca.components_[0,25], pca.components_[1,25]) )
+        c_50nt_2d  = np.array( (pca.components_[0, 5], pca.components_[1, 5]) )
+
+        return (angleBetween(c_0nt_2d, c_250nt_2d),
+                angleBetween(c_0nt_2d, c_50nt_2d),
+                pca.explained_variance_ratio_[0],
+                pca.explained_variance_ratio_[1])
+
+    angles1_2 = []
+    angles1_3 = []
+    varexp1 = []
+    varexp2 = []
+    for n in range(repeat):
+        print(n)
+        ret = testIteration()
+        print(ret)
+        angles1_2.append(ret[0])
+        angles1_3.append(ret[1])
+        varexp1.append(ret[2])
+        varexp2.append(ret[3])
+
+    fig, ax1 = plt.subplots()
+    sns.distplot(angles1_2)
+    plt.savefig("pca_profiles_robustness_angle_1_2.pdf")
+    plt.close(fig)
+    
+    fig, ax1 = plt.subplots()
+    sns.distplot(angles1_3)
+    plt.savefig("pca_profiles_robustness_angle_1_3.pdf")
+    plt.close(fig)
+
+    fig, ax1 = plt.subplots()
+    sns.distplot(varexp1)
+    plt.savefig("pca_profiles_robustness_varexp_1.pdf")
+    plt.close(fig)
+
+    fig, ax1 = plt.subplots()
+    sns.distplot(varexp2)
+    plt.savefig("pca_profiles_robustness_varexp_2.pdf")
+    plt.close(fig)
+    
+        
+
+def saveHistogram(data, filename):
+    fig, ax1 = plt.subplots()
+    sns.distplot(data, ax=ax1)
+    plt.title("{} (N={}, median={})".format(filename, data.shape[0], np.median(data)) )
+    plt.savefig(filename)
+    plt.close(fig)
+    
+    
+    
+def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}):
     filteredProfiles = {}
     for key, profile in biasProfiles.items():
         if not np.any(np.isnan(profile)):
@@ -922,164 +1115,271 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     
     X = np.vstack(biasProfiles.values()) # convert dict of vectors to matrix
     #X = X[~np.any(np.isnan(X), axis=1)]  # remove points containig NaN
+
+
+    testPCArobustness(X) # create diagnostic plots for the robustness of the PCA solution (that is not generally robust to outliers)
+    
     print("Creating PCA plot...")
+    
 
     shortNames = getSpeciesShortestUniqueNamesMapping_memoized()
 
+    # Perform the PCA
     pca = decomposition.PCA()
     pca.fit(X)
 
-    pca.n_components = 2  # force 2 components
+    pca.n_components = 3  # force 3 components
     X_reduced = pca.fit_transform(X)
     print(X_reduced.shape)
 
+    debugSymbols = [[0, 1, -1, 0,  0], [0, 0,  0, 1, -1]]   # coordinates for debug symbols ('x')
+    
     # Assign dimensions to plot axes
     # TODO - test the other values...
     D0 = 0 # D0 - component to show on Y scale 
     D1 = 1 # D1 - component to show on X scale
     assert(D0!=D1)
+
+    D0_peak = estimateModeUsingKDE( X_reduced[:,D0] )
+    D1_peak = estimateModeUsingKDE( X_reduced[:,D1] )
+    distPlotsScales = (exp(D1_peak[1])*1.12, exp(D0_peak[1])*1.12)
+    print("Peaks: {} {}".format(exp(D1_peak[1]), exp(D0_peak[1])))
+    
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+
+    
     
 
-    #fig = matplotlib.figure.Figure(suppressComposite=True)
-    #ax = fig.subplots()
-    fig, ax = plt.subplots()    
+    def plotPCALayer(layerConfig):
+        #fig = matplotlib.figure.Figure(suppressComposite=True)
+        #ax = fig.subplots()
+        fig, ((ax1,ax2),(ax3,ax4)) = plt.subplots(nrows=2, ncols=2, sharex="col", sharey="row", gridspec_kw={'height_ratios': [1, 8], 'width_ratios': [1, 8]  }, figsize=plt.figaspect(1.333), linewidth=0 )
+        for ax in fig.axes: ax.set_autoscale_on(False)
+        #ax = ax4
 
-    cmapNormalizer = CenterPreservingNormlizer(profileValuesRange[0], profileValuesRange[1])
+        cmapNormalizer = CenterPreservingNormlizer(profileValuesRange[0], profileValuesRange[1])
 
 
-    #plt.scatter(X_reduced[:,1], X_reduced[:,0], label=[shortNames[x] for x in biasProfiles.keys()])
+        #plt.scatter(X_reduced[:,1], X_reduced[:,0], label=[shortNames[x] for x in biasProfiles.keys()])
 
-    # Calculate general scaling constants
-    scaleX = max(X_reduced[:,D1]) - min(X_reduced[:,D1])
-    scaleY = max(X_reduced[:,D0]) - min(X_reduced[:,D0])
-    ori1 =   max(X_reduced[:,D0])
-    ori2 =   max(X_reduced[:,D1])
-    #assert(scaleY>scaleX)  # We map the first PCA dimension to the Y axis (since portrait format better fits the figure layout)
-    scaleX = scaleY
-    imw = scaleX*0.100*profileScale
-    imh = scaleY*0.012*profileScale
-    imofy = profilesYOffsetWorkaround # 0.0 # 0.45 # TODO - FIX THIS
 
-    spIndex = Index(bbox=(min(X_reduced[:,D1]), min(X_reduced[:,D0]), max(X_reduced[:,D1]), max(X_reduced[:,D0]) ))
-    
-    #zorders = [x[0] for x in sorted(list(enumerate([sqrt((X_reduced[i,D1]-ori2)**2 + (X_reduced[i,D0]-ori1)**2) for i in range(len(X_reduced))])), key=lambda x:x[D1])]
+        # Calculate general scaling constants
+        scaleX = (max(X_reduced[:,D1]) - min(X_reduced[:,D1])) * zoom
+        scaleY = (max(X_reduced[:,D0]) - min(X_reduced[:,D0])) * zoom
+        ori1 =   max(X_reduced[:,D0])
+        ori2 =   max(X_reduced[:,D1])
+        #assert(scaleY>scaleX)  # We map the first PCA dimension to the Y axis (since portrait format better fits the figure layout)
+        #scaleX = scaleY
+        scaleXY = max(scaleX,scaleY)
+        imw = scaleXY*0.100*profileScale
+        imh = scaleXY*0.012*profileScale
+        imofy = profilesYOffsetWorkaround # 0.0 # 0.45 # TODO - FIX THIS
 
-    dinfo = {}
-
-    highlightPatches = []
-
-    # Plot each profile 
-    for i, taxId in enumerate(biasProfiles.keys()):
-        # Determine the location for this profile
-        x = X_reduced[i,D1]
-        y = X_reduced[i,D0]
-
-        showProfile = True
-        label = shortNames[taxId]
-        
-        # is there overlap?
-        if overlapAction=="hide":
-            bbox = (x-imw, y-imh, x+imw, y+imh)
-            print("---"*10)
-            print("new: {} {}".format(label, bbox))
-            matches = spIndex.intersect( bbox )
-            for m in matches:
-                print("-X- {} {}".format(m, dinfo[m]))
-                
-            if matches and taxId not in highlightSpecies:
-                print( "Hiding profile at {}".format( (x,y) ) )
-                showProfile = False
-            else:
-                spIndex.insert( label, bbox )
-                dinfo[label] = bbox
-            
-        # plot the profile
-        #zorder = zorders[i]
-        if showProfile:      # skip this if we decided to hide this profile
-
-            # Show the text label
-            if fontSize > 0:
-                plt.annotate(label, (x - scaleX*0.03, y + scaleY*0.012), fontsize=fontSize, zorder=5)
-
-            if taxId in highlightSpecies:
-                rect = Rectangle((bbox[0]-0.03, bbox[1]+0.03+imh), imw*2+0.06, imh*2+0.06, edgecolor="blue", linewidth=4.0, facecolor="none", fill=False, linestyle="solid")
-                highlightPatches.append(rect)
-                
-
-            # Show the profile tile
-            if True:
-                plt.imshow( np.array( biasProfiles[taxId] ).reshape(1,-1), cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2005 )
-        
-
-    # Paint the highlights
-    if False:
-        ax.add_collection(PatchCollection(highlightPatches))
-        
-    ax.set_aspect("equal")
-    centerY = (max(X_reduced[:,D0]) + min(X_reduced[:,D0])) * 0.5
-    centerX = (max(X_reduced[:,D1]) + min(X_reduced[:,D1])) * 0.5
-    ax.set_xlim(( centerX - scaleY*0.55, centerX + scaleY*0.55 ))   # Use same scale for both axes
-    ax.set_ylim(( centerY - scaleY*0.55, centerY + scaleY*0.55 ))
-
-    if False:
-        tlx = max(X_reduced[:,D1])
+        # Legend position
+        #tlx = min(X_reduced[:,D1]) - imw*0.5
+        tlx = max(X_reduced[:,D1]) - (imw*legendXpos)
         tly = min(X_reduced[:,D0])
         bry = max(X_reduced[:,D0])
-        cmapNormalizerForPCAvars = CenterPreservingNormlizer(-1, 1)
-        plt.imshow( pca.components_[0,:].reshape(1,-1), extent=(tlx-imw*2, tlx,  tly-imh*2, tly-imh*4 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=5 )
-        plt.imshow( pca.components_[1,:].reshape(1,-1), extent=(tlx-imw*2, tlx,  tly      , tly-imh*2 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=5 )
-        plt.annotate( "V1",                                               (tlx - imw*2.4, bry+imh*2), fontsize=fontSize )
-        plt.annotate( "V2",                                               (tlx - imw*2.4, bry),       fontsize=fontSize )
-        plt.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0] ), (tlx + imw*0.1, bry+imh*2), fontsize=fontSize )
-        plt.annotate( "{:.3g}".format( pca.explained_variance_ratio_[1] ), (tlx + imw*0.1, bry      ), fontsize=fontSize )
 
-    if False:
-        loadingScale = 5.4
-        plt.annotate( u"\u0394LFE[0nt]",   xy=(0,0), xytext=(pca.components_[D1,0 ]*loadingScale, pca.components_[D0,0 ]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.4, linewidth=1.5, color='red'), color='red', zorder=200 )
-        plt.annotate( u"\u0394LFE[100nt]", xy=(0,0), xytext=(pca.components_[D1,10]*loadingScale, pca.components_[D0,10]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.4, linewidth=1.5, color='red'), color='red', zorder=200 )
+        
+        spIndex = Index(bbox=(min(X_reduced[:,D1]), min(X_reduced[:,D0]), max(X_reduced[:,D1]), max(X_reduced[:,D0]) ))
+
+        #zorders = [x[0] for x in sorted(list(enumerate([sqrt((X_reduced[i,D1]-ori2)**2 + (X_reduced[i,D0]-ori1)**2) for i in range(len(X_reduced))])), key=lambda x:x[D1])]
+
+        dinfo = {}
+
+        highlightPatches = []
+
+        if layerConfig.showProfiles:
+            # Plot each profile 
+            for i, taxId in enumerate(biasProfiles.keys()):
+                # Determine the location for this profile
+                x = X_reduced[i,D1]
+                y = X_reduced[i,D0]
+
+                showProfile = True
+                label = shortNames[taxId]
+
+                # is there overlap?
+                if overlapAction=="hide":
+                    bbox = (x-imw, y-imh, x+imw, y+imh)
+                    print("---"*10)
+                    print("new: {} {}".format(label, bbox))
+                    matches = spIndex.intersect( bbox )
+                    for m in matches:
+                        print("-X- {} {}".format(m, dinfo[m]))
+
+                    if matches and taxId not in highlightSpecies:
+                        print( "Hiding profile at {}".format( (x,y) ) )
+                        showProfile = False
+                    else:
+                        spIndex.insert( label, bbox )
+                        dinfo[label] = bbox
+
+                # plot the profile
+                #zorder = zorders[i]
+                if showProfile:      # skip this if we decided to hide this profile
+
+                    # Show the text label
+                    if fontSize > 0:
+                        ax4.annotate(label, (x - scaleX*0.03, y + scaleY*0.012), fontsize=fontSize, zorder=100)
+
+                    if taxId in highlightSpecies:
+                        rect = Rectangle((bbox[0]-0.03, bbox[1]+0.03+imh), imw*2+0.06, imh*2+0.06, edgecolor="blue", linewidth=4.0, facecolor="none", fill=False, linestyle="solid")
+                        highlightPatches.append(rect)
 
 
-    #plt.scatter(X_reduced[:,1], X_reduced[:,0] )
-    
-    
-    plt.grid(False)
-    ax.set_xticks(())
-    ax.set_yticks(())
-    #plt.xlim( (min(X_reduced[:,D1]) - scaleX*0.1, max(X_reduced[:,D1]) + scaleX*0.1) )
-    #plt.ylim( (min(X_reduced[:,D0]) - scaleY*0.1, max(X_reduced[:,D0]) + scaleY*0.1) )
-
-    plt.savefig("pca_profiles.pdf")
-    plt.savefig("pca_profiles.png", dpi=300, transparent=True)
-    plt.savefig("pca_profiles.svg")
-    plt.close(fig)
+                    # Show the profile tile
+                    if True:
+                        ax4.imshow( np.array( biasProfiles[taxId] ).reshape(1,-1), cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2000 )
 
 
-    # Create separate density plot
-    fig, ax = plt.subplots()
+        # Paint the highlights
+        if layerConfig.showHighlights:
+            ax4.add_collection(PatchCollection(highlightPatches))
 
-    if showDensity:
-        sns.kdeplot( X_reduced[:,D1].flatten(), X_reduced[:,D0].flatten(), n_levels=20, cmap="Blues", shade=True, shade_lowest=True, legend=False, ax=ax, zorder=1 )
+        if layerConfig.showComponents:
+            cmapNormalizerForPCAvars = CenterPreservingNormlizer(-1, 1)
+            ax4.imshow( pca.components_[0,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly-imh*2, tly-imh*4 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
+            ax4.imshow( pca.components_[1,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly      , tly-imh*2 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
+            ax4.imshow( pca.components_[2,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly+imh*2, tly-imh*0 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
+            ax4.annotate( "V1",                                                (tlx - imw*2.5, bry+imh*2),       fontsize=fontSize*0.9 )
+            ax4.annotate( "V2",                                                (tlx - imw*2.5, bry+imh*0),       fontsize=fontSize*0.9 )
+            ax4.annotate( "V3",                                                (tlx - imw*2.5, bry-imh*2),       fontsize=fontSize*0.9 )
+            ax4.annotate( "V1+V2",                                             (tlx - imw*2.5, bry-imh*4),       fontsize=fontSize*0.9 )
+            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0] ), (tlx - imw*1.0, bry+imh*2), fontsize=fontSize*0.9 )
+            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[1] ), (tlx - imw*1.0, bry+imh*0), fontsize=fontSize*0.9 )
+            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[2] ), (tlx - imw*1.0, bry-imh*2), fontsize=fontSize*0.9 )
+            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0]+
+                                           pca.explained_variance_ratio_[1] ), (tlx - imw*1.0, bry-imh*4), fontsize=fontSize*0.9 )
 
-    #plt.scatter(X_reduced[:,1], X_reduced[:,0] )
+        if layerConfig.showLoadingVectors:
+            isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
 
-    ax.set_aspect("equal")
-    centerY = (max(X_reduced[:,D0]) + min(X_reduced[:,D0])) * 0.5
-    centerX = (max(X_reduced[:,D1]) + min(X_reduced[:,D1])) * 0.5
-    ax.set_xlim(( centerX - scaleY*0.55, centerX + scaleY*0.55 ))   # Use same scale for both axes
-    ax.set_ylim(( centerY - scaleY*0.55, centerY + scaleY*0.55 ))
-    
-    plt.grid(False)
-    ax.set_xticks(())
-    ax.set_yticks(())
-    #plt.xlim( (min(X_reduced[:,D1]) - scaleX*0.1, max(X_reduced[:,D1]) + scaleX*0.1) )
-    #plt.ylim( (min(X_reduced[:,D0]) - scaleY*0.1, max(X_reduced[:,D0]) + scaleY*0.1) )
+            for i, c in enumerate(addLoadingVectors):
+                print("c = {}".format(c))
+                if isEndReferenced:
+                    assert(c <= 0)
+                    cIdx = X.shape[1] + c - 1
+                    print("--> {} (N={})".format(cIdx, X.shape))
+                else:
+                    cIdx = c
 
-    
-    plt.savefig("pca_profiles_density.pdf")
-    plt.savefig("pca_profiles_density.png", dpi=300)
-    plt.savefig("pca_profiles_density.svg")
-    plt.close(fig)
-    
+                #ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingScale, pca.components_[D0,cIdx]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.6, linewidth=2.0, color='red'), color='red', zorder=200 )
+                ax4.annotate( "",   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingVectorsScale, pca.components_[D0,cIdx]*loadingVectorsScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), color=colors[i], zorder=50 )
+
+                ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(tlx-imw*1.9, bry-imh*2.2*(i+4)), xytext=(tlx-imw*0.4, bry-imh*2.2*(i+4)),  fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), zorder=200 )
+
+                
+
+        #plt.scatter(X_reduced[:,1], X_reduced[:,0] )
+
+
+        #plt.xlim( (min(X_reduced[:,D1]) - scaleX*0.1, max(X_reduced[:,D1]) + scaleX*0.1) )
+        #plt.ylim( (min(X_reduced[:,D0]) - scaleY*0.1, max(X_reduced[:,D0]) + scaleY*0.1) )
+
+        if layerConfig.showDists:
+            sns.set(style="ticks")
+
+            sns.distplot( X_reduced[:,D1].flatten(), hist=False, rug=False, ax=ax2 )
+            sns.distplot( X_reduced[:,D0].flatten(), hist=False, rug=False, ax=ax3, vertical=True )
+
+
+        if layerConfig.showDensity:
+            ax4.set_autoscale_on(False)
+            sns.kdeplot( X_reduced[:,D1].flatten(), X_reduced[:,D0].flatten(), n_levels=20, cmap="Blues", shade=True, shade_lowest=False, legend=False, ax=ax4, zorder=1 )
+            #sns.jointplot( X_reduced[:,D1].flatten(), X_reduced[:,D0].flatten(), cmap="Blues" )
+            # ax4.scatter(X_reduced[:,1], X_reduced[:,0], s=1.5, alpha=0.5 )
+
+
+            
+        if layerConfig.showTrait:
+            xs = []
+            ys = []
+            cs = []
+            for i, taxId in enumerate(biasProfiles.keys()):
+                # Determine the location for this profile
+                xs.append( X_reduced[i,D1] )
+                ys.append( X_reduced[i,D0] )
+                cs.append( traitValues.get(taxId, None) )
+                
+            traitPlot = ax4.scatter(xs, ys, c=cs, s=7.0, alpha=1.0, edgecolors='none', cmap="plasma_r", label="genomicGC",  )
+            fig.colorbar(traitPlot, shrink=0.5)
+            
+
+        if debug:
+            ax4.scatter(debugSymbols[0], debugSymbols[1], s=50, alpha=0.8, c="green", marker="+", zorder=300 )
+            ax4.annotate( "*", xy=(D1_peak[0], D0_peak[0]), alpha=0.5, color='red', zorder=250 )
+
+        ax4.set_ylabel('PCV1')
+        ax4.set_xlabel('PCV2')
+
+
+        #-----------------------------------------------------------------------------------
+        fig.subplots_adjust(hspace=0, wspace=0, left=0.05, right=0.95, bottom=0.05, top=0.95)
+        #plt.setp([a.get_xticklabels() for a in fig.axes[:-1]], visible=False)
+        for ax in fig.axes:
+            for side in ('top', 'right', 'left', 'bottom'):
+                ax.spines[side].set_visible(False)
+        ax1.set_xticks(())
+        ax1.set_yticks(())
+
+        ax4.set_aspect("equal")
+        centerY = (max(X_reduced[:,D0]) + min(X_reduced[:,D0])) * 0.5
+        centerX = (max(X_reduced[:,D1]) + min(X_reduced[:,D1])) * 0.5
+        x0 = centerX - scaleX*0.55
+        x1 = centerX + scaleX*0.55
+        y0 = centerY - scaleY*0.55
+        y1 = centerY + scaleY*0.55
+        #ax4.set_xlim(( x0, x1 ))
+        #ax4.set_ylim(( y0, y1 ))
+        unifiedScaleForDistPlots = max(distPlotsScales)
+        ax1.axis((unifiedScaleForDistPlots,  0,  0, unifiedScaleForDistPlots))
+        ax2.axis((                      x0, x1,  0, unifiedScaleForDistPlots))
+        ax3.axis((unifiedScaleForDistPlots,  0, y0, y1                      ))
+        ax4.axis((                      x0, x1, y0, y1                      ))
+
+        ax4.set_axis_on()
+        plt.grid(False)
+
+        if layerConfig.showTickMarks:
+            ax4.set_xticks((min(X_reduced[:,D1]), max(X_reduced[:,D1])))
+            ax4.set_yticks((min(X_reduced[:,D0]), max(X_reduced[:,D0])))
+        else:
+            ax4.set_xticks(())
+            ax4.set_yticks(())
+
+        if layerConfig.showDists:
+            #ax2.set_yticks((0, round(unifiedScaleForDistPlots,2)))
+            #Xax2.spines['left'].set_visible(True)
+            #ax2.spines['right'].set_visible(True)
+            
+            #ax3.set_xticks((0, round(unifiedScaleForDistPlots,2)))
+            #ax3.spines['bottom'].set_visible(True)
+            #ax3.spines['top'].set_visible(True)
+            pass
+        
+        #ax2.set_ylim((                 0, distPlotsScales[0]))
+        #ax3.set_xlim((distPlotsScales[1],                  0))
+        #ax3.invert_xaxis()
+        #-----------------------------------------------------------------------------------
+
+        plt.savefig("{}.pdf".format(layerConfig.output))
+        plt.savefig("{}.png".format(layerConfig.output), dpi=300, transparent=True, bbox_inches='tight')
+        plt.savefig("{}.svg".format(layerConfig.output))
+        plt.close(fig)
+
+
+    #_defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False )
+    plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True ) )
+
+    overlayImages( ["pca_profiles_density.png", "pca_profiles.png"], "pca_profiles_combined.png" )
+
+    plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showLoadingVectors=True ) )
+    overlayImages( ["pca_profiles_trait.png"], "pca_profiles_trait_combined.png" )
+
     
     print("Explained variance: {}".format(pca.explained_variance_ratio_))
     print("            (Total: {})".format(sum(pca.explained_variance_ratio_)))
