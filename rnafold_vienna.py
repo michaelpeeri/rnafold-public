@@ -3,7 +3,7 @@ import subprocess
 
 # ----------------------------------------------------------
 # configuration
-vienna_rnafold_path = "~/anaconda2_node/bin/RNAfold"
+vienna_rnafold_path = "~/anaconda2N/bin/RNAfold"
 #vienna_rnafold_path = "~/anaconda2/bin/RNAfold"
 # ----------------------------------------------------------
 
@@ -18,8 +18,14 @@ vienna_rnafold_path = "~/anaconda2_node/bin/RNAfold"
 reMFEScore = re.compile(".*\n.*[(]\s*([\d.-]+)[)]\n")   # parse the score (group 1), ignore the structure
 reMFEScoreWithStructure = re.compile(".*\n([().]+)\s+[(]\s*([\d.-]+)[)]\n")  # return the score (group 2) and structure (group 1)
 
-def RNAfold_direct(seq):
-    out = subprocess.check_output("echo %s | %s --noPS" % (seq, vienna_rnafold_path), shell=True)
+def RNAfold_direct(seq, explicitCalculationTemperature=None):
+    
+    if explicitCalculationTemperature is None:
+        cmdline = "echo %s | %s --noPS" % (seq, vienna_rnafold_path)
+    else:
+        cmdline = "echo %s | %s --temp=%g --noPS" % (seq, vienna_rnafold_path, explicitCalculationTemperature)
+        
+    out = subprocess.check_output(cmdline, shell=True)
     score = float(reMFEScore.match(out).group(1))
     assert(score<=0.0)
     return score

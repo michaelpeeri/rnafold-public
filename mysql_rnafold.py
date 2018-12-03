@@ -5,7 +5,10 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import config
 
-db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False, echo_pool=True, pool_recycle=120)
+if config.run_without_mysql_server:
+    db = None
+else:
+    db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False, echo_pool=True, pool_recycle=120)
 connection = None
 
 
@@ -38,17 +41,18 @@ def getMysqlHostFromConnectionString(connString):
     return (host, port)
 
 connectionInfo = getMysqlHostFromConnectionString(config.mysql_host_connection)
-if not testHostAvailable(*connectionInfo):
-    print("Connection test to mysql server %s failed." % (str(connectionInfo)))
-    sys.exit(-1)
-    
 
-try:
-    connection = db.connect()
-except Exception as e:
-    print("Failed to connect to mysql database on %s" % config.mysql_host_connection)
-    print(e)
-    sys.exit(-1)
+if not config.run_without_mysql_server:
+    if not testHostAvailable(*connectionInfo):
+       print("Connection test to mysql server %s failed." % (str(connectionInfo)))
+       sys.exit(-1)
+       
+    try:
+        connection = db.connect()
+    except Exception as e:
+        print("Failed to connect to mysql database on %s" % config.mysql_host_connection)
+        print(e)
+        sys.exit(-1)
 
 
 #######################################################
@@ -157,8 +161,9 @@ class SequenceIntegers2(Base):
     value = Column(Integer)
     source = Column(Integer, primary_key=True)
 
-
+# TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY #
 Session = sessionmaker(bind=db)
+#Session = None
 
 
 class Alphabets:
@@ -172,8 +177,10 @@ class Sources:
     Computed = 2
     ShuffleCDSv2_matlab = 10
     ShuffleCDSv2_python = 11
+    ShuffleCDS_vertical_permutation_1nt = 12
     RNAfoldEnergy_SlidingWindow40_v2 = 102
     RNAfoldEnergy_SlidingWindow40_v2_alt = 103
+    RNAfoldEnergy_SlidingWindow40_v2_native_temp = 110
     CDS_length_nt = 201
     PA_paxdb_single_assay_or_weighted_average = 202
     GC_content_all_CDS = 203
@@ -181,5 +188,7 @@ class Sources:
     GC_content_codon_pos_2 = 205
     GC_content_codon_pos_3 = 206
     MFE_mean_window_40nt_estimated = 207
+    TEST_StepFunction_BeginReferenced = 801
+    TEST_StepFunction_EndReferenced   = 802
     
     

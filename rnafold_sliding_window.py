@@ -6,23 +6,36 @@ import subprocess
 import gzip
 import json
 import logging
+import profiling
 from time import sleep
 from datetime import datetime, timedelta
 import argparse
 import mysql_rnafold as db
-from data_helpers import CDSHelper, countSpeciesCDS, calcCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted
+from data_helpers import CDSHelper, countSpeciesCDS, calcCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted, getSpeciesTemperatureInfo
 from runningstats import RunningStats
 from rate_limit import RateLimit
 from rnafold_vienna import RNAfold_direct
-import profiling
+import config
 
 
 # hold configuration arguments (for either stand-alone or module use)
 args = None
 
-timerForPreFolding  = profiling.Timer()
-timerForFolding     = profiling.Timer()
-timerForPostFolding = profiling.Timer()
+class DummyTimer(object):
+    def start(self): pass
+    def stop(self): pass
+    def stats(self): return [None]
+
+useProfiling = False
+if useProfiling:
+    timerForPreFolding  = profiling.Timer()
+    timerForFolding     = profiling.Timer()
+    timerForPostFolding = profiling.Timer()
+else:
+    timerForPreFolding  = DummyTimer()
+    timerForFolding     = DummyTimer()
+    timerForPostFolding = DummyTimer()
+    
 
 def parseOption(possibleValues, name):
     def checkOption(value):
@@ -51,7 +64,12 @@ def round4(x):
     else:
         return round(x,4)
 
-
+test = [-4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None,  None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14, None, None, None, None, None, None, None, None, None, 26, None, None, None, None, None, None, None, None, None, 16, None, None, None, None, None, None, None, None, None, 6, None, None, None, None, None, None, None, None, None, -4, None, None, None, None, None, None, None, None, None, -14]
+def prettyPrintProfile(profile):
+    for start in range(0, len(profile), 10):
+        elements = profile[start:start+10]
+        print("[{:4}]\t{}\t[{:4}]".format(start, ",\t".join(map(lambda x: "{:5}".format(x), elements)), start+len(elements)-1))
+        
 
 class RNAFold(object):
     def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sources.RNAfoldEnergy_SlidingWindow40_v2):
@@ -68,17 +86,32 @@ class RNAFold(object):
 
 
             
-    def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
+    def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin", shuffleType=db.Sources.ShuffleCDSv2_python):
 
         timerForPreFolding.start()
-        logging.info("Parameters: %d %s %s %s %d %d %s" % (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, reference))
+        logging.warning("Parameters: %d %s %s %s %d %d %s %d" % (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, reference, shuffleType))
         f = self._logfile
 
         assert(len(seqIds)>0)
         assert(len(seqIds)==len(requestedShuffleIds))
 
-        if( reference != "begin"):
-            raise Exception("Specificed profile reference '%s' is not supported!" % reference)
+        optimalSpeciesGrowthTemperature = None
+        if( self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp ):
+            (numericalProp, _) = getSpeciesTemperatureInfo(taxId)
+            optimalSpeciesGrowthTemperature = numericalProp[0]
+
+            if optimalSpeciesGrowthTemperature is None:
+                raise Exception("No temperature value for taxid={}, can't calculate native-temperature folding profile...".format(taxId))
+            else:
+                optimalSpeciesGrowthTemperature = float(optimalSpeciesGrowthTemperature)
+                assert(optimalSpeciesGrowthTemperature >= -30.0 and optimalSpeciesGrowthTemperature <= 150.0)
+        
+
+        if( reference != "begin" and reference != "end"):
+            timerForPreFolding.stop()
+            e = "Specificed profile reference '%s' is not supported! (" % reference
+            logging.error(e)
+            raise Exception(e)
 
         # We will process all listed shuffle-ids for the following protein record
         cds = CDSHelper( taxId, protId )
@@ -87,20 +120,35 @@ class RNAFold(object):
             e = "Refusing to process item %s because the sequence length (%d nt) is less than the window size (%d nt)\n" % (itemToProcess, cds.length(), self._windowWidth)
             f.write(e)
             logging.error(e)
+            timerForPreFolding.stop()
             raise Exception(e)
 
         # Create a list of the windows we need to calculate for this CDS
-        requestedWindowStarts = frozenset(range(0, min(lastWindowStart+1, cds.length()-self._windowWidth-1), windowStep ))
-        if( len(requestedWindowStarts) == 0):
-            e = "No windows exist for calculation taxid=%d, protId=%s, CDS-length=%d, lastWindowStart=%d, windowStep=%d, windowWidth=%d - Skipping...\n" % (taxId, protId, cds.length(), lastWindowStart, windowStep, self._windowWidth)
-            f.write(e)
-            logging.error(e)
-            raise Exception(e)
+        if reference == "begin":
+            requestedWindowStarts = frozenset(range(0, min(lastWindowStart+1, cds.length()-self._windowWidth-1), windowStep ))
+            if( len(requestedWindowStarts) == 0):
+                e = "No windows exist for calculation taxid=%d, protId=%s, CDS-length=%d, lastWindowStart=%d, windowStep=%d, windowWidth=%d - Skipping...\n" % (taxId, protId, cds.length(), lastWindowStart, windowStep, self._windowWidth)
+                f.write(e)
+                logging.error(e)
+                timerForPreFolding.stop()
+                raise Exception(e)
+        elif reference == "end":
+            lastPossibleWindowStart = cds.length() - self._windowWidth #+ 1  # disregard lastWindowStart when reference=="end"
+            #lastWindowCodonStart = (lastPossibleWindowStart-3)-(lastPossibleWindowStart-3)%3
+
+            #lastPossibleWindowStart = seqLength - windowWidth # + 1  # disregard lastWindowStart when reference=="end"
+            requestedWindowStarts = frozenset(filter( lambda x: x>=lastWindowStart, range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep)))
+            
+            
+            #requestedWindowStarts = frozenset(range(lastWindowCodonStart % windowStep, lastWindowCodonStart, windowStep))
+            #pass
+        else:
+            assert(False)
 
         # First, read available results (for all shuffle-ids) in JSON format
         # Array is indexed by shuffle-id, so results not requested will be represented by None (as will requested items that have no results yet).
         logging.info("DEBUG: requestedShuffleIds (%d items): %s\n" % (len(requestedShuffleIds), requestedShuffleIds))
-        existingResults = cds.getCalculationResult2( self._seriesSourceNumber, requestedShuffleIds, True )
+        existingResults = cds.getCalculationResult2( self._seriesSourceNumber, requestedShuffleIds, True, shuffleType=shuffleType )
         #assert(len(existingResults) >= len(requestedShuffleIds))  # The returned array must be at least as large as the requested ids list
         assert(len(existingResults) == len(requestedShuffleIds))
         logging.info("requestedShuffleIds: %s" % requestedShuffleIds)
@@ -117,6 +165,8 @@ class RNAFold(object):
                 if shuffleId in requestedShuffleIds:
                     shuffleIdsToProcess[shuffleId] = list(requestedWindowStarts)
                     
+                timerForPreFolding.stop()
+                
                 # ------------------------------------------------------------------------------------
                 continue   # TODO - verify this line; should we abort this sequence by throwing????
                 # ------------------------------------------------------------------------------------
@@ -131,8 +181,9 @@ class RNAFold(object):
                 shuffleIdsToProcess[shuffleId] = missingWindows
 
         if( not shuffleIdsToProcess):
-            e = "All requested shuffle-ids in (taxId: %d, protId: %s, seqs: %s) seems to have already been processed. Skipping...\n" % (taxId, protId, str(list(zip(seqIds, requestedShuffleIds))) )
+            e = "All requested shuffle-ids in (taxId: %d, protId: %s, seqs: %s) seem to have already been processed. Skipping...\n" % (taxId, protId, str(list(zip(seqIds, requestedShuffleIds))) )
             logging.warning(e)
+            timerForPreFolding.stop()
             return
         logging.info("DEBUG: shuffleIdsToProcess (%d items): %s\n" % (len(shuffleIdsToProcess), shuffleIdsToProcess))
 
@@ -145,7 +196,7 @@ class RNAFold(object):
                 logging.info(shuffleId)
                 thisSeqId = seqIds[ requestedShuffleIds.index(shuffleId) ]
                     
-                existingResults[shuffleId] = { "id": "%s/%s/%d/%d" % (taxId, protId, thisSeqId, shuffleId), "seq-crc": None, "MFE-profile": [], "MeanMFE": None, "v": 2 }
+                existingResults[shuffleId] = { "id": "%s/%s/%d/%d" % (taxId, protId, thisSeqId, shuffleId), "seq-crc": None, "MFE-profile": [], "MeanMFE": None, "v": 2, "shuffle-type":shuffleType }
         logging.info("DEBUG: existingResults (%d items): %s\n" % (len(existingResults),existingResults) )
         timerForPreFolding.stop()
 
@@ -153,6 +204,7 @@ class RNAFold(object):
         # TODO - combine loading of multiple sequences into one DB operation
         for shuffleId, record in existingResults.items():
             if record is None:
+                logging.info("DEBUG: skipping empty results record for shuffleId={}".format(shuffleId))
                 continue
             timerForPreFolding.start()
 
@@ -163,8 +215,8 @@ class RNAFold(object):
                 seq = cds.sequence()
                 annotatedSeqId = cds.seqId()
             else:
-                seq = cds.getShuffledSeq(shuffleId)
-                annotatedSeqId = cds.getShuffledSeqId(shuffleId)
+                seq = cds.getShuffledSeq(shuffleId, shuffleType)
+                annotatedSeqId = cds.getShuffledSeqId(shuffleId, shuffleType)
 
             if( seq is None or (not seq is None and len(seq)==0 )):
                 seq2 = cds.getShuffledSeq2( annotatedSeqId )
@@ -175,6 +227,7 @@ class RNAFold(object):
                 seq5 = cds.getShuffledSeq2( annotatedSeqId )
                 e = "Got empty sequence for shuffleId=%d, seqId=%d, taxId=%d, protId=%s, numShuffled=%d, ids[%d:%d]=%s, len(seq2)=%d, len(seq3)=%d, len(seq4)=%d, len(seq5)=%d" % (shuffleId, annotatedSeqId, taxId, protId, len(cds.shuffledSeqIds()), shuffleId-2, shuffleId+2, cds.shuffledSeqIds()[shuffleId-2:shuffleId+2], len(seq2) if not seq2 is None else -1, len(seq3) if not seq3 is None else -1, len(seq4) if not seq4 is None else -1, len(seq5) if not seq5 is None else -1 )
                 logging.error(e)
+                timerForPreFolding.stop()
                 raise Exception(e)
 
             #
@@ -200,6 +253,7 @@ class RNAFold(object):
                     e = "Warning: taxid=%d, protid=%s, seqid=%d - unexpected length %d (expected: %d)\n" % (taxId, protId, annotatedSeqId, len(seq), expectedSeqLength)
                     f.write(e)
                     logging.error(e)
+                    timerForPreFolding.stop()
                     raise Exception(e)
 
             if( len(seq) < self._windowWidth ):
@@ -207,6 +261,7 @@ class RNAFold(object):
                 e = "Warning: skipping sequence because it is shorter than the requested window...\n"
                 f.write(e)
                 logging.error(e)
+                timerForPreFolding.stop()
                 raise Exception(e)
 
             logging.info("DEBUG: Processing item taxId=%d, protId=%s, shuffle=%d (length=%d, %d windows)...\n" % (taxId, protId, shuffleId, len(seq), len(requestedWindowStarts)))
@@ -242,17 +297,45 @@ class RNAFold(object):
                 fragment = seq[start:(start+self._windowWidth)]
                 assert(len(fragment)==self._windowWidth)
 
-                # Calculate the RNA folding energy. This is the computation-heavy part.
-                #strct, energy = RNA.fold(fragment)
-                energy = RNAfold_direct(fragment)
-                assert(energy <= 0.0)
+                if self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2:
+                    # Calculate the RNA folding energy. This is the computation-heavy part.
+                    #strct, energy = RNA.fold(fragment)
+                    energy = RNAfold_direct(fragment)
+                    assert(energy <= 0.0)
 
+                elif self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp:
+                    # Calculate the RNA folding energy. This is the computation-heavy part.
+                    #strct, energy = RNA.fold(fragment)
+                    energy = RNAfold_direct(fragment, explicitCalculationTemperature = optimalSpeciesGrowthTemperature)
+                    assert(energy <= 0.0)
+                    
+                    
+                    
+                elif self._seriesSourceNumber == db.Sources.TEST_StepFunction_BeginReferenced:
+                    if shuffleId < 0:
+                        energy = 0
+                    else:
+                        energy = start%50 - 20
+                
+                elif self._seriesSourceNumber == db.Sources.TEST_StepFunction_EndReferenced:
+                    if shuffleId < 0:
+                        energy = 0
+                    else:
+                        energy = (expectedSeqLength - self._windowWidth - start)%50 - 20
+
+                else:
+                    logging.error("Received unknown seriesSourceNumber {}".format(self._seriesSourceNumber))
+                    assert(False)
+                    
                 # Store the calculation result
                 #print("%d:%s --> %f" % (taxId, protId, energy))
 
                 stats.push(energy)
                 MFEprofile[start] = energy
-                
+
+            print("///////////////////  shuffleId={} (len={}) //////////////////////////".format(shuffleId, expectedSeqLength))
+            prettyPrintProfile(MFEprofile)
+
             timerForFolding.stop()
             timerForPostFolding.start()
 
@@ -272,6 +355,7 @@ class RNAFold(object):
                 
             timerForPostFolding.stop()
 
+            
         timerForPostFolding.start()
         
         if( not self._debugDoneWriteResults):
@@ -305,26 +389,46 @@ def parseTaskDescription(taskDescription):
         windowStep = int(parts[5])
         assert(windowStep > 0 and windowStep <= 30)
 
-    return (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep)
+    windowRef = "begin"
+    if( len(parts)>6 ):
+        windowRef = parts[6]
+    
+    shuffleType = db.Sources.ShuffleCDSv2_python
+    if( len(parts)>7 ):
+        shuffleType = int(parts[7])
+
+    return (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, windowRef, shuffleType)
 
 
 
 rl = RateLimit(60)
 
-def calculateMissingWindowsForSequence(taskDescription):
-    logging.info("Processing task %s" % taskDescription)
+def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription):
+    config.initLogging()
+    logging.warning("Processing task %s" % taskDescription)
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
-    (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep) = parseTaskDescription(taskDescription)
+    (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, windowRef, shuffleType) = parseTaskDescription(taskDescription)
 
     windowWidth = 40 # Todo: get this
-    windowRef = "begin"
+    #windowRef = "begin"
     firstWindowStart = 0
-    
-    f = RNAFold(windowWidth)
-    #def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
-    ret = f.calculateMissingWindowsForSequence(taxId, protId, seqIds, requestedShuffleIds, firstWindowStart, lastWindowStart, windowStep, windowRef)
 
-    if rl():  # display performance timers
+    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced):
+        f = RNAFold(windowWidth, seriesSourceNumber=seriesSourceNumber)
+    else:
+        raise Exception("Got invalid sourceSeries: {}".format(sourceSeries))
+    
+    try:
+        #def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
+        ret = f.calculateMissingWindowsForSequence(taxId, protId, seqIds, requestedShuffleIds, firstWindowStart, lastWindowStart, windowStep, windowRef, shuffleType)
+    except Exception as e:
+        logging.error("calculateMissingWindowsForSequence() caught exception")
+        logging.error(e)
+        logging.error(taskDescription)
+        raise
+        
+
+    if useProfiling and rl():  # display performance timers
         pre  = timerForPreFolding.stats()[0]
         fold = timerForFolding.stats()[0]
         post = timerForPostFolding.stats()[0]
@@ -402,6 +506,8 @@ def standaloneMainWithRedisQueue():
                 updateJobStatus_ItemCompleted( myWorkerKey, taxId )
                 
             except Exception as e:
+                logging.error("Exception thrown by calculateMissingWindowsForSequence():")
+                logging.error(e)
                 print(e)
 
 
@@ -425,8 +531,25 @@ if __name__=="__main__":
     #testTask = "436017/ABO96972/21063218/150/780/10"
     #testTask = "436017/ABO94655/7087318,8008675,7880166,20829673,20600299,20676590,21064374,21064375,21064376,21064377,21064378,21064379,21064380,21064381,21064382,21064383,21064384/-1,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160/350/10"
     #testTask = "436017/ABP00033/7076680,20044248,20045786,7638494,20042209,20129253,21064286,21064287,21064288,21064289,21064290,21064291,21064292,21064293,21064294,21064295,21064296/-1,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160/640/10"
-    testTask = "436017/ABP00428/7087197,20371424,20676675,20750822,20600300,7810032,21064946,21064947,21064948,21064949,21064950,21064951,21064952,21064953,21064954,21064955,21064956/-1,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160/370/10"
-    calculateMissingWindowsForSequence(testTask)
+    #testTask = "436017/ABP00428/7087197,20371424,20676675,20750822,20600300,7810032,21064946,21064947,21064948,21064949,21064950,21064951,21064952,21064953,21064954,21064955,21064956/-1,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160/370/10"
+    #testTask = "578462/KNE54425/63247003,63247004,63247005,63247006,63247007,63247008,63247009,63247010,63247011,63247012,63247013,63247014,63247015,63247016,63247017,63247018,63247019,63247020,63247021,63247022/0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/1990/10/begin/12"
+    #testTask = "553190/ADB14681/47037871,62847903,62847904,62847905,62847906,62847907,62847908,62847909,62847910,62847911,62847912,62847913,62847914,62847915,62847916,62847917,62847918,62847919,62847920,62847921,62847922/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/410/10/begin/11"
+    #testTask = "553190/ADB13628/47037529,62847923,62847924,62847925,62847926,62847927,62847928,62847929,62847930,62847931,62847932,62847933,62847934,62847935,62847936,62847937,62847938,62847939,62847940,62847941,62847942/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/920/10/begin/11"
+    #testTask = "553190/ADB13628/47037529,62847923,62847924,62847925,62847926,62847927,62847928,62847929,62847930,62847931,62847932,62847933,62847934,62847935,62847936,62847937,62847938,62847939,62847940,62847941,62847942/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/0/10/end/11"
+    #testTask = "553190/ADB14512/47037823,62847943,62847944,62847945,62847946,62847947,62847948,62847949,62847950,62847951,62847952,62847953,62847954,62847955,62847956,62847957,62847958,62847959,62847960,62847961,62847962/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/560/10/begin/11"
+    testTask = "553190/ADB14512/47037823,62847943,62847944,62847945,62847946,62847947,62847948,62847949,62847950,62847951,62847952,62847953,62847954,62847955,62847956,62847957,62847958,62847959,62847960,62847961,62847962/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/0/10/end/11"
+    #testTask = "553190/ADB14651/47038128,62847963,62847964,62847965,62847966,62847967,62847968,62847969,62847970,62847971,62847972,62847973,62847974,62847975,62847976,62847977,62847978,62847979,62847980,62847981,62847982/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/380/10/begin/11"
+    #testTask = "553190/ADB14158/47038273,62847983,62847984,62847985,62847986,62847987,62847988,62847989,62847990,62847991,62847992,62847993,62847994,62847995,62847996,62847997,62847998,62847999,62848000,62848001,62848002/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/650/10/begin/11"
+    #testTask = "553190/ADB13518/47037530,62848003,62848004,62848005,62848006,62848007,62848008,62848009,62848010,62848011,62848012,62848013,62848014,62848015,62848016,62848017,62848018,62848019,62848020,62848021,62848022/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/1000/10/begin/11"
+    #testTask = "553190/ADB13855/47037679,62848023,62848024,62848025,62848026,62848027,62848028,62848029,62848030,62848031,62848032,62848033,62848034,62848035,62848036,62848037,62848038,62848039,62848040,62848041,62848042/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/1000/10/begin/11"
+    #testTask = "553190/ADB14495/47037099,62848043,62848044,62848045,62848046,62848047,62848048,62848049,62848050,62848051,62848052,62848053,62848054,62848055,62848056,62848057,62848058,62848059,62848060,62848061,62848062/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/660/10/begin/11"
+    #testTask = "553190/ADB14646/47038172,62848063,62848064,62848065,62848066,62848067,62848068,62848069,62848070,62848071,62848072,62848073,62848074,62848075,62848076,62848077,62848078,62848079,62848080,62848081,62848082/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/950/10/begin/11"
+    #testTask = "553190/ADB14057/47037869,62848083,62848084,62848085,62848086,62848087,62848088,62848089,62848090,62848091,62848092,62848093,62848094,62848095,62848096,62848097,62848098,62848099,62848100,62848101,62848102/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/890/10/begin/11"
+    #testTask = "553190/ADB13694/47037560,62848103,62848104,62848105,62848106,62848107,62848108,62848109,62848110,62848111,62848112,62848113,62848114,62848115,62848116,62848117,62848118,62848119,62848120,62848121,62848122/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/360/10/begin/11"
+    
+    
+
+    calculateMissingWindowsForSequence(801, testTask)
     sys.exit(0)
 else:
     # TODO - define args when used as a module

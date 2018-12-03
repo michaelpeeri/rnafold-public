@@ -4,7 +4,7 @@
 #       - computationTag
 #       - randomFraction
 # Example:
-# python2 requeue_sequences_missing_energies_for_sliding_window.py 3055,556484 rna-fold-window-40-0 10
+# python2 requeue_sequences_missing_energies_for_sliding_window.py --shuffle-type=11  --from-shuffle 0 --to-shuffle 19 --window-step 10 --profile-reference begin --max-num-windows 32 --species 866499,635003,556484,555500,158189,456481,272632,1307761,505682,400682,6669,436017,412133,104782,412030,211586,190485 --series-source 102 --completion-notification True
 # 
 # TODO: This script will requeue sequences that have already in the queue but haven't been completed yet.
 # TODO: Add support for step-size >1
@@ -12,6 +12,7 @@ import sys
 import codecs
 import argparse
 from random import randint
+from collections import Counter
 import logging
 import traceback
 import config
@@ -25,6 +26,7 @@ import notify_pushover
 
 scheduler = _distributed.open()
 
+config.initLogging()
 
 def parseList(conversion=str):
     def convert(values):
@@ -39,8 +41,17 @@ argsParser.add_argument("--random-fraction", type=int, default=1)
 argsParser.add_argument("--window-step", type=int, default=10)
 argsParser.add_argument("--from-shuffle", type=int, default=-1)
 argsParser.add_argument("--to-shuffle", type=int, default=20)
+argsParser.add_argument("--shuffle-type", type=str, default="")
 argsParser.add_argument("--insert-sequences-only", type=bool, default=False)
+argsParser.add_argument("--analyze-only", type=bool, default=False)
 argsParser.add_argument("--completion-notification", type=bool, default=False)
+argsParser.add_argument("--max-num-windows", type=int, default=1000)
+argsParser.add_argument("--profile-reference", type=str, default="begin")
+argsParser.add_argument("--series-source", type=int, default=db.Sources.RNAfoldEnergy_SlidingWindow40_v2)
+
+
+
+#argsParser.add_argument("--log", type=str, default=None)
 args = argsParser.parse_args()
 
 # command-line arguments
@@ -50,7 +61,25 @@ if( computationTag.find(':') != -1 ): raise Exception("computation tag cannot co
 # e.g. rna-fold-0
 randomFraction = args.random_fraction
 windowStep = args.window_step
+maxNumWindows = args.max_num_windows
+profileReference = args.profile_reference
+shuffleType = args.shuffle_type
+#defaultMappingType = (db.Sources.ShuffleCDSv2_matlab, db.Sources.ShuffleCDSv2_python)
+shuffleTypesMapping = {""                   :db.Sources.ShuffleCDSv2_python,
+                       "11"                 :db.Sources.ShuffleCDSv2_python,
+                       "ShuffleCDSv2_matlab":db.Sources.ShuffleCDSv2_python,
+                       "ShuffleCDSv2_python":db.Sources.ShuffleCDSv2_python,
+                       "12"                 :db.Sources.ShuffleCDS_vertical_permutation_1nt,
+                       "ShuffleCDS_vertical_permutation_1nt"
+                                            :db.Sources.ShuffleCDS_vertical_permutation_1nt }
+shuffleType=shuffleTypesMapping[args.shuffle_type]
 
+#if not args.log is None:
+#    numericLevel = getattr(logging, args.log.upper(), None)
+#    if not isinstance( numericLevel, int ):
+#        raise Exception("Unknown log level {}".format(args.log))
+#    print("set logging to {}".format(args.log))
+#    logging.basicConfig(level=numericLevel)
 
 # Configuration
 #queueKey = "queue:tag:awaiting-%s:members" % computationTag
@@ -58,7 +87,10 @@ windowStep = args.window_step
 #seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 windowWidth = 40
 lastWindowStart = 2000
-seriesSourceNumber = db.Sources.RNAfoldEnergy_SlidingWindow40_v2
+seriesSourceNumber = args.series_source
+if seriesSourceNumber not in ( db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced ):
+    raise Exception("Unsupported value for --series-source: {}".format(seriesSourceNumber))
+
 expectedNumberOfShuffles = 20
 fromShuffle = args.from_shuffle
 toShuffle = args.to_shuffle
@@ -82,9 +114,13 @@ for taxIdForProcessing in species:
              taxIdForProcessing,
              getSpeciesName(taxIdForProcessing)))
 
+    stats = Counter()
+
     # Iterate over all CDS entries for this species
     # TODO - preloading all sequences and results should optimize this
     for protId in SpeciesCDSSource(taxIdForProcessing):
+
+        stats['all-sequences'] += 1
 
         #protId = codecs.decode(protId)
         # Filtering
@@ -93,8 +129,13 @@ for taxIdForProcessing in species:
         # (if randomFraction==1, all sequences will be processed)
         if( randint(1, randomFraction) != 1 ):
             skipped += 1
+            stats['skipped-random-fraction'] += 1
             continue
 
+        # ------------------------------------------------------------------------------------------
+        # Exclude some sequences from the calculation
+        # ------------------------------------------------------------------------------------------
+        
         # Skip sequences with partial CDS annotations
         #if(r.exists("CDS:taxid:%d:protid:%s:partial" % (taxIdForProcessing, protId))):
         #    skipped += 1
@@ -110,46 +151,103 @@ for taxIdForProcessing in species:
         if seqLength is None:
             print("Warning: Could not find CDS length entry for taxid=%d, protid=%s" % (taxIdForProcessing, protId) )
             skipped += 1
+            stats['skipped-cds-length-missing'] += 1
             continue
 
         assert( seqLength > 3 )
         # Skip sequences with length <40nt (window width)
         if(seqLength < windowWidth + 1 ):
             print("short seq")
+            stats['skipped-short-seq'] += 1
             skipped += 1
             continue
 
-        requiredWindows = list(range(0, min(seqLength - windowWidth - 1, lastWindowStart), windowStep))
-        requiredShuffles = [-1] # Check the native profile, regardless of the requested range
+        # ------------------------------------------------------------------------------------------
+        # Determine which required windows (from each series) don't have results already
+        # ------------------------------------------------------------------------------------------
+
+        if profileReference=="begin":
+            requiredWindows = list(range(0, min(seqLength - windowWidth + 1, lastWindowStart), windowStep))
+            
+            if len(requiredWindows) > maxNumWindows:
+                requiredWindows = requiredWindows[:maxNumWindows]
+                assert(len(requiredWindows) == maxNumWindows)
+                
+        elif profileReference=="end":
+            lastPossibleWindowStart = seqLength - windowWidth # + 1  # disregard lastWindowStart when reference=="end"
+            #lastWindowCodonStart = (lastPossibleWindowStart-3)-(lastPossibleWindowStart-3)%3
+            
+            #requiredWindows = list(range(lastWindowCodonStart % windowStep, lastWindowCodonStart, windowStep))
+
+            requiredWindows = list(range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep))
+
+            if len(requiredWindows) > maxNumWindows:
+                requiredWindows = requiredWindows[-maxNumWindows:]
+                assert(len(requiredWindows) == maxNumWindows)
+            
+            print("seqLength: {} lastPossibleWindowStart: {}".format(seqLength, lastPossibleWindowStart))
+            print(requiredWindows)
+
+            # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
+            assert(len((" "*seqLength)[lastPossibleWindowStart:]) == windowWidth)
+            # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
+            
+            # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
+            #requiredWindows = []
+            # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
+            
+        else:
+            assert(False)
+
+        assert(len(requiredWindows) <= maxNumWindows)
+            
+        requiredShuffles = [-1] # Check that the native profile exists, regardless of the requested range
         requiredShuffles.extend(range(fromShuffle, toShuffle+1))
 
         existingResults = None
         try:
-            missingResults = cds.checkCalculationResultWithWindows( seriesSourceNumber, requiredShuffles, requiredWindows )
+            missingResults = cds.checkCalculationResultWithWindows( seriesSourceNumber, requiredShuffles, requiredWindows, shuffleType )
         except IndexError as e:
             msg = "Missing sequences for %s, skipping..." % protId
             print(msg)
             logging.error(msg)
             logging.error(str(e))
             skipped += 1
+            stats['skipped-missing-seq'] += 1
             continue
 
-        logging.warning("missingResults: %s" % missingResults)
+        logging.info("missingResults: %s" % missingResults)
 
         shufflesWithMissingWindows = [requiredShuffles[n] for n,v in enumerate(missingResults) if v ] # get the indices (not shuffle-ids!) of existing shuffles with missing positions
         print("Existing shuffles with missing windows: %s" % shufflesWithMissingWindows)
         completelyMissingShuffles = [requiredShuffles[n] for n,v in enumerate(missingResults) if v is None]
         print("Missing shuffles: %s" % completelyMissingShuffles)
 
-        # Submit all missing shuffles for processing in a single task
+        if completelyMissingShuffles:
+            stats['has-some-shuffles-missing'] += 1
+            stats['num-shuffles-missing'] += len(completelyMissingShuffles)
+
+        if shufflesWithMissingWindows:
+            stats['has-some-windows-missing'] += 1
+            stats['num-windows-missing'] += len(shufflesWithMissingWindows)
+
+
+        if args.analyze_only:
+            continue
+
+        # ------------------------------------------------------------------------------------------
+        # Submit a single task that will create all missing randomized sequences (for this sequence)
+        # ------------------------------------------------------------------------------------------
 
         ret = None
         if( completelyMissingShuffles ):
             try:
-                #ret = storeNewShuffles(cds.getTaxId(), cds.getProtId(), completelyMissingShuffles)
+                ret = storeNewShuffles(cds.getTaxId(), cds.getProtId(), completelyMissingShuffles, shuffleType)
+                newIds = ret
+                #print(ret)
 
-                ret = scheduler.submit(storeNewShuffles, cds.getTaxId(), cds.getProtId(), completelyMissingShuffles)
-                newIds = ret.result()
+                #ret = scheduler.submit(storeNewShuffles, cds.getTaxId(), cds.getProtId(), completelyMissingShuffles, shuffleType)
+                #newIds = ret.result()
                 print("Created new seqs:")
                 print(zip(completelyMissingShuffles, newIds))
 
@@ -161,6 +259,7 @@ for taxIdForProcessing in species:
             except Exception as e:
                 print("Error creating new seqs")
                 print(e)
+                logging.error(e)
                 skipped += 1
                 continue
 
@@ -169,12 +268,22 @@ for taxIdForProcessing in species:
         if args.insert_sequences_only:
             continue
             
-        lastwin = requiredWindows[-1]
+        # ------------------------------------------------------------------------------------------
+        # Submit a tasks for calculating LFE values for all series that have some values missing
+        # ------------------------------------------------------------------------------------------
+
+        if profileReference == "begin":
+            lastwin = requiredWindows[-1]
+        elif profileReference == "end":
+            lastwin = requiredWindows[0]
+        else:
+            assert(False)
+            
         if(shufflesWithMissingWindows):
             #cds.enqueueForProcessing(computationTag, shufflesWithMissingWindows, lastwin, windowStep)#
 
             shuffleIdsToProcess = sorted(shufflesWithMissingWindows + completelyMissingShuffles)
-            allSeqIds = cds.shuffledSeqIds()
+            allSeqIds = cds.shuffledSeqIds(shuffleType)
 
             def shuffleIdToSeqId(shuffleId):
                 if shuffleId==-1:
@@ -184,8 +293,8 @@ for taxIdForProcessing in species:
                 
             requiredSeqIds = list(map(shuffleIdToSeqId, shuffleIdsToProcess))
 
-            queueItem = "%d/%s/%s/%s/%d/%d" % (cds.getTaxId(), cds.getProtId(), ",".join(map(str, requiredSeqIds)), ",".join(map(str, shufflesWithMissingWindows + completelyMissingShuffles)), lastwin, windowStep)
-            print(queueItem)
+            queueItem = "%d/%s/%s/%s/%d/%d/%s/%d" % (cds.getTaxId(), cds.getProtId(), ",".join(map(str, requiredSeqIds)), ",".join(map(str, shufflesWithMissingWindows + completelyMissingShuffles)), lastwin, windowStep, profileReference, shuffleType)
+            #print(queueItem)
 
             # To maximize node utilization, we will delay the main part of the calcualtion, the energy calculation, until after
             # we finished creating all necessary sequences (Otherwise, both types of calculations are interleaved and we may
@@ -193,8 +302,17 @@ for taxIdForProcessing in species:
             #
             # An even better alternative might be to interleave submission of both types of tasks, but give the "loading"
             # tasks higher priority.
-            
-            delayedCall = dask.delayed( calculateMissingWindowsForSequence )(taskDescription=queueItem) # create a delayed call for the calculations needed
+
+
+
+            if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2,
+                                      db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp,
+                                      db.Sources.TEST_StepFunction_BeginReferenced,
+                                      db.Sources.TEST_StepFunction_EndReferenced):
+                delayedCall = dask.delayed( calculateMissingWindowsForSequence )(seriesSourceNumber=seriesSourceNumber, taskDescription=queueItem) # create a delayed call for the calculations needed
+            else:
+                assert(False)
+                
             queuedDelayedCalls.append( delayedCall ) # store the call for later submission
 
             #print("%s: enqueued %d additional results" % (protId, len(shufflesWithMissingWindows)))
@@ -203,8 +321,15 @@ for taxIdForProcessing in species:
             print("No pending shuffles, skipping...")
             skipped += 1
             continue
-                
 
+    print("taxId: {} shuffleType: {}".format(taxIdForProcessing, shuffleType) )
+    print(stats)
+
+
+# ------------------------------------------------------------------------------------------
+# Process all deferred tasks, and collect the results
+# ------------------------------------------------------------------------------------------
+        
 print("Added %d additional calculations" % totalMissingResults)
 print("%d sequences selected, %d skipped, %d already completed (%d total)" % (selected, skipped, alreadyCompleted, selected+skipped))
 #print("queue contains %d items" % numItemsInQueue(computationTag))
@@ -225,6 +350,8 @@ for f in futures:
         results.append(r)
     except Exception as e:
         results.append(e)
+        logging.error("requeue_sequences...: Exception thrown by async function ")
+        logging.error(e)
         errorsCount += 1
         
 print(results)

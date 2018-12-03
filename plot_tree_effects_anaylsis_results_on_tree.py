@@ -6,15 +6,27 @@ from ncbi_taxa import ncbiTaxa
 from data_helpers import allSpeciesSource
 from ncbi_taxa import ncbiTaxa
 
+#--------------------------------------------------------------
 # Configuration
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
+
+#--------------------------------------------------------------
+# Input file - choose one
+
+# Possible input 1: GLS regression result for individual taxonomic groups and position ranges (created by tree_traits_effects_analysis_with_taxgroups.r)
 #csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.dLFE.length.300.csv"
-csvRegressionEffectsByGroupCsv = "find_trait_values_outliers.out.dLFE.csv"
+csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.abs(dLFE).length.300.csv"
+
+# Possible input 2: Raw profile value outliers, i.e., profiles with positive dLFE at position 0 (created by find_trait_values_outliers.r)
+#csvRegressionEffectsByGroupCsv = "find_trait_values_outliers.out.dLFE.csv"
+#--------------------------------------------------------------
+
 baseFontSize = 25         # Scale factor for (most) text
 significanceLevel = 1e-2  # p-values smaller than this will be marked as significant
-#barScale = 500            # Width of 100%-bar
-barScale = 20              # Width of 100%-bar
-
+barScale = 500            # Width of 100%-bar
+#barScale = 20              # Width of 100%-bar
+useOwnXserver = False
+#--------------------------------------------------------------
 
 
 print("Processing all species...")
@@ -65,7 +77,12 @@ def getMajorTaxonomicGroups(taxidToLineage):
 #                 return s.replace("/", "/\n")
             
 #             return "%s-\n%s" % (s[:9], s[9:])
-    
+
+class DummyResourceManager(object):
+    def __init__(self, *dummy1, **dummy2):  pass
+    def __enter__(self): return self
+    def __exit__(self, exc_type, exc_val, exc_tb):  pass
+
 
 def plotRegressionEffectsByGroup():
     majorGroups = getMajorTaxonomicGroups( taxidToLineage )
@@ -79,7 +96,12 @@ def plotRegressionEffectsByGroup():
 
     allRanges = list(sorted(set(df['Range'])))
 
-    with Display(backend='xvnc') as disp:  # Plotting requires an X session
+    if useOwnXserver:
+        _disp = Display
+    else:
+        _disp = DummyResourceManager
+
+    with _disp(backend='xvnc') as disp:  # Plotting requires an X session
 
         # Helper function for plotting a single tree, for the specified trait and with data from all specified ranges
         def plotSingleTree( var, ranges ):

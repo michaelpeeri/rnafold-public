@@ -4,6 +4,7 @@ from math import factorial
 import random
 from Bio.Seq import Seq
 import Bio.Data
+from local_cache import LocalStringsCache
 
 def splitCodons(seq):
     assert(len(seq)%3==0)
@@ -32,7 +33,7 @@ def applyCodonsPermutation(mutableSeq, newCodons, positions):
         mutableSeq[pos] = newCodon
 
 negate = lambda p: imap( lambda x: not x, p ) # return a sequence where each element is negated
-        
+
 class SynonymousCodonPermutingRandomization(object):
     """
     Args:
@@ -101,6 +102,8 @@ class SynonymousCodonPermutingRandomization(object):
         return (permutationsCount, identity, resultingSeq)
 
     """
+    Permute a sequence, allowing substitutions only in positions specified by a mask. Positions can include an arbitrary list of codons, specified by positions
+
     nucleotideSeq - nucleotide coding sequence (using the species genetic code). Length must be divisible by 3.
                     Start and end codons are not treated specially.
     codonMask - List of logical values of length nucleotideSeq/3 (not nucleotideSeq!)
@@ -142,6 +145,162 @@ class SynonymousCodonPermutingRandomization(object):
         
         return (permutationsCount, identity, resultingSeq)
         
+    def verticalPermutation( self, cdss ):
+        assert(all([x%3==0 for x in map(len, cdss)]))  # length of all CDSs must be divisible by 3
+        longestLengthNt = max(map(len, cdss)) # find the length of the longest CDS
+
+        cdsCodons = map( splitCodons, cdss )
+
+        identities = []
+        
+        for codonPos in range(longestLengthNt/3):
+            print("--- Doing codon {} ---".format(codonPos))
+
+            # Collect all codons in position codonPos
+            poolCodons = []
+            for seq in cdsCodons:
+                if codonPos < len(seq):
+                    codon = seq[codonPos]
+                    assert(len(codon)==3)
+                    poolCodons.append( codon )
+            assert(len(poolCodons) >= 1)
+
+            # Permute all codons in this position
+            pool = ''.join(poolCodons)
+            totalPermutationsCountForSeq, identity, shuffledPool = self.randomize(pool)
+
+            # Update the original sequences with the new permutation
+            nextPoolCodonPos = 0
+            for seqIdx, seq in enumerate(cdsCodons):
+                if codonPos < len(seq):
+                    newCodon = shuffledPool[nextPoolCodonPos:nextPoolCodonPos+3]
+                    #if len(newCodon) != 3:
+                    #    print(codonPos)
+                    #    print(len(newCodon))
+                    #    print(shuffledPool)
+                    assert(len(newCodon)==3)
+                    seq[codonPos] = newCodon
+                    assert(cdsCodons[seqIdx][codonPos] == newCodon)
+                    nextPoolCodonPos += 3
+
+            identities.append( identity )
+
+        ret = list( map( lambda x: ''.join(x), cdsCodons ) )
+
+        # Check all translations are unaltered
+        for (u,v) in zip(cdss, ret):
+            assert( len(u) > 0 )
+            assert( len(u) == len(v) )
+            xlation1 = Seq( u ).translate(table=self._code)
+            xlation2 = Seq( v ).translate(table=self._code)
+            if( xlation1 != xlation2 ):
+                print("Translation mismatch:")
+                print(u)
+                print(v)
+                print(xlation1)
+                print(xlation2)
+            assert(xlation1==xlation2)
+
+        return (ret, identities)
+            
+
+
+class VerticalRandomizationCache(object):
+    _id_sets = "x//sets"
+    _id_native_seqs_written = "x//native_ok"
+    #_id_genetic_code = "x//genetic_code"
+
+    
+        
+    def _storeNativeSeqs( self, nativeSeqsMap ):
+        if self._cache.get_value( VerticalRandomizationCache._id_native_seqs_written ) == "1":  # native seqs already written; nothing to do
+            return
+
+        # write all seqs
+        for protId, seq in nativeSeqsMap.items():
+            entry_key = self._make_entry_key( protId, -1 )
+            self._cache.insert_value(entry_key, seq)
+
+        self._cache.insert_value( VerticalRandomizationCache._id_native_seqs_written, "1" )  # make native seqs already written flag
+
+    def _make_entry_key(self, protId, shuffleId ):
+        assert(type(shuffleId) == type(0))
+        assert(shuffleId >= -1)
+        return "s//{}//{}".format(shuffleId, protId)
+    
+        
+    def _nativeSeqsSource( self ):
+        if self._cache.get_value( VerticalRandomizationCache._id_native_seqs_written ) != "1":  # were native seqs already written?
+            raise Exception("Native seqs not available!")
+
+        nativePrefix = "s//-1//"
+        prefixLen = len(nativePrefix)
+        for key, val in self._cache.all_matching_values_source( nativePrefix ):
+            assert( key[:prefixLen] == nativePrefix )
+            yield (key[prefixLen:], val)  # yield clean protIds without the prefix
+        
+    
+    def __init__(self, shuffleType, taxId, nativeSeqsMap, geneticCode, randomizer):
+        self._cache = LocalStringsCache("codon_randomization_cache_type_{}_taxid_{}".format( shuffleType, taxId ) )
+        self._availableShuffles = self._checkAvailableSets()
+        assert(type(geneticCode)==type(0))
+        assert(geneticCode > 0)
+        self._geneticCode = geneticCode
+        self._storeNativeSeqs( nativeSeqsMap )
+        self._randomizer = randomizer
+
+
+    def _checkAvailableSets(self):
+        val = self._cache.get_value(VerticalRandomizationCache._id_sets)
+        if val is None:
+            self._cache.insert_value(VerticalRandomizationCache._id_sets, "")
+            return set()
+        elif val=="":
+            return set()
+        else:
+            return set(map(int, val.split(",")))
+
+    def _updateAvailableSets(self):
+        self._cache.update_value( VerticalRandomizationCache._id_sets, ",".join( map( str, self._availableShuffles ) ) )
+
+    #def _storeGeneticCode(self):
+    #    val = self._cache.get_value(VerticalRandomizationCache._id_genetic_code)
+    #    if val is None:
+    #        self._cache.insert_value(VerticalRandomizationCache._id_genetic_code, str(self._geneticCode) )
+    #    else:
+    #        assert( val == str(self._geneticCode) )
+
+    def _storeNewShuffleSet( self, shuffleId ):
+        nativeSeqs = []
+        protIds = []
+        for protId, seq in self._nativeSeqsSource():
+            protIds.append(protId)
+            nativeSeqs.append(seq)
+        
+        shuffledSeqs, _ = self._randomizer( nativeSeqs )
+        assert( len(shuffledSeqs) == len(nativeSeqs) )
+        assert( map(len, shuffledSeqs) == map(len, nativeSeqs) )
+
+        for protId, shuffledSeq in zip( protIds, shuffledSeqs ):
+            entry_key = self._make_entry_key( protId, shuffleId )
+            self._cache.insert_value(entry_key, shuffledSeq)
+
+        # Add the newly created shuffle to the list of available shuffles
+        self._availableShuffles.add( shuffleId )
+        self._updateAvailableSets()
+
+
+    def getShuffledSeq(self, protId, shuffleId ):
+        entry_key = self._make_entry_key( protId, shuffleId )
+        
+        if shuffleId in self._availableShuffles or shuffleId==-1:  # is this shuffleId already stored?
+            return self._cache.get_value( entry_key )
+
+        self._storeNewShuffleSet( shuffleId )
+        
+        assert(shuffleId in self._availableShuffles)  # now shuffleId must be stored...
+        return self._cache.get_value( entry_key )
+
         
 
 #map( lambda x: x[1] if x[0] else x[2], zip( [0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1], [8]*20, [1]*20 ) )
@@ -193,12 +352,79 @@ def testMaskedRandomization(N=10000):
     print('Total randomizations: %g' % float(totalPermutationsCount))
     return 0
 
-def testAll():
-    ret = testCountRandomizations(N=1000)
-    if ret: return ret
 
-    ret = testMaskedRandomization(N=20000)
+def testVerticalShuffling():
+    from nucleic_compress import randseq
+    
+    geneticCode = 1
+    numSeqs = 505
+    fixedSeqLength = 621
+    
+    protIds = ["PROT{}.1".format(x) for x in range(numSeqs) ]
+    seqs = list(map( lambda _: randseq(fixedSeqLength), protIds ))
+
+
+    scpr = SynonymousCodonPermutingRandomization( geneticCode )
+    randomizer = lambda cdss: scpr.verticalPermutation( cdss )
+    cache = VerticalRandomizationCache(shuffleType=9999,
+                                       taxId=555,
+                                       nativeSeqsMap=dict(zip(protIds, seqs)),
+                                       geneticCode=geneticCode,
+                                       randomizer=randomizer )
+
+    print(">native")
+    s = cache.getShuffledSeq( "PROT9.1", -1 )
+    for x0 in range(0, 80, len(s)): print( s[x0:x+80] )
+    for i in range(10):
+        s = cache.getShuffledSeq( "PROT9.1", i )
+        print(">s{}".format(i))
+        for x0 in range(0, 80, len(s)): print( s[x0:x+80] )
+
+    return 0
+
+
+def printCounterAsHistogram(counter, stops=(0,1,5,20,50,100,200,300,400,500,600,700,800,900,1000,1500)):
+    levels = [] # [0]*(len(stops)+2)
+    ranges = []
+    #currLevel = 0
+
+    def getCounterElementByRange( s0, s1 ):
+        return sum([x[1] for x in counter.items() if (x[0]>=s0 and x[0]<s1) ] )
+
+    if counter:
+        levels.append( getCounterElementByRange( min( min(counter.keys()), stops[0]-1), stops[0] ) )
+    ranges.append( ("min", str(stops[0])) )
+    #currLevel += 1
+
+    for s0,s1 in zip(stops,stops[1:]):
+        assert(s0<s1)
+        levels.append( getCounterElementByRange( s0, s1 ) )
+        ranges.append( (str(s0), str(s1) ) )
+        #currLevel += 1
+
+    if counter:
+        levels.append( getCounterElementByRange( stops[-1], max( max(counter.keys()), stops[-1]+1) ) )
+    ranges.append( (str(stops[-1]), "max" ) )
+    #currLevel += 1
+
+    for level, currRange in zip( levels, ranges ):
+        if counter:
+            print("{: >5}-{: <5} {:7} {}".format( currRange[0], currRange[1], level, "="*int(round(float(level)/sum(counter.values())*200)) ) )
+        else:
+            print("{: >5}-{: <5} {:7}".format(    currRange[0], currRange[1], level ) )
+        
+
+
+def testAll():
+    #ret = testCountRandomizations(N=1000)
+    #if ret: return ret
+
+    #ret = testMaskedRandomization(N=20000)
+    #if ret: return ret
+
+    ret = testVerticalShuffling()
     if ret: return ret
+    
     return 0
 
 

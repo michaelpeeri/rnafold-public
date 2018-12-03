@@ -21,7 +21,7 @@ rl = RateLimit(30)
 
 
 
-def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=20, maxShuffledGroups=20, cdsFilter=None, returnCDS=True ):
+def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=20, maxShuffledGroups=20, shuffleType=db.Sources.ShuffleCDSv2_python, cdsFilter=None, returnCDS=True ):
     if isinstance(species, Iterable):  # usually, species will be a sequence of numeric taxid values
         if isinstance(species, basestring):
             raise Exception("species cannot be string")
@@ -36,7 +36,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
                  taxIdForProcessing,
                  getSpeciesName(taxIdForProcessing)))
 
-        computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing, maxShuffledGroups)
+        computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing, maxShuffledGroups, shuffleType=shuffleType )
         computedIds = frozenset(computed.keys())
         print("Collecting data from %d computation results..." % len(computed))
 
@@ -54,7 +54,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
 
             cdsSeqId = cds.seqId()
 
-            shuffledIds = cds.shuffledSeqIds()
+            shuffledIds = cds.shuffledSeqIds(shuffleType=shuffleType)
 
             # How many shuffles (for this cds) exist in the data we found?
             computedShufflesCount = len(computedIds.intersection(frozenset(shuffledIds)))
@@ -66,7 +66,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
 
             # Get the computed results for this CDS
             seqIds = [cds.seqId()]
-            seqIds.extend( cds.shuffledSeqIds() )
+            seqIds.extend( cds.shuffledSeqIds(shuffleType=shuffleType) )
             if( len(seqIds) > maxShuffledGroups+1 ):
                 seqIds = seqIds[:maxShuffledGroups+1]
             results = [ computed.get(x) for x in seqIds ]
@@ -91,7 +91,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
                 print("# %s - %d records included, %d records skipped" % (datetime.now().isoformat(), selected, skipped))
 
 
-def readSeriesResultsForSpeciesWithSequence( seriesSourceNumber, species, minShuffledGroups=20, maxShuffledGroups=20, cdsFilter=None, returnCDS=True ):
+def readSeriesResultsForSpeciesWithSequence( seriesSourceNumber, species, minShuffledGroups=20, maxShuffledGroups=20, shuffleType=db.Sources.ShuffleCDSv2_python, cdsFilter=None, returnCDS=True ):
     if isinstance(species, Iterable):  # usually, species will be a sequence of numeric taxid values
         if isinstance(species, basestring):
             raise Exception("species cannot be string")
@@ -103,7 +103,7 @@ def readSeriesResultsForSpeciesWithSequence( seriesSourceNumber, species, minShu
         # Get seqs
         allseqs = getAllNativeCDSsForSpecies(taxIdForProcessing)
         
-        for obj in readSeriesResultsForSpecies( seriesSourceNumber, (taxIdForProcessing,), minShuffledGroups, maxShuffledGroups, cdsFilter, returnCDS ):
+        for obj in readSeriesResultsForSpecies( seriesSourceNumber, (taxIdForProcessing,), minShuffledGroups=minShuffledGroups, maxShuffledGroups=maxShuffledGroups, shuffleType=shuffleType, cdsFilter=cdsFilter, returnCDS=returnCDS ):
             assert(obj["taxid"]==taxIdForProcessing)
 
             assert(len(obj["content"]) >= minShuffledGroups+1)
@@ -131,29 +131,69 @@ def convertResultsToMFEProfiles( results, maxShuffledGroups=20 ):
         profile = np.zeros((maxShuffledGroups+1, profileLength))
         for i, row in enumerate(content):
             profilei = row["MFE-profile"]
+            if( len(profilei) < profileLength ):
+                profilei[len(profilei):] = [None]*(profileLength-len(profilei)) # pad the list
             profile[i] = profilei
 
         result["profile-data"] = profile # Store the combined profile in the processed result
         yield result
 
 
-def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, interval=10):
+def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, interval=10, reference="begin"):
     
     for result in results:
         fullProfile = result["profile-data"]
+        #print(fullProfile)
+        #print(fullProfile.shape)
         #positions = range(startPosition, min(endPosition, fullProfile.shape[1]), interval)
-        maxPosition = min(endPosition, fullProfile.shape[1])
-        result["profile-data"] = fullProfile[:, startPosition:maxPosition:interval]  # replace the full profile with the sampled profile
+        if reference=="begin":
+            maxPosition = min(endPosition, fullProfile.shape[1])
+            result["profile-data"] = fullProfile[:, startPosition:maxPosition:interval]  # replace the full profile with the sampled profile
+        elif reference=="end":
+            lastPosition = fullProfile.shape[1]-1
+            #print("lastPosition: {}".format(lastPosition))
+            #firstPosition = (lastPosition - startPosition) % interval
+            #print("firstPosition: {}".format(firstPosition))
+            firstPosition = lastPosition - endPosition
+            #print("firstPosition: {}".format(firstPosition))
+            #print("startPosition: {}".format(startPosition))
+            result["profile-data"] = fullProfile[:, firstPosition:(lastPosition+interval):interval]  # replace the full profile with the sampled profile
+            #print(result["profile-data"].shape)
+        else:
+            assert(False)
+            
         del fullProfile
         yield result
 
 
 def profileLength(profileSpec):
-    return int(ceil(float(profileSpec[0]-profileSpec[3]) / profileSpec[1]))  # should be equal to len(range(0, spec[0], spec[1]))
+    if profileSpec[2] == "begin":
+        return int(ceil(float(profileSpec[0]-profileSpec[3]) / profileSpec[1]))  # should be equal to len(range(0, spec[0], spec[1]))
+    elif profileSpec[2] == "end":
+        return (profileSpec[0]/profileSpec[1])+1
+    else:
+        assert(False)
 
 def profileElements(profileSpec):
-    return range(profileSpec[3], profileSpec[0], profileSpec[1])
+    if profileSpec[2] == "begin":
+        return range(profileSpec[3], profileSpec[0], profileSpec[1])
+    elif profileSpec[2] == "end":
+        return range(-profileSpec[0], 1, profileSpec[1])
+    else:
+        assert(False)
 
+"""
+Find the position (index) of the "edge" (0nt) element
+"""
+def profileEdgeIndex(profileSpec):
+    if profileSpec[2] == "begin":
+        return list(range(profileSpec[3], profileSpec[0], profileSpec[1])).index(0)
+    elif profileSpec[2] == "end":
+        return list(range(-profileSpec[0], 1, profileSpec[1])).index(0)
+    else:
+        assert(False)
+
+    
 class MeanProfile(object):
     def __init__(self, length):
         self._a = np.zeros((length,))

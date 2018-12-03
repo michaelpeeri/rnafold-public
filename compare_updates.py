@@ -1,5 +1,6 @@
 # Examine data in the "pending updates" table (sequence_series2_updates)
 # Try to identify errors, inconsistencies and duplications
+# Print stastics on the contents of the updates table
 # 
 from collections import Counter
 from distutils.util import strtobool 

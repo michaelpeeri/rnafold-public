@@ -20,14 +20,16 @@ from mfe_plots import loadProfileData, getProfileHeatmapTile, getLegendHeatmapTi
 # Configuration
 #K = 30  # Profile length
 #N = 500 # Number of profiles
-fileglob = "gcdata_v2_taxid_*_profile_1000_10_begin_0.h5"
-profileLengthSamples = 31
+#fileglob = "gcdata_v2_taxid_*_profile_1000_10_begin_0.h5"
+fileglob = "gcdata_v2_taxid_*_profile_310_10_begin_0_t11.h5"
+#fileglob = "gcdata_v2_taxid_*_profile_310_10_end_0_t11.h5"
+profileLengthSamples = 33
 profileStep = 10
 typicalProfileOutputCSV = "find_typical_profile.out.profile.csv"
 
 # Externally-supplied Y range (for plotting the modal profile as a tile). Must match the range used for other profiles (if all of them are used together)
-#fixedYrange = (-2.9, 2.9)
-fixedYrange = None
+fixedYrange = (-2.8436242765763069, 2.8436242765763069)
+#fixedYrange = None
 
 #bwEstimationPoints = 1000
 bwEstimationPoints = 150     # Number of bandwidth values to test when estimating the optimal KDE bandwidth
@@ -37,7 +39,7 @@ def getFileNames():
     from glob import glob
     return glob(fileglob)
 
-(_, _, _, _, _, _, _, biasProfiles, _, _) = loadProfileData(getFileNames())
+(_1, _2, _3, _4, _5, _6, _7, biasProfiles, _9, _10, _11, _12) = loadProfileData(getFileNames())
 
 print( "Loaded %d profiles" % len(biasProfiles) )
 
@@ -45,7 +47,8 @@ if fixedYrange is None:
     fixedYrange = getHeatmaplotProfilesValuesRange( biasProfiles )
 print("Using profile scale: {}".format(fixedYrange))
 
-x = np.vstack( [x[:profileLengthSamples] for x in biasProfiles.values()] )
+#x = np.vstack( [x[:profileLengthSamples] for x in biasProfiles.values()] )
+x = np.vstack( [x for x in biasProfiles.values()] )
 print(x.shape)
 
 N, K = x.shape
@@ -78,7 +81,11 @@ plt.close()
 optimalBW = []
 for k in range(0,K,1):
     bandwidths = 10 ** np.linspace(-2.0, 1, bwEstimationPoints)
-    x1 = np.expand_dims(x[:,k], 1)
+    #bandwidths = 10 ** np.linspace(-3.0, 2, bwEstimationPoints)
+    #x1 = np.expand_dims(x[:,k], 1)
+    x1 = x[:,k]
+    x1 = x1[~np.isnan(x1)]
+    x1 = np.expand_dims(x1, 1)
     
     cv = KFold(len(x1), n_folds=10)
     #cv = LeaveOneOut(len(x1))
@@ -136,8 +143,14 @@ for k in reversed(range(0,K,1)):  # go over profiles (for plotting ease, do it i
 
     bandwidth = optimalBW[k]  # get the optimal bandwidth (calculated above)
     print("%d: bw=%g" % (k, bandwidth))
-    kde = KernelDensity(bandwidth=bandwidth, kernel='gaussian')  
-    kde.fit(np.expand_dims(x[:,k], 1))  # calculate the KDE
+    kde = KernelDensity(bandwidth=bandwidth, kernel='gaussian')
+    xi = x[:,k]
+    xi = xi[~np.isnan(xi)]
+    print(xi.shape)
+    xi = np.expand_dims(xi, 1)
+    print(xi.shape)
+
+    kde.fit(xi)  # calculate the KDE
 
     logprob = kde.score_samples( np.expand_dims(x_d, 1) )  # score the KDE over a range of values
 

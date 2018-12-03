@@ -159,7 +159,8 @@ def pruneTreeByTaxonomy(tree, parentTaxonIdToKeep):
     # Collect all child taxons whose lineage includes the specified parent
     for node in tree.traverse():
         if node.is_leaf():
-            if (not node.taxId is None):
+            leafTaxId = getattr(node, "taxId", None)
+            if (not leafTaxId is None):
                 lineage = frozenset(ncbiTaxa.get_lineage(node.taxId))
 
                 if( parentTaxonIdToKeep in lineage ):
