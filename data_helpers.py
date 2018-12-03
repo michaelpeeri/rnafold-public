@@ -36,7 +36,7 @@ queueItemsKey = "queue:tag:awaiting-%s:members"
 seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
 cdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
 cdsSeqChecksumKey = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
-shuffledSeqIdsKey = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-v2"
+shuffledSeqIdsKey = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-%s"
 workerKeepAliveKey = "status:worker-keep-alive"
 jobStatusKey = "status:job:%s:progress"
 taxGroupKey = "species:taxid:%d:tax-group"
@@ -45,6 +45,14 @@ speciesPropertyValueKey = "species:taxid:%d:properties:%s"
 speciesPropertySourceKey = "species:taxid:%d:properties:%s:source"
 speciesTaxIdKey = "species:name:%s:taxid"
 
+allowedShuffleTypes = frozenset((db.Sources.ShuffleCDSv2_python, db.Sources.ShuffleCDS_vertical_permutation_1nt))
+
+def getShuffleTypeIdentifier(shuffleType = db.Sources.ShuffleCDSv2_python):
+    assert( shuffleType in allowedShuffleTypes )
+    if shuffleType == db.Sources.ShuffleCDSv2_python:
+        return "v2"
+    else:
+        return "t{}".format(shuffleType)
 
 # establish connections
 # metadata server (redis)
@@ -311,6 +319,10 @@ class CDSHelper(object):
         return newVal
 
 
+    """
+    Obtain a (possible cached) sequence by sequenceId
+    Since sequence-id is used, other factors (source, shuffleType, etc.) are not relevant.
+    """
     def _fetchSequence(self, seqIds):
         if( not isinstance(seqIds, Iterable)):
             seqIds = (seqIds,)
@@ -339,7 +351,7 @@ class CDSHelper(object):
             
                 # Get the sequence for this entry
                 results = db.connection.execute( sql.select( (db.sequences2.c.id, db.sequences2.c.sequence)).select_from(db.sequences2).where(
-                                db.sequences2.c.id.in_(notFoundInCache)
+                    db.sequences2.c.id.in_(notFoundInCache)
                                 ) )  # Note: order_by not needed, because id is used
                 if( results.rowcount < len(notFoundInCache) ):
                     logging.warning("Some results were not found for taxid=%d, protid=%s." % (self._taxId, self._protId))
@@ -380,8 +392,9 @@ class CDSHelper(object):
     def seqId(self):
         return self._getScalarRedisProperty( "cds-seq-id", cdsSeqIdKey % (self._taxId, self._protId), int)
         
-    def shuffledSeqIds(self):
-        return self._getListRedisProperty( "shuffled-seq-ids", shuffledSeqIdsKey % (self._taxId, self._protId), lambda x: map(int, x) )
+    def shuffledSeqIds(self, shuffleType):
+        assert( shuffleType in allowedShuffleTypes )
+        return self._getListRedisProperty( "shuffled-seq-ids-{}".format(shuffleType), shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), lambda x: map(int, x) )
 
     def getProtId(self):
         return self._protId
@@ -398,31 +411,32 @@ class CDSHelper(object):
         # Fetch that sequence from the DB
         return self._fetchSequence(seqId)
 
-    def getShuffledSeq(self, pos):
+    def getShuffledSeq(self, pos, shuffleType):
         assert(pos>=0)
-        shuffleSeqId = self.getShuffledSeqId(pos)
+        shuffleSeqId = self.getShuffledSeqId(pos, shuffleType)
         
         return self._fetchSequence(shuffleSeqId)
 
     def getShuffledSeq2(self, seqId):
         return self._fetchSequence(seqId)
 
-    def getShuffledSeqId(self, pos):
+    def getShuffledSeqId(self, pos, shuffleType=db.Sources.ShuffleCDSv2_python):
         assert(pos>=0)
+        assert( shuffleType in allowedShuffleTypes )
         # TODO - Cache this...
-        return self._getListRedisPropertyItem( shuffledSeqIdsKey % (self._taxId, self._protId), pos, int )
+        return self._getListRedisPropertyItem( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType)), pos, int )
 
 
     def clearCalculationResult(self, calculationId, shuffleId=-1):
         # TODO - impl this...
         pass
 
-    def saveCalculationResult(self, calculationId, results, shuffleId=-1):
+    def saveCalculationResult(self, calculationId, results, shuffleId=-1, shuffleType=db.Sources.ShuffleCDSv2_python):
         seqId = None
         if( shuffleId < 0 ):
             seqId = self.seqId()
         else:
-            seqId = self.getShuffledSeqId( shuffleId )
+            seqId = self.getShuffledSeqId( shuffleId, shuffleType=shuffleType )
 
         gzBuffer = StringIO()
         f = gzip.GzipFile("", "wb", 9, gzBuffer)
@@ -485,12 +499,12 @@ class CDSHelper(object):
         out.append("Shuffle-ids: %s" % ([(i,v) for i,v in enumerate(shuffids)]))
         return out
 
-    def isCalculationDone(self, calculationId, shuffleId=-1):
+    def isCalculationDone(self, calculationId, shuffleId, shuffleType):
         seqId = None
         if( shuffleId < 0 ):
             seqId = self.seqId()
         else:
-            seqId = self.getShuffledSeqId( shuffleId )
+            seqId = self.getShuffledSeqId( shuffleId, shuffleType=shuffleType )
 
         count = db.connection.execute( sql.select(( sql.func.count('*'),)).select_from(db.sequence_series2).where(
                 sql.and_(
@@ -500,6 +514,8 @@ class CDSHelper(object):
         return count>0
 
     def getCalculationResult(self, calculationId, shuffleId=-1):
+        raise Exception("Deprecated")
+    
         seqId = None
         if( shuffleId < 0 ):
             seqId = self.seqId()
@@ -524,12 +540,14 @@ class CDSHelper(object):
 
             Results will be uncompressed. In addition, if parseAsJson==True, results will be decoded as JSON.
     """
-    def getCalculationResult2(self, calculationId, shuffleIds, parseAsJson=False):
+    def getCalculationResult2(self, calculationId, shuffleIds, parseAsJson=False, shuffleType=db.Sources.ShuffleCDSv2_python ):
         assert(shuffleIds >= -1)
+        assert( shuffleType in allowedShuffleTypes )
         cdsSeqId = self.seqId()
-        allSeqIds = self.shuffledSeqIds()
+        allSeqIds = self.shuffledSeqIds(shuffleType=shuffleType)
 
         print("requested calcid is: ", calculationId)
+        print("requested shuffleType: ", shuffleType)
         print("requested shuffleIds: ", shuffleIds)
 
         def shuffleIdToSeqId(i):
@@ -599,8 +617,9 @@ class CDSHelper(object):
 
     Params:
     * calculationId
-    * shuffleIds -- list of shuffle-ids (contained in the range 0..n-1). the arbitrary list order determines the output order.
+    * shuffleIds     -- list of shuffle-ids (contained in the range 0..n-1). the arbitrary list order determines the output order.
     * windowsToCheck -- a collection of window offsets, relative to CDS start
+    * shuffleType    -- which randomization method to check
 
     Return value:
       returned value is a list with items matching those requested in shuffleIds.
@@ -611,11 +630,13 @@ class CDSHelper(object):
     * if no values are missing, the item will be an empty list ([])
     * if the shuffle-id does not exist (in the results table), item will be None
     """
-    def checkCalculationResultWithWindows(self, calculationId, shuffleIds, windowsToCheck):
+    def checkCalculationResultWithWindows(self, calculationId, shuffleIds, windowsToCheck, shuffleType=db.Sources.ShuffleCDSv2_python):
+        assert( shuffleType in allowedShuffleTypes )
 
         # Fetch the sequence-ids for the native and existing shuffles
         cdsSeqId = self.seqId()
-        allSeqIds = self.shuffledSeqIds()
+        allSeqIds = self.shuffledSeqIds(shuffleType=shuffleType)
+        print("Debug: Index contains {} shuffles".format(len(allSeqIds)))
 
         #print("found %d shuffles" % len(allSeqIds))
 
@@ -642,17 +663,26 @@ class CDSHelper(object):
                     db.sequence_series2.c.sequence_id.in_(requestedSeqIds)
                     )) )
         records = results.fetchall()
+        print("Debug: Found {} records in sequence_series2".format(len(records)))
 
         # check all sequence records to make sure they exist
+
+        if shuffleType == db.Sources.ShuffleCDSv2_matlab or shuffleType == db.Sources.ShuffleCDSv2_python:
+            shuffleTypeForQuery = (db.Sources.ShuffleCDSv2_matlab, db.Sources.ShuffleCDSv2_python) # Both types are equivalent
+        else:
+            shuffleTypeForQuery = (shuffleType,)
+
         results = db.connection.execute( sql.select(( db.sequences2.c.id, )).select_from(db.sequences2).where(
                 sql.and_(
                     db.sequences2.c.id.in_(requestedSeqIds),
                     db.sequences2.c.alphabet == db.Alphabets.RNA_Huff,
-                    db.sequences2.c.source.in_( (db.Sources.ShuffleCDSv2_matlab, db.Sources.ShuffleCDSv2_python) ),
+                    db.sequences2.c.source.in_( shuffleTypeForQuery ),
                     db.sequences2.c.sequence.isnot(None)
                     )) )
         allExistingSequenceIds = frozenset([x[0] for x in results.fetchall()])
         assert(len(allExistingSequenceIds) <= len(requestedSeqIds))
+        print("Debug: Found {} records in sequences2".format(len(allExistingSequenceIds)))
+        
 
         # returned value is an array, with items matching those requested in shuffleIds (which are not required to be in consecutive or in ascending order)
         out = [None]*len(shuffleIds)
@@ -715,7 +745,7 @@ class CDSHelper(object):
             #logging.warning("pos: %d" % pos)
             itemShuffleId = shuffleIds[pos]
             if itemShuffleId == -1:
-                logging.warning("Skipping checking native CDS sequence")
+                #logging.info("Skipping checking native CDS sequence")
                 out[pos] = frozenset(windowsToCheck)
                 continue   # we assume the native CDS sequence must already exist...
             
@@ -769,11 +799,19 @@ class CDSHelper(object):
         
         r.rpush(queueKey, queueItem)
 
-    def dropShuffledSeqs(self, lastItemToKeep=0):
-        shuffledSeqIds = self.shuffledSeqIds()
+    # Note: lastItemToKeep == -1: delete all shuffles of the specified type
+    #       lastItemToKeep >=  0: keep only items 0..lastItemToKeep (inclusive)
+    #       seriesToDelete: None or tuple of ints specifing series to delete from sequence_series2
+    def dropShuffledSeqs(self, lastItemToKeep=-1, shuffleType=None, seriesToDelete=None):  # no default when deleting...
+        if shuffleType not in allowedShuffleTypes:
+            raise Exception("dropShuffledSeqs: invalid shuffleType {}".format(shuffleType))
+
+        shuffledSeqIds = self.shuffledSeqIds(shuffleType=shuffleType)
+        if not seriesToDelete is None:
+            assert( type(seriesToDelete) == type(()))
 
         cdsRecordsBeforeDeleting = len(shuffledSeqIds)
-        shuffledSeqIdsToDelete = shuffledSeqIds[lastItemToKeep:None]  # delete the range lastItemToKeep:end
+        shuffledSeqIdsToDelete = shuffledSeqIds[lastItemToKeep:]  # delete the range lastItemToKeep:end
 
         expectedDeletedRecords = len(shuffledSeqIdsToDelete)
         
@@ -792,16 +830,35 @@ class CDSHelper(object):
         
         if(result.rowcount < expectedDeletedRecords):
             print("Warning: Deleted less records (%d) than expected (%d)" % (result.rowcount, expectedDeletedRecords))
-            
-        shuffleCountBeforeDeleting = r.llen( shuffledSeqIdsKey % (self._taxId, self._protId) )
-        print("Debug: Before deleting from redis: %d items" % shuffleCountBeforeDeleting )
-        #r.delete(shuffledSeqIdsKey % (self._taxId, self._protId))
-        r.ltrim( shuffledSeqIdsKey % (self._taxId, self._protId), 0, lastItemToKeep-1 )
 
-        shuffleCountAfterDeleting = r.llen( shuffledSeqIdsKey % (self._taxId, self._protId) )
+        if (not seriesToDelete is None) and (len(seriesToDelete) > 0):
+            delResult = db.connection.execute( db.sequence_series2.delete().where(
+                sql.and_(
+                    db.sequence_series2.c.sequence_id.in_(shuffledSeqIdsToDelete),
+                    db.sequence_series2.c.source.in_(seriesToDelete)
+                    )
+            ) )
+            print("Also deleted {} records from {}".format( delResult.rowcount, seriesToDelete ) )
+            
+            
+        shuffleCountBeforeDeleting = r.llen( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ) )
+        print("Debug: Before deleting from redis: %d items" % shuffleCountBeforeDeleting )
+        if lastItemToKeep >= 0: # lastItemToKeep specified (>=0); trim the list to keep only the specified items
+            print("LTRIM {} {} {}".format( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), 0, lastItemToKeep-1 ) )
+            r.ltrim( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), 0, lastItemToKeep-1 )
+        else:                  # lastItemToKeep not specified (<0); remove all items (start>end)
+            print("LTRIM {} {} {}".format( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), 1, 0 ) )
+            r.ltrim( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), 1, 0 )
+            
+
+        shuffleCountAfterDeleting = r.llen( shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ) )
         print("Debug: After deleting from redis: %d items" % shuffleCountAfterDeleting )
 
-        assert( shuffleCountAfterDeleting <= lastItemToKeep )
+        if lastItemToKeep >= 0:
+            assert( shuffleCountAfterDeleting <= lastItemToKeep )
+        else:
+            assert( shuffleCountAfterDeleting == 0 )
+            
 
         return result.rowcount
 
@@ -900,11 +957,16 @@ Get a merged list of matching records showing an update and the original record,
 Updates are allowed for non-existent records (i.e., a new version was computed but the original recored is missing).
 
 Note: There is no treatment of multiple updates for the same record (i.e., both will be returned).
-"""
-def seriesUpdatesSource(calculationId, bulkSize=500):
+Returns generator for pairs (updatedRecord, originalRecord)
+# updatedRecord  - (sequence_id, decoded_record, dummy_id)
+# originalRecord - (sequence_id, decoded_record)
 
-    lastId = 0
-    offset = 0 
+"""
+def seriesUpdatesSource(calculationId, bulkSize=500, startFromId=0, stopAtId=-1):
+
+    lastId = startFromId
+    offset = 0
+    
 
     while(True):
         # Approach 1: Use sequence-id (not primary-key!)
@@ -922,11 +984,19 @@ def seriesUpdatesSource(calculationId, bulkSize=500):
 
         # Approach 3: Use primary-key (dummy_id)
         # Note: This seems to be the most efficient
-        updates = db.connection.execute( sql.select(( db.sequence_series2_updates.c.dummy_id, db.sequence_series2_updates.c.sequence_id, db.sequence_series2_updates.c.content )).select_from(db.sequence_series2_updates).where(
-            sql.and_(
-                db.sequence_series2_updates.c.source==calculationId,
-                db.sequence_series2_updates.c.dummy_id > lastId
-            )).order_by(db.sequence_series2_updates.c.dummy_id).limit(bulkSize) ).fetchall()
+        if stopAtId < 0:
+            updates = db.connection.execute( sql.select(( db.sequence_series2_updates.c.dummy_id, db.sequence_series2_updates.c.sequence_id, db.sequence_series2_updates.c.content )).select_from(db.sequence_series2_updates).where(
+                sql.and_(
+                    db.sequence_series2_updates.c.source==calculationId,
+                    db.sequence_series2_updates.c.dummy_id > lastId
+                )).order_by(db.sequence_series2_updates.c.dummy_id).limit(bulkSize) ).fetchall()
+        else:
+            updates = db.connection.execute( sql.select(( db.sequence_series2_updates.c.dummy_id, db.sequence_series2_updates.c.sequence_id, db.sequence_series2_updates.c.content )).select_from(db.sequence_series2_updates).where(
+                sql.and_(
+                    db.sequence_series2_updates.c.source==calculationId,
+                    db.sequence_series2_updates.c.dummy_id > lastId,
+                    db.sequence_series2_updates.c.dummy_id <= stopAtId
+                )).order_by(db.sequence_series2_updates.c.dummy_id).limit(bulkSize) ).fetchall()
 
         if( len(updates) == 0 ):
             return
@@ -1081,7 +1151,7 @@ def getGenomicGCContent(taxId):
         return None
     
 
-def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100):
+def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100, shuffleType=db.Sources.ShuffleCDSv2_python):
     # First, collect all sequence-ids for the given species. This manual filtering by species is much faster than simply fetching all computation results...
     #print("Collecting sequence ids for taxid=%d..." % taxId)
 
@@ -1095,11 +1165,11 @@ def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100):
         newIds = set()
         newIds.add(cds.seqId())
 
-        allShuffleIds = cds.shuffledSeqIds()
+        allShuffleIds = cds.shuffledSeqIds(shuffleType=shuffleType)
         if( len(allShuffleIds) > maxShuffleId ):  # limit the included shuffled ids to the first N=maxShuffleId
-            newIds.update(cds.shuffledSeqIds()[:maxShuffleId] )
+            newIds.update(cds.shuffledSeqIds(shuffleType=shuffleType)[:maxShuffleId] )
         else:
-            newIds.update(cds.shuffledSeqIds() )
+            newIds.update(cds.shuffledSeqIds(shuffleType=shuffleType) )
             
         sequenceIdsForTaxid |= newIds
     
@@ -1145,7 +1215,7 @@ class DropSequenceWithResults(object):
         self._sequenceIdsToBeDropped = []
         self._owners = {}
 
-    def performDroppingNow(self):
+    def performDroppingNow(self, shuffleType=db.Sources.ShuffleCDSv2_python):
         if( not self._sequenceIdsToBeDropped ):
             return
 
@@ -1157,7 +1227,7 @@ class DropSequenceWithResults(object):
         for owner, sequenceIdsToDelete in self._owners.items():
             taxId  = owner[0]
             protId = owner[1]
-            keyId = shuffledSeqIdsKey % (taxId, protId)
+            keyId = shuffledSeqIdsKey % (taxId, protId, getShuffleTypeIdentifier(shuffleType) )
             originalItems = list( map(int, r.lrange( keyId, 0, -1 ) ) )
             assert(len(originalItems) >= len(sequenceIdsToDelete))
 
@@ -1213,15 +1283,15 @@ def session_scope():
     
         
 class AddShuffledSequences(object):
-    def __init__(self, taxId, protId, sourceTag):
+    def __init__(self, taxId, protId):
         self._taxId = taxId
         self._protId = protId
-        self._sourceTag = sourceTag
         
         assert( r.sismember(speciesCDSList % (taxId,),  protId))
 
-    def addSequence(self, shuffleId, seq):
-        # Store the shuffled CDS sequence
+    # Store the shuffled CDS sequence
+    def addSequence(self, shuffleId, seq, shuffleType=db.Sources.ShuffleCDSv2_python):
+        assert( shuffleType in allowedShuffleTypes )
 
         logging.info('compress seq: %s...' % seq[:15])
 
@@ -1233,17 +1303,21 @@ class AddShuffledSequences(object):
             s1 = db.Sequence2(
                 sequence=encodedCds,
                 alphabet=db.Alphabets.RNA_Huff,
-                source=self._sourceTag)
+                source=shuffleType )
 
             s.add(s1)
             s.commit()    # perform commit now, so we can obtain the generated sequence id
             
             newSequenceId = s1.id
+        print(s1)
             
         assert(not newSequenceId is None)
 
         # mysql work done; record the new sequence id in redis
-        shufflesKey = shuffledSeqIdsKey % (self._taxId, self._protId)
+        shufflesKey = shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) )
+
+        #if not r.exists( shufflesKey ):
+        #    r.xxxx
 
         with r.pipeline() as pipe: # will automatically call pipe.reset()
             attempt = 1
@@ -1257,8 +1331,10 @@ class AddShuffledSequences(object):
         
                     if( shuffleId < listItems ):   # we are replacing an existing item
                         pipe.lset( shufflesKey, shuffleId, newSequenceId )
+                        print("Debug: LSET {} {} {}".format( shufflesKey, shuffleId, newSequenceId ) )
                     elif( shuffleId == listItems ): # we are appending the next item
                         pipe.rpush( shufflesKey, newSequenceId )
+                        print("Debug: RPUSH {} {}".format( shufflesKey, newSequenceId ) )
                     else:
                         pipe.reset() # not required (will be called by context manager)
                         raise Exception("Can't append items past end of list (key=%s; length=%d; new index=%d)" % (shufflesKey, listItems, shuffleId))
