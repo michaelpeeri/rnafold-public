@@ -115,7 +115,8 @@ getProfilePositions <- function( profileId=1 )
     }
     else if ( spec$reference == "end" )
     {
-        return( seq( spec$stop-spec$step, spec$start, -(spec$step) ) )
+        #return( seq( spec$stop-spec$step, spec$start, -(spec$step) ) )
+        return(  seq( -spec$stop         , spec$start, spec$step ) )
     }
     else
     {
@@ -783,36 +784,47 @@ traits$Compound   <- as.factor((protectFromNAs(traits$Is_low_GC == 1) | protectF
 #print(traits$Compound)
 #print(traits[order(traits$Profile_1.26),c("Profile_1.26", "Compound", "Is_endosymbiont", "OptimumTemp", "Is_high_temp", "GenomicENc.prime",  "Is_high_ENc_prime", "GenomicGC", "Is_low_GC")])
 
-#dev.off()
-#quit()
-
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Scale-shape decomposition
-#        matching <- apply( traits[test.res], MARGIN=1, FUN=all)
 
-profile.vars <- getProfileVariables( c(1,31), profileId=1 )
-#profile.vars <- sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } )
-dLFE.sd <- apply( traits[,profile.vars], MARGIN=1, FUN=sd )
+profile.vars.1 <- getProfileVariables( c(1,31), profileId=1 )
+profile.vars.2 <- getProfileVariables( c(2,32), profileId=2 )
+#profile.vars.2 <- sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } )
+#dLFE.sd.1 <- apply( traits[,profile.vars.1], MARGIN=1, FUN=sd )
+dLFE.sd.12 <- apply( traits[,c(profile.vars.1,profile.vars.2)], MARGIN=1, FUN=sd )
+###dLFE.sd.12[20] <- dLFE.sd.12[20]*1.01 # TEST ONLY
+###dLFE.sd.12[20] <- dLFE.sd.12[30]*0.99 # TEST ONLY
 
-#print(dLFE.sd)
-traits.normalized <- traits
+traits.normalized <- traits  # create another traits data-set, with profile values of each species normalized by sd 
 
-#traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] <- traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] * (1/dLFE.sd)
+#traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] <- traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] * (1/dLFE.sd.1)
 #traits.normalized[,profile.vars] <- traits.normalized[,profile.vars] * (1/dLFE.sd)
+traits.normalized[,profile.vars.1] <- traits.normalized[,profile.vars.1] * (1/dLFE.sd.12)
+traits.normalized[,profile.vars.2] <- traits.normalized[,profile.vars.2] * (1/dLFE.sd.12)
+
+traits.normalized$dLFE.sd.12 <- dLFE.sd.12  # save the sd values for each species as an extra trait (dLFE scale)
+#traits.normalized
+#dLFE.sd.12.check <- apply( traits.normalized[,c(profile.vars.1,profile.vars.2)], MARGIN=1, FUN=sd )
 
 #########dLFE.normalized.sd <- apply( traits.normalized[,sapply(seq(32,2,-1), function (j) { sprintf("Profile_2.%d", j) } )], MARGIN=1, FUN=sd )
-dLFE.normalized.sd <- apply( traits.normalized[,profile.vars], MARGIN=1, FUN=sd )
+#traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] <- traits.normalized[,getProfileVariables( c(1,31), profileId=1 )] * (1/dLFE.sd.1)
+#dLFE.normalized.sd <- apply( traits.normalized[,profile.vars], MARGIN=1, FUN=sd )
 
-print(dLFE.normalized.sd)
+dLFE.sd.12.check <- apply( traits.normalized[,c(profile.vars.1,profile.vars.2)], MARGIN=1, FUN=sd )
+print(dLFE.sd.12.check)
+#print(dLFE.normalized.sd)
 
-print(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE  ))
-print(isTRUE(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE )))
+print(all.equal( dLFE.sd.12.check, rep(1,0, length(dLFE.sd.12.check)), check.names=FALSE ))
+stopifnot(all.equal( dLFE.sd.12.check, rep(1,0, length(dLFE.sd.12.check)), check.names=FALSE ))
+#print(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE  ))
+#print(isTRUE(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE )))
 #stopifnot(isTRUE(all.equal(dLFE.normalized.sd, rep(1.0, length(dLFE.normalized.sd)), check.names=FALSE )))
 #traits.normalized$Profile_1.sd <- dLFE.sd
 ################traits.normalized$Profile_2.sd <- dLFE.sd
 
-remove(profile.vars)
+remove(profile.vars.1)
+remove(profile.vars.2)
 # ----------------------------------------------------------------------------------------------------------------------
 
 
@@ -1815,6 +1827,8 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
     stopifnot(nrow(subranges) == length(range)*(length(range)+1)/2 ) # arithmetic series sum
 
     out <- data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character() )
+    profilePositions <- getProfilePositions( profileId )
+
 
     handleSubrange <- function(v)   # Perform regression on each subrange
     {
@@ -1830,8 +1844,10 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
             v$Pvalue    <- regressionResults$pvalue
             v$Buse.R2   <- regressionResults$R2
             v$Logpval <- log10( v$Pvalue )
-            v$Var1 <- (v$Var1 - 1) * profileStep
-            v$Var2 <- (v$Var2 - 1) * profileStep
+            #v$Var1 <- (v$Var1 - 1) * profileStep
+            v$Var1 <- profilePositions[v$Var1]
+            #v$Var2 <- (v$Var2 - 1) * profileStep
+            v$Var2 <- profilePositions[v$Var2]
             v$NumSpecies <- regressionResults$N
             v$DirectionsIndicator <- regressionResults$directionsIndicator
             v$MIC <- regressionResults$MIC
@@ -2627,7 +2643,7 @@ testRegressionForWeakModelComponents <- function()
 prepareFilteredTreeForGLS <- function( traitsx, tree, filterTrait, studyTrait )
 {
     stopifnot( any( filterTrait == colnames(traitsx) ) )  # filterTrait not found
-    stopifnot( any( studyTrait  == colnames(traitsx) ) )  # filterTrait not found
+    stopifnot( any( studyTrait  == colnames(traitsx) ) )  # studyTrait not found
         
     # Filter by the requested trait, and also discard tree tips for species missing data
     speciesWithMissingData <- row.names(traitsx[ (!traitsx[,filterTrait] | is.na(traitsx[,studyTrait])), ])
@@ -2635,7 +2651,7 @@ prepareFilteredTreeForGLS <- function( traitsx, tree, filterTrait, studyTrait )
 
     if( is.null(tree) )
     {
-        return( list(NA, NA ) )
+        return( list(NA, NA) )
     }
     
     # Discard trait data for species missing from the tree
@@ -2708,7 +2724,7 @@ glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, p
         #return( NA )
         return( data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character(), MIC=double(), MAS=double(), Pearson.r=double(), MIC.pvalue=double(), BP.pvalue=double() ) )
     }
-    
+
     return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits.filtered) ), profileId=profileId, addKdePlot=FALSE, extras=extras ) )
 }
 
@@ -3070,21 +3086,20 @@ make.group <- function(v)
 
 partialDeterminationAnalysis <- function( traits, tree, trait, pyramidSpec, profileId=1, extras="" )
 {
-    ps <- list(NA,NA)
+    #ps <- list(NA,NA)
     
-    results.t1       <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1", trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
-    results.t2       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2", trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
+    results.t1       <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
+    results.t2       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Bacteria_2",     trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
     results.t3       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Eukaryota_2759", trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
-    results.t4       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Fungi_4751", trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
-    results.t5       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Archaea_2157", trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
-
+    results.t4       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Fungi_4751",     trait, pyramidSpec, plotCaption="", profileId=profileId, extras="")
+    results.t5       <- glsRangeAnalysisWithFilter( traits, tree, "Member_Archaea_2157",   trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
+    results.all <- data.frame()
                                         #results.t1       <- glsRegressionRangeAnalysis( traits, tree, trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
     #results.t1       <- testDataForRegressionAnalysis( traits, tree, trait1, pyramidSpec, plotCaption="", profileId=profileId, extras="")
     #results.t2       <- glsRegressionRangeAnalysis( traits, tree, trait2, pyramidSpec, plotCaption="", profileId=profileId, extras="")
     #results.combined <- glsRegressionRangeAnalysis( traits, tree, trait1, pyramidSpec, plotCaption=trait2, profileId=profileId, extras=trait2)
     # returns df:
     #    Var1 Var2       Pvalue      Buse.R2     Logpval NumSpecies DirectionsIndicator
-
 
     #print("pret1")
     if( !isTRUE(is.na(results.t1)) ) { if( nrow(results.t1) > 0 ) {
@@ -3101,11 +3116,9 @@ partialDeterminationAnalysis <- function( traits, tree, trait, pyramidSpec, prof
 
         results.t1$MIC.significant <- results.t1$MIC.pvalue<significanceLevel
         results.t1$MIC.significant.group <- make.group( results.t1$MIC.significant )
+        results.all <- rbind( results.all, results.t1)
     }}
 
-    #print(isTRUE(is.na(results.t1)))
-    #print(results.t2)
-    #print(isTRUE(is.na(results.t2)))
     if( !isTRUE(is.na(results.t2)) ) { if( nrow(results.t2) > 0 ) {
         #print("t2")
         ##with(results.t2, {
@@ -3119,49 +3132,48 @@ partialDeterminationAnalysis <- function( traits, tree, trait, pyramidSpec, prof
 
         results.t2$MIC.significant <- results.t2$MIC.pvalue<significanceLevel
         results.t2$MIC.significant.group <- make.group( results.t2$MIC.significant )
+        results.all <- rbind( results.all, results.t2)
     }}
 
-    #print("pret3")
     if( !isTRUE(is.na(results.t3)) ) { if( nrow(results.t3) > 0 ) {
-        #print("t3")
         results.t3$T <- "Eukaryota"
         results.t3$significant <- results.t3$Pvalue<significanceLevel
         results.t3$significant.group <- make.group( results.t3$significant )
 
         results.t3$MIC.significant <- results.t3$MIC.pvalue<significanceLevel
         results.t3$MIC.significant.group <- make.group( results.t3$MIC.significant )
+        results.all <- rbind( results.all, results.t3)
     }}
 
     if( !isTRUE(is.na(results.t4)) ) { if( nrow(results.t4) > 0 ) {
-        #print("t5")
         results.t4$T <- "Fungi"
         results.t4$significant <- results.t4$Pvalue<significanceLevel
         results.t4$significant.group <- make.group( results.t4$significant )
 
         results.t4$MIC.significant <- results.t4$MIC.pvalue<significanceLevel
         results.t4$MIC.significant.group <- make.group( results.t4$MIC.significant )        
+        results.all <- rbind( results.all, results.t4)
     }}
     
-    #print("pret5")
     if( !isTRUE(is.na(results.t5)) ) { if( nrow(results.t5) > 0 ) {
-        #print("t5")
         results.t5$T <- "Archaea"
         results.t5$significant <- results.t5$Pvalue<significanceLevel
         results.t5$significant.group <- make.group( results.t5$significant )
 
         results.t5$MIC.significant <- results.t5$MIC.pvalue<significanceLevel
         results.t5$MIC.significant.group <- make.group( results.t5$MIC.significant )        
+        results.all <- rbind( results.all, results.t5)
     }}
 
 
     #results.all <- rbind( results.t1, results.t2, results.t3, results.t5 )
-    results.all <- rbind( results.t1, results.t2, results.t3, results.t4, results.t5 )
+    #results.all <- rbind( results.t1, results.t2, results.t3, results.t4, results.t5 )
 
     return(results.all)
 }    
         
 
-plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrange=NA)
+plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrange=NA, referenceLine=NA)
 {
     if( isTRUE(is.na(yrange)) )
     {
@@ -3170,15 +3182,15 @@ plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrang
     stopifnot(yrange[2] > yrange[1])
     stopifnot(length(yrange)==2)
     
-    xlabels <- NA
-    if( profileId==1 )
-    {
-        xlabels <- c(0,100,200,300)
-    }
-    else
-    {
-        xlabels <- c(-300,-200,-100,0)
-    }
+    ## xlabels <- NA
+    ## if( profileId==1 )
+    ## {
+    ##     xlabels <- c(0,100,200,300)
+    ## }
+    ## else
+    ## {
+    ##     xlabels <- c(-300,-200,-100,0)
+    ## }
 
 
 
@@ -3211,8 +3223,6 @@ plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrang
         scale_colour_manual( values=c("All"="black", "Bacteria"="blue", "Eukaryota"="darkgreen", "Archaea"="orange", "Fungi"="darkgreen") ) +
         scale_size_manual(   values=c("All"=1.8, "Bacteria"=0.8, "Eukaryota"=0.8, "Archaea"=0.8, "Fungi"=0.4) ) +
         scale_y_continuous( limits=yrange, breaks=c(-0.25, 0.0, 0.25, 0.5, 0.75, 1.00), labels=c("0.25", "0.00", "0.25", "0.50", "0.75", "1.00" ) ) +
-        scale_x_continuous( breaks=c(0,100,200,300),
-                           labels=xlabels, expand=expand_scale( mult=c(0,0) ) ) +
         labs(title=traitName, x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
         theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
               panel.grid.major.y = element_line(color="grey", size=0.50),
@@ -3222,6 +3232,35 @@ plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrang
               )
         guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
 
+    if( profileId==1 )
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(0,100,200,300),
+                                labels=c(0,100,200,300), expand=expand_scale( mult=c(0,0) ) )
+    }
+    else
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(-300,-200,-100,0),
+                                labels=c(-300,-200,-100,0), expand=expand_scale( mult=c(0,0) ) )
+    }
+    
+    if( !is.na(referenceLine))
+    {
+        if( profileId==1 )
+        {
+            xpos <- 200
+        }
+        else
+        {
+            xpos <- -200
+        }
+        
+        p <- p +
+            geom_hline( yintercept=referenceLine, linetype="dashed", color="red", size=1.5, alpha=0.6  ) +
+            annotate( "text", x=xpos, y=referenceLine, label=sprintf("Scale R^2 = %.2f", referenceLine), hjust=0, vjust=-1, color="red", alpha=0.6)
+    }
+    
     ## p1 <- ggplot(results.all, aes(x=Var1) ) + 
     ##     geom_hline( yintercept=0 ) +
     ##     geom_line( aes(y=MIC , color=T, size=T), alpha=0.8 ) +
@@ -3299,11 +3338,8 @@ plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrang
     #grid.arrange( ggplotGrob( kdePlot1 ), ps[[1]], ps[[2]], ncol=1, heights=c(unit(0.32, "npc"), unit(0.34, "npc"), unit(0.34, "npc") ) )
 
     grid.newpage()
-    print("111111111111111111111111111111111111111111111111111111")
     #grid.arrange( p, p1, p2, p3, ncol=1, heights=c(unit(0.34, "npc"), unit(0.22, "npc"), unit(0.22, "npc"), unit(0.22, "npc") ) )
-    print("222222222222222222222222222222222222222222222222222222")
     grid.arrange( p, p, p, p, ncol=1, heights=c(unit(0.34, "npc"), unit(0.22, "npc"), unit(0.22, "npc"), unit(0.22, "npc") ) )
-    print("333333333333333333333333333333333333333333333333333333")
     
     #pushViewport( viewport( x=unit(0.5, "npc"), y=unit(0.25, "npc") ) )
     #grid.draw(ggplotGrob( kdePlot ) )
@@ -3467,21 +3503,30 @@ figure_PartialDeterminationAnalysis_NormalizedProfiles <- function()
     ## partialDeterminationAnalysis( dres1 )
     ##partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", "GenomicENc.prime", c(1,pyramidLength), profileId=2, extras="", yrange=c(-0.40,1.00) )
 
-    #d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", c(1,pyramidLength), profileId=1, extras="" )
-    #print(d1)
-    #plotPartialDetermination( d1, "GenomicGC", profileId=1, yrange=c(-0.5,0.5) )
+    GLS.dLFE.sd.vs.GenomicGC        <- performGLSregression( traits.normalized, tree, "GenomicGC",                "dLFE.sd.12",  extras="", plotRegression=FALSE )
+    GLS.dLFE.sd.vs.GenomicENc.prime <- performGLSregression( traits.normalized, tree, "GenomicENc.prime",         "dLFE.sd.12",  extras="", plotRegression=FALSE )
 
-    #d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", c(2,pyramidLength+1), profileId=2, extras="" )
+    yrange=c(-0.45, 0.70)
+    
+    d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", c(1,pyramidLength), profileId=1, extras="" )
     #print(d1)
-    #plotPartialDetermination( d1, "GenomicGC", profileId=2, yrange=c(-0.5,0.5) )
+    plotPartialDetermination( d1, "GenomicGC", profileId=1, yrange=yrange, referenceLine=GLS.dLFE.sd.vs.GenomicGC$R2 )
+    
+    d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicGC", c(2,pyramidLength+1), profileId=2, extras="" )
+    #print(d1)
+    #d1$Var1 <- d1$Var1-10
+    plotPartialDetermination( d1, "GenomicGC", profileId=2, yrange=yrange, referenceLine=GLS.dLFE.sd.vs.GenomicGC$R2 )
+
+    #print(traits$Member_Bacteria_2)
+    #print(nrow(traits))
     
     d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="" )
     #print(d1)
-    plotPartialDetermination( d1, "GenomicENc.prime", profileId=1, yrange=c(-0.5,0.5) )
+    plotPartialDetermination( d1, "GenomicENc.prime", profileId=1, yrange=yrange, referenceLine=GLS.dLFE.sd.vs.GenomicENc.prime$R2 )
 
-    #d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicENc.prime", c(2,pyramidLength+1), profileId=2, extras="" )
+    d1 <- partialDeterminationAnalysis( traits.normalized,            tree, "GenomicENc.prime", c(2,pyramidLength+1), profileId=2, extras="" )
     #print(d1)
-    #plotPartialDetermination( d1, "GenomicENc.prime", profileId=2, yrange=c(-0.5,0.5) )
+    plotPartialDetermination( d1, "GenomicENc.prime", profileId=2, yrange=yrange, referenceLine=GLS.dLFE.sd.vs.GenomicENc.prime$R2 )
 
     
 }
