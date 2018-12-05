@@ -1,0 +1,38 @@
+{
+    "plotOutput" :
+    {
+        "width":  1300,
+        "height": 600,
+        "fileName": "Eukaryotes.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Eukaryotes/GenomicGC_Eukaryotes.png",
+            "x": 0.00,
+            "y": 0.06,
+            "w": 0.45,
+            "h": 0.93
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Eukaryotes/pca_profiles_trait_combined.cropped.png",
+            "x": 0.77,
+            "y": 0.18,
+            "w": 0.30,
+            "h": 0.70
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Eukaryotes/pca_profiles_combined.cropped.png",
+            "x": 0.47,
+            "y": 0.06,
+            "w": 0.30,
+            "h": 0.96
+        }
+    ],
+    "annotations" :
+    [
+    ]
+}

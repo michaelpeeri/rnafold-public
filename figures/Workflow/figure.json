@@ -1,0 +1,51 @@
+{
+    "plotOutput" :
+    {
+        "width":  1300,
+        "height": 1000,
+        "fileName": "Workflow combined.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Workflow/Forces scheme new.svg.png",
+            "x": 0.005,
+            "y": 0.05,
+            "w": 0.32,
+            "h": 0.40
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Workflow/Workflow_B01.svg.png",
+            "x": 0.33,
+            "y": 0.05,
+            "w": 0.67,
+            "h": 0.98
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/Workflow/Species_property_protein-count.svg.png",
+            "x": 0.01,
+            "y": 0.69,
+            "w": 0.34,
+            "h": 0.30
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Workflow/Species_property_gc-content.svg.png",
+            "x": 0.34,
+            "y": 0.69,
+            "w": 0.34,
+            "h": 0.30
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Workflow/Species_property_ENc-prime.svg.png",
+            "x": 0.68,
+            "y": 0.69,
+            "w": 0.34,
+            "h": 0.30
+        }
+    ]
+}

@@ -1,0 +1,70 @@
+{
+    "plotOutput" :
+    {
+        "width":  1500,
+        "height": 1500,
+        "fileName": "ENc-prime response.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/R2_ENcPrime_begin.png",
+            "x": 0.023,
+            "y": 0.05,
+            "w": 0.45,
+            "h": 0.27
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/R2_ENcPrime_end.png",
+            "x": 0.47,
+            "y": 0.05,
+            "w": 0.53,
+            "h": 0.35
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/R2comparison_GenomicGC_GenomicENc.prime.vs.dLFE.pdf.png",
+            "x": 0.026,
+            "y": 0.28,
+            "w": 0.594,
+            "h": 0.40
+        },
+        {
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_combined.cropped.png",
+            "x": 0.03,
+            "y": 0.45,
+            "w": 0.45,
+            "h": 0.28
+        },
+        {
+            "label": "E",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.dLFE.strength.annotated.png",
+            "x": 0.50,
+            "y": 0.45,
+            "w": 0.45,
+            "h": 0.30
+        },
+        {
+            "label": "F",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.ENc.png",
+            "x": 0.03,
+            "y": 0.72,
+            "w": 0.45,
+            "h": 0.29
+        },
+        {
+            "label": "G",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.classification.png",
+            "x": 0.50,
+            "y": 0.72,
+            "w": 0.45,
+            "h": 0.28
+        }
+    ],
+    "annotations" :
+    [
+    ]
+}

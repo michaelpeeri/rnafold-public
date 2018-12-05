@@ -1,0 +1,51 @@
+{
+    "plotOutput" :
+    {
+        "width":  1350,
+        "height": 1000,
+        "fileName": "Profile model.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Profile model/Profile model v2.svg.png",
+            "x": 0.0152,
+            "y": 0.05,
+            "w": 0.496,
+            "h": 0.28
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Profile model/Typical_dLFE_boxplots_all_species.png",
+            "x": 0.011,
+            "y": 0.32,
+            "w": 0.508,
+            "h": 0.20
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/Profile model/Model_elements_table.pdf.svg.png",
+            "x": 0.01,
+            "y": 0.59,
+            "w": 0.98,
+            "h": 0.40
+        },
+        {
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/Profile model/0-crossing.svg.png",
+            "x": 0.605,
+            "y": 0.05,
+            "w": 0.39,
+            "h": 0.46
+        },
+        {
+            "label": "E",
+            "fileName": "/home/michael/rnafold/figures/Profile model/Autocorrelation_regions.svg.png",
+            "x": 0.605,
+            "y": 0.54,
+            "w": 0.395,
+            "h": 0.54
+        }
+    ]
+}
