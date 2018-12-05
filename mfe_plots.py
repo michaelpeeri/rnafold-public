@@ -53,6 +53,75 @@ def plotMFEProfileWithGC(taxId, profileId, data):
     plt.close(fig)
 
 
+def plotMFEProfileV3(taxid, profileId, df, dLFEData, wilcoxon, transitionPeak, transitionPeakPos, edgeWilcoxon, ProfilesCount):
+    # TODO - RE-IMPL THIS
+    pass
+
+#         spearman_smfe_CAI_pval  spearman_smfe_CAI_rho          ...           spearman_smfe_gc_pval  spearman_smfe_gc_rho
+
+def plotMFEvsCUBcorrelation( biasProfiles, cubCorrs ):
+
+    yvars = ('spearman_smfe_Nc_rho', 'spearman_smfe_CAI_rho', 'spearman_smfe_Fop_rho', 'spearman_smfe_gc_rho')
+    
+    print(cubCorrs.columns)
+    for cdsPos in (0, 25):
+        #xvals = [x.iat[cdsPos] for x in biasProfiles.values()]
+        #print(xvar)
+
+        for yvar in yvars:
+            yvals = cubCorrs[yvar].values
+            yvarWords = yvar.split("_")
+
+            xvals = []
+            for taxid in cubCorrs.index.values:
+                xvals.append( biasProfiles[taxid].iat[cdsPos] )
+            #print(xvals)
+            #print(yvals)
+
+            f, ax = plt.subplots()
+            g = sns.jointplot( xvals, yvals, kind="scatter", dropna=False )
+            plt.xlabel("dLFE at begin+{}nt".format(cdsPos*10))
+            plt.ylabel("Spearman correlation vs. {}".format(yvarWords[2]))
+            plt.ylim((-1,1))
+            g.savefig("cub_corrs_{}_vs_dLFE_{}_begin.pdf".format(yvar, cdsPos*10) )
+            g.savefig("cub_corrs_{}_vs_dLFE_{}_begin.svg".format(yvar, cdsPos*10) )
+
+    f, ax = plt.subplots(4,1, figsize=(7,7), sharex=True)
+    ymax = 64
+    for i, yvar in enumerate(yvars):
+        yvals = cubCorrs[yvar].values
+        yvarWords = yvar.split("_")
+        yvarName = yvarWords[2]
+        if yvarName=="gc": yvarName="GC%"
+
+        g = sns.distplot(yvals, kde=False, bins=10, ax=ax[i])
+
+        meanVal   = np.mean(yvals)
+
+        # Show mean value
+        ax[i].axvline( x=meanVal, c="red" )
+        ax[i].annotate(s="mean={:.2}".format(meanVal), xy=(meanVal-0.015, ymax*0.9),  color="red", fontsize=11, horizontalalignment="right" )
+        # Show x-axis (no correlation)
+        ax[i].axvline( x=0, c="black" )
+        # Update axis labels
+        ax[i].set_xlabel("Spearman correlation vs. {}".format(yvarName))
+        ax[i].set_ylabel("Num. species")
+        # Used fixed y-range
+        ax[i].set_ylim((0, ymax))
+        
+    # Annotate number of species
+    ax[0].annotate(s="N={}".format(cubCorrs.shape[0]), xy=(0.82, ymax*0.9),  fontsize=11 )
+                
+
+
+    plt.tight_layout()
+    plt.savefig("cub_corrs_all_hist_only.pdf")
+    plt.savefig("cub_corrs_all_hist_only.svg")
+    
+
+        
+
+    
 randomizationTypesLabels = {11:"Codon shuffle", 12:"Vertical shuffle"}  # TODO - move this to a good place (resolve dependency problem)
 def plotMFEProfileForMultipleRandomizations(taxId, profileId, data):
     fig, ax1 = plt.subplots()

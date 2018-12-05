@@ -12,7 +12,7 @@ plt.style.use('ggplot') # Use the ggplot style
 from sklearn import decomposition
 import data_helpers
 import species_selection_data
-from mfe_plots import getHeatmaplotProfilesValuesRange, scatterPlot, loadProfileData, PCAForProfiles
+from mfe_plots import getHeatmaplotProfilesValuesRange, scatterPlot, loadProfileData, PCAForProfiles, plotMFEvsCUBcorrelation
 from fit_profile_params import getEstimatedParams
 from ncbi_entrez import getTaxonomicGroupForSpecies
 
@@ -332,10 +332,20 @@ def PCAforParams(params):
 
 def standalone():
     import sys
-    files = sys.argv[1:]
-    assert(len(files)>0)
+    import os
+    from glob import glob
+    
+    globs = sys.argv[1].split(",")
 
-    (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+    files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in globs]
+        
+    for group in range(len(files)):
+        (xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files[group])
+        if group==0:
+            print(dfProfileCorrs)
+            plotMFEvsCUBcorrelation( biasProfiles, dfProfileCorrs )
+    
+    return
 
     #print(dfProfileCorrs)
 
