@@ -1,8 +1,8 @@
 {
     "plotOutput" :
     {
-        "width":  1300,
-        "height": 600,
+        "width":  2015,
+        "height": 930,
         "fileName": "Eukaryotes.png"
     },
     "panels" :
