@@ -1028,7 +1028,7 @@ def overlayImages(images, outputFile):
     h=2400
     w=1800
 
-    surface = cairo.ImageSurface(cairo.Format.RGB24, w, h)
+    surface = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
     ctx = cairo.Context( surface )
 
     # ------------------------- Background -------------------------
