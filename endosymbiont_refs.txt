@@ -1,0 +1,283 @@
+Requirement: Repeated population bottlencks <- Intracellular phase (facultative or obligatory), such as replication. (But probably need more than just occasional "cell invasion") 
+
+Apicomplexans:
+Trichomonas - No
+Giardia  - No
+Trypanosoma - Yes (already included)
+Plasmodium - Yes (add)
+Cryptosporidium - Yes (already included)
+Entamoeba - No
+
+Chlamydiales
+
+
+Buchnera and Wigglesworthia - Done
+
+
+Mycoplasma - No (some may have ability to enter cells)
+Ureaplasma - Don't have any...
+
+Salmonella
+
+
+---------------------------------------------------------------------------------------------
+
+107806
+Buchnera aphidicola str. APS (Acyrthosiphon pisum)
+enterobacteria
+
+
+Cassone
+
+---------------------------------------------------------------------------------------------
+203907
+Candidatus Blochmannia floridanus
+species, enterobacteria
+
+Endosymbiont
+Gil
+
+---------------------------------------------------------------------------------------------
+322098
+Aster yellows witches'-broom phytoplasma AYWB
+mycoplasmas
+
+Obligate
+Bai
+
+
+---------------------------------------------------------------------------------------------
+331104
+Blattabacterium sp. (Blattella germanica) str. Bge
+CFB group bacteria
+
+Obligatory for the host! is it also obligatory for the parasites?
+Kambhampati
+
+---------------------------------------------------------------------------------------------
+228908
+Nanoarchaeum equitans Kin4-M
+archaea
+
+Obligate
+Waters
+
+
+---------------------------------------------------------------------------------------------
+
+1236703
+Candidatus Photodesmus katoptron Akat1
+g-proteobacteria
+
+"obligate host dependence"
+Hendry
+
+---------------------------------------------------------------------------------------------
+
+1227812
+Piscirickettsia salmonis LF-89 = ATCC VR-1361
+g-proteobacteria
+
+P. salmonis is able to infect, survive, and replicate inside salmonid macrophages
+https://www.ncbi.nlm.nih.gov/pubmed/26220311
+
+Piscirickettsia salmonis is the first Gram-negative, intracellular bacterial pathogen
+https://www.ncbi.nlm.nih.gov/pubmed/12962234
+
+Facultative
+https://www.ncbi.nlm.nih.gov/pubmed/28026007
+
+
+Fryer
+
+---------------------------------------------------------------------------------------------
+1116230
+Wolbachia pipientis wAlbB
+a-proteobacteria
+
+obligate intracellular bacteria
+Newton
+
+---------------------------------------------------------------------------------------------
+218497
+Chlamydia abortus S26/3
+chlamydias
+
+Obligate
+Thomson
+
+
+---------------------------------------------------------------------------------------------
+115713
+Chlamydia pneumoniae CWL029
+chlamydias
+
+obligate intracellular eubacteria
+Kalman
+
+---------------------------------------------------------------------------------------------
+353152
+Cryptosporidium parvum Iowa II
+apicomplexans
+
+Facultative
+Weedel
+
+---------------------------------------------------------------------------------------------
+347515
+Leishmania major strain Friedlin
+kinetoplastids
+
+Intracellular (phagoctyes)
+Ivens
+
+---------------------------------------------------------------------------------------------
+5693
+Trypanosoma cruzi
+species, kinetoplastids
+
+Rassi
+
+---------------------------------------------------------------------------------------------
+
+
+36329
+Plasmodium falciparum 3D7
+
+Maier
+
+
+---------------------------------------------------------------------------------------------
+
+99287
+Salmonella enterica subsp. enterica serovar Typhimurium str. LT2
+
+Richter
+
+---------------------------------------------------------------------------------------------
+
+400667
+Acinetobacter baumannii ATCC 17978
+
+Bist
+
+---------------------------------------------------------------------------------------------
+
+83332
+Mycobacterium tuberculosis
+
+Brosch
+
+---------------------------------------------------------------------------------------------
+
+203267
+Tropheryma whipplei str. Twist
+
+Raoult
+
+
+
+---------------------------------------------------------------------------------------------
+
+272631
+Mycobacterium leprae TN
+
+Sibley
+
+
+---------------------------------------------------------------------------------------------
+
+508771
+Toxoplasma gondii ME49
+
+Soldati
+
+
+---------------------------------------------------------------------------------------------
+
+224914
+Brucella melitensis bv. 1 str. 16M
+
+DelVecchio
+
+---------------------------------------------------------------------------------------------
+
+262768
+Onion yellows phytoplasma OY-M
+
+
+---------------------------------------------------------------------------------------------
+
+272633
+Mycoplasma penetrans HF-2
+
+Sasaki
+---------------------------------------------------------------------------------------------
+
+169963
+
+Listeria monocytogenes EGD-e
+
+facultative
+
+
+---------------------------------------------------------------------------------------------
+
+227377
+Coxiella burnetii RSA 493
+
+Seshadri
+
+---------------------------------------------------------------------------------------------
+
+266834
+Sinorhizobium meliloti 1021 (aka Ensifer meliloti)
+
+Finan
+---------------------------------------------------------------------------------------------
+
+264462
+Bdellovibrio bacteriovorus HD100
+
+Rendulic
+---------------------------------------------------------------------------------------------
+
+862908
+Halobacteriovorax marinus SJ
+
+Enos
+---------------------------------------------------------------------------------------------
+
+283166
+Bartonella henselae str. Houston-1
+
+Yun-Yueh Lu
+
+---------------------------------------------------------------------------------------------
+
+1321371
+Holospora undulata HU1
+
+Dohra
+
+---------------------------------------------------------------------------------------------
+
+
+
+---------------------------------------------------------------------------------------------
+
+Mycoplasma genitalium G37
+
+Mycoplasma pneumoniae M129
+
+Mycoplasma agalactiae PG2 (invasion only)
+
+Staphylococcus aureus subsp. aureus NCTC 8325 (invasion only)
+
+Hepatoplasma crinochetorum Av (extracellular)
+
+Haloplasma contractile SSD-17B
+
+Enterococcus faecalis V583 (invasion only)
+
+
