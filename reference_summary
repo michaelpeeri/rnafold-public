@@ -1,0 +1,88 @@
+
+----------------------------------------------------------------------------------------------------------------------------
+Faure
+
+dLFE is linked to protein structure (protein solvent accesibility, 
+
+Negative GC correlation in [C]
+
+----------------------------------------------------------------------------------------------------------------------------
+Gu
+
+[A]+[C]
+Positive GC correlation in [A]
+Optimum temp
+
+
+----------------------------------------------------------------------------------------------------------------------------
+Mao
+
+[B]
+
+----------------------------------------------------------------------------------------------------------------------------
+
+Keller
+
+[A]
+
+
+
+
+----------------------------------------------------------------------------------------------------------------------------
+Shabalina (2006)
+
+
+[A]+[D]
+
+
+----------------------------------------------------------------------------------------------------------------------------
+Shabalina (2013)
+
+GC content affects codon usage (pp. 2074; 11,25,28)
+Effects of synonymous mutations on mRNA stability and iteractions (pp. 2074; 9,10)
+
+
+
+----------------------------------------------------------------------------------------------------------------------------
+Luba Katz (2003)
+
+CDS region: mean
+Species: 28 sp., 3 domains (incl. human)
+Resolution: species, domain
+
+* Negative mid-CDS [C] in bacteria and some archaea and eukaryotes.
+
+* 1 blue bacteria (Synechocystis PCC6803). This is not consistent with our results (possible due to different shuffling)
+
+* dLFE not correlated with CAI
+
+
+Evidence for selection:
+1) dLFE found using dinucleotide-preserving shuffling.
+2) stronger dLFE in bacterial polycistronic bacterial genes
+3) stronger dLFE in s. cervisiae genes containing introns
+
+Evidence for CDS mRNA interactions:
+
+"Additionally, a stem-loop in the coding sequence of the yeast ASH1 gene can localize ASH1 mRNA to the bud tip" (Chartrand et al. 1999).
+
+"secondary structure in ORFs can interfere with translation" (Klionsky et al. 1986; Guisez et al. 1993; Schmittgen et al. 1994).
+
+----------------------------------------------------------------------------------------------------------------------------
+Itzkovits
+
+CDS region: first 100nt
+Species: 700 sp., bacteria, archaea, ascomycota
+Resolution: domain
+
+[A] appears in all phyla
+[C] in bacteria/archaea
+
+----------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+Kudla 2009 (<- Itzkovits)
+

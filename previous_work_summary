@@ -1,0 +1,138 @@
+
+
+Pluses:
+GLS control
+Enough species for in-group variation
+Unified model combines previous discoveries
+
+
+
+Mid CDS
+Katz: mean (mid-CDS). Bacteria most
+
+
+
+
+-------------------------------------------
+Katz
+-------------------------------------------
+
+High-level: 28 species, across the tree of life, mean.
+
+Bacteria: Largely negative dLFE, with some neutral and one positive.
+Archaea: mostly no bias, with 2/8 positive
+Eukaryotic: "sporadic" negative dLFE, with cerevisiae showing positive. Mostly neutral.
+
+
+
+-------------------------------------------
+Keller
+-------------------------------------------
+145 species (bacteria and archaea)
+
+Evidence for selection: functional genes have positive dLFE near CDS starts, non-functional genes do not.
+
+Conflict: this is not universal
+
+
+
+-------------------------------------------
+Mao              10.1016/j.gene.2012.12.062
+-------------------------------------------
+27 species.
+
+HSR 30-80
+
+Z-score based on normal distribution
+With a step-size of 9, all windows are in-phase.
+
+
+
+
+
+
+-------------------------------------------
+Gu (2010)
+-------------------------------------------
+
+High-level: 340 species, across the tree of life, window 0.
+
+GC is the main determinant of dLFE in window 0 (strong positive correlation)
+
+
+Methods drawbacks:
+
+No GLS control
+No other controls?
+
+No differentitation of start vs. mid for the sake of GC influence (positive vs. negative correlation of GC vs. dLFE). Focus on start (assuming this part is the most imporant).
+no discussion of outliers
+Less taxonomic granularity in general - bacteria vs. metazoan clades
+Statistics based on Z-score (not aparametric distribution)
+Very low N for many subgroups
+Less discussion of diversity within and between groups
+No analysis of dLFE except right after CDS start
+
+Contrasting conclusions:
+
+E-coli profile is followed by "most species... except for plants and warm-blooded animals (birds and mammals)." (p. 2). 10/11 Fungi also follow this pattern (p. 2, p. 4).
+Temperature effect - found same results; interpreted them as negative correlation (Fig. 4). Attributed to thermodynamic stability in discussion (p. 5).
+
+
+
+
+
+-------------------------------------------
+Itzkovitz
+-------------------------------------------
+
+High-level: 700 species (including viruses)
+Negative folllowed by positive in bacteria, archaea and fungi.
+
+
+
+-------------------------------------------
+Faure                    10.1093/nar/gkw671
+-------------------------------------------
+12 genomes
+Novel biophysical method of estimating deltaG
+
+Negative correlation between GC and dLFE (in the mid-CDS)
+
+Much other content...
+
+
+
+
+-------------------------------------------
+
+Shabalina(Synonymous):
+[80]-[95]
+
+
+
+
+-------------------------------------------
+Interesting refs:
+
+
+Gu->[40] - Experimental evidence linking RNA secondary structure near first codon with gene expression levels.
+
+
+Itzkovitz->
+Itzkovitz S, Alon U. 2007. The genetic code is nearly optimal for allowing additional information within protein-coding sequences. Genome Res 17: 405–412.
+
+
+
+
+Loh doi:10.1093/nar/gkr850
+Experimental evidence for requirement of unstructured mRNA 5'-region for translation in Listeria.
+
+
+Gu (2014)           10.1186/1471-2148-14-87
+
+
+
+
+
+

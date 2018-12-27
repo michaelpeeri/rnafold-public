@@ -205,6 +205,7 @@ DelVecchio
 262768
 Onion yellows phytoplasma OY-M
 
+Oshima
 
 ---------------------------------------------------------------------------------------------
 
@@ -219,7 +220,7 @@ Sasaki
 Listeria monocytogenes EGD-e
 
 facultative
-
+Gaillard
 
 ---------------------------------------------------------------------------------------------
 
@@ -262,8 +263,46 @@ Dohra
 
 ---------------------------------------------------------------------------------------------
 
+1208920
+Candidatus Kinetoplastibacterium oncopeltii TCC290E
+
+Alves
+doi:10.1093/gbe/evt012
+
+---------------------------------------------------------------------------------------------
+331113
+
+Simkania negevensis
+
+Knab
+10.1128/JB.00919-10
 
 
+---------------------------------------------------------------------------------------------
+1165094
+
+Richelia intracellularis
+
+Bar-Zeev
+https://www.nature.com/articles/ismej200856
+
+---------------------------------------------------------------------------------------------
+
+
+http://dx.doi.org/10.2174/1874404401004010012
+ Life With a Few Genes: A Survey on Naturally Evolved Reduced Genomes
+
+The Open Evolution Journal, 2010, 4: 12-22
+
+Luis Delaye, Rosario Gil, Juli Pereto, Amparo Latorre, Andres Moya
+https://benthamopen.com/ABSTRACT/TOEVOLJ-4-12
+
+---------------------------------------------------------------------------------------------
+https://doi.org/10.1002/bies.200900161
+ Evolution of reduced prokaryotic genomes and the minimal cell concept: Variations on a theme
+Luis Delaye, Andres Moya
+
+---------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------
 
 Mycoplasma genitalium G37
