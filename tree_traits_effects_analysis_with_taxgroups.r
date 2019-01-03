@@ -63,9 +63,8 @@ taxidToKingdomFilename <- "TaxidToKingdom.csv"   # create file using: python2 cr
 #pyramidLength <- 99+1  # unit is single windows (not real nt when profileStep>1)
 pyramidLength <- 30+1  # unit is single windows (not real nt when profileStep>1)
 
-#maxPyramidHeight <- 1-1
-#maxPyramidHeight <- 32-1
-maxPyramidHeight <- 0
+maxPyramidHeight <- 1-1     # calculate single-windows only
+#maxPyramidHeight <- 32-1   # calculate full pyramid
 
 profileMode <- "dLFE"
 #profileMode <- "nativeLFE"
@@ -84,7 +83,7 @@ stopifnot( length(groupsTableOutputFile.limitRangeFromNt) == length(groupsTableO
 stopifnot(groupsTableOutputFile.limitRangeFromNt <= groupsTableOutputFile.limitRangeToNt )
 stopifnot( c( groupsTableOutputFile.limitRangeFromNt, 1e8 ) > c( -1, groupsTableOutputFile.limitRangeToNt ) ) # ranges shouldn't overlap
 stopifnot( profileStep*(pyramidLength-1) >= groupsTableOutputFile.limitRangeFromNt[length(groupsTableOutputFile.limitRangeFromNt)] ) # pyramidLength must overlap with limits (otherwise peaks csv output will be empty)
-groupsTableOutputFile <- sprintf("tree_traits_effects_analysis_with_taxgroups.out.%s.length.%d.csv", profileMode, profileStep*(pyramidLength-1) )  # peaks CSV output file
+groupsTableOutputFile <- sprintf("tree_traits_effects_analysis_with_taxgroups.out.%s.length.%d.%%s.csv", profileMode, profileStep*(pyramidLength-1) )  # peaks CSV output file
 # Add range 0 (full range)
 groupsTableOutputFile.limitRangeFromNt <- c(0  , groupsTableOutputFile.limitRangeFromNt)
 groupsTableOutputFile.limitRangeToNt   <- c(1e6, groupsTableOutputFile.limitRangeToNt  )
@@ -96,7 +95,7 @@ lipaUseRankedValues <- TRUE
 
 significanceLevel <- 1e-2
 
-MIC.pval.num.iterations <- 100  # the default number of permutations used for estimating p-value for MIC
+MIC.pval.num.iterations <- 10  # the default number of permutations used for estimating p-value for MIC
 #MIC.pval.num.iterations <- 50000  # the default number of permutations used for estimating p-value for MIC
 
 rankTransformResponse <- FALSE
@@ -762,7 +761,7 @@ stopifnot(nrow(traits) > 300 )  # sanity test
 #stopifnot(ncol(traits) == profileLen+7 )
 
 
-knownEndosymbionts = c(107806,203907,322098,331104,228908,1236703,1116230,218497,115713,353152,347515,5693,36329,99287,400667,83332,203267,1227812,272631,508771,224914,262768,272633,169963,227377,266834,264462,862908,283166,1321371,1208920,138677,331113)
+knownEndosymbionts = c(107806,203907,322098,331104,228908,1236703,1116230,218497,115713,353152,347515,5693,36329,99287,400667,83332,203267,1227812,272631,508771,224914,262768,272633,169963,227377,266834,264462,862908,283166,1321371,1208920,138677,331113,1165094)
 # https://en.wikipedia.org/wiki/Intracellular_parasite#Obligate
 # Buchnera, Blochmania, Aster yellows, Blattabacteria, Nanoarchaeum, Photodesmum, Piscirickettsia, Chlamydia, Cryptosporidium, Leishmania, Trypanosoma
 traits$Is_endosymbiont <- factor(0, c(0,1))
@@ -1477,7 +1476,7 @@ performOLSregression <- function( traits, Xtrait, Ytrait, plotRegression=TRUE, e
 
 
 
-performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange, profileId=1, plotRegression=FALSE, caption="", extras="", traits.full=NA, plot.yrange=plot.yrange )
+performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profileRange, profileId=1, plotRegression=FALSE, caption="", extras="", traits.full=NA, plot.yrange=NA )
 {
     #print("performGLSregression_profileRangeMean(): -->")
     #print(profileRange)
@@ -1978,12 +1977,14 @@ glsRegressionRangeAnalysis <- function( traits, tree, Xtrait, profileRange, plot
 
 
     # Plot MIC pyramid
-    plotdf <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("MIC"  ) ) )
-    print(plotdf)
-    dotsDF <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("MIC.pvalue") ))
-    dotsDF <- dotsDF[dotsDF$value < significanceLevel,]
-    plotRotatedPyramid( plotdf, dotsDF, "MIC", valScale, Xtrait, plotTitle=paste(plotTitle, " (MIC)") )
-    
+    if( FALSE )
+    {
+        plotdf <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("MIC"  ) ) )
+        print(plotdf)
+        dotsDF <- data.frame( melt( subranges, id.vars=c("Var1", "Var2"), measure.vars=c("MIC.pvalue") ))
+        dotsDF <- dotsDF[dotsDF$value < significanceLevel,]
+        plotRotatedPyramid( plotdf, dotsDF, "MIC", valScale, Xtrait, plotTitle=paste(plotTitle, " (MIC)") )
+    }
     
     
     return(subranges)
@@ -2157,7 +2158,7 @@ findUncorrectedVariableCorrelation <- function( traits, filterTrait, Xtrait, Ytr
     d1 <- traits[,Xtrait]
     d2 <- traits[,Ytrait]
     N <- sum( !(is.na(d1) | is.na(d2)) )
-    ret <- cor.test( d1, d2, method="spearman", rm.na=TRUE )
+    ret <- cor.test( d1, d2, method="spearman", rm.na=TRUE, exact=TRUE )
     #print(ret$estimate)
     return( data.frame( pvalue=ret$p.value, corr=ret$estimate, N=N, directionsIndicator=NA ) )
 }
@@ -2430,7 +2431,7 @@ gridSearch <- function( traits, tree, values.from, values.to, values.logic, grid
     results
 }
 
-testCompoundClassification <- function()
+report_testCompoundClassification <- function()
 {
     
 
@@ -2490,9 +2491,12 @@ figure_GLS_GC_vs_endosymbionts <- function()
 }
 
 
-testRegressionForWeakModelComponents <- function()
+report_testRegressionForWeakModelComponents <- function()
 {
 ##print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras="", plotRegression=FALSE ))
+
+    print(performGLSregression_profileRangeMean( traits, tree, "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    print(performOLSregression_profileRangeMean( traits,       "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
 
     print(performGLSregression_profileRangeMean( traits, tree, "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
     print(performOLSregression_profileRangeMean( traits,       "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
@@ -3394,10 +3398,47 @@ plotPartialDetermination <-  function(results.all, traitName, profileId=1, yrang
 }
 
 
-figure_PartialDeterminationAnalysis <- function()
+figure_PartialDeterminationAnalysis <- function(profileId=1, pyramidSpec=c(1,31) )
 {
+    d.all <- data.frame()
+    yrange <- c(0.00,0.70)
     
+    d.t1   <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          "GenomicGC",       pyramidSpec, plotCaption="GenomicGC", profileId=profileId, extras="" )
+    d.t1$Buse.R2 <- abs(d.t1$Buse.R2)
+    d.t1$T <- "GenomicGC"
+    d.t1$significant <- d.t1$Pvalue<significanceLevel
+    d.t1$significant.group <- make.group( d.t1$significant )
+    d.t1$MIC.significant <- d.t1$MIC.pvalue<significanceLevel
+    d.t1$MIC.significant.group <- make.group( d.t1$MIC.significant )
+    d.all <- rbind( d.all, d.t1)
+    
+    d.t2   <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          "GenomicENc.prime", pyramidSpec, plotCaption="GenomicENc.prime", profileId=profileId, extras="" )
+    d.t2$Buse.R2 <- abs(d.t2$Buse.R2)
+    d.t2$T <- "GenomicENc.prime"
+    d.t2$significant <- d.t2$Pvalue<significanceLevel
+    d.t2$significant.group <- make.group( d.t2$significant )
+    d.t2$MIC.significant <- d.t2$MIC.pvalue < significanceLevel
+    d.t2$MIC.significant.group <- make.group( d.t2$MIC.significant )
+    d.all <- rbind( d.all, d.t2)
 
+    d.t3   <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          "GenomicGC",        pyramidSpec, plotCaption="GenomicGC -> GenomicENc.prime", profileId=profileId, extras=" GenomicENc.prime " )
+    d.t3$Buse.R2 <- abs(d.t3$Buse.R2)
+    d.t3$T <- "GenomicGC+GenomicENc.prime"
+    d.t3$significant <- d.t3$Pvalue<significanceLevel
+    d.t3$significant.group <- make.group( d.t3$significant )
+    d.t3$MIC.significant <- d.t3$MIC.pvalue < significanceLevel
+    d.t3$MIC.significant.group <- make.group( d.t3$MIC.significant )
+    d.all <- rbind( d.all, d.t3)
+
+    ## d.t4   <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          "GenomicENc.prime", pyramidSpec, plotCaption="GenomicENc.prime -> GenomicGC", profileId=profileId, extras="  GenomicGC  " )
+    ## d.t4$Buse.R2 <- abs(d.t4$Buse.R2)
+    ## d.t4$T <- "Test"
+    ## d.t4$significant <- d.t4$Pvalue<significanceLevel
+    ## d.t4$significant.group <- make.group( d.t4$significant )
+    ## d.t4$MIC.significant <- d.t4$MIC.pvalue < significanceLevel
+    ## d.t4$MIC.significant.group <- make.group( d.t4$MIC.significant )
+    ## d.all <- rbind( d.all, d.t4)
+    
     #d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicGC", c(1,pyramidLength), profileId=1, extras="" )
 
     #plotPartialDetermination( d1, "GenomicGC", profileId=1, yrange=c(-0.40,1.00) )
@@ -3430,17 +3471,52 @@ figure_PartialDeterminationAnalysis <- function()
     ## #dev.off()
     ## #quit()
 
-    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="" )
-    print(d1)
-    plotPartialDetermination( d1, "GenomicENc.prime", profileId=1, yrange=c(-0.5,0.5) )
+    ##d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="" )
+    ##print(d1)
+    ##plotPartialDetermination( d1, "GenomicENc.prime", profileId=1, yrange=c(-0.5,0.5) )
 
-    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(2,pyramidLength+1), profileId=2, extras="" )
-    print(d1)
-    plotPartialDetermination( d1, "GenomicENc.prime", profileId=2, yrange=c(-0.5,0.5) )
+    ##d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(2,pyramidLength+1), profileId=2, extras="" )
+    ##print(d1)
+    ##plotPartialDetermination( d1, "GenomicENc.prime", profileId=2, yrange=c(-0.5,0.5) )
     
     ## d1 <- partialDeterminationAnalysis( traits,            tree, "LogGrowthTime", c(1,pyramidLength), profileId=1, extras="GenomicGC" )
     ## print(d1)
     ## plotPartialDetermination( d1, "LogGrowthTime", profileId=1, yrange=c(-1.0,1.0) )
+
+    p <- ggplot(d.all, aes(x=Var1) ) + 
+        geom_line( aes(y=Buse.R2, color=T, size=T), alpha=0.7 ) +
+        geom_line( data=d.all[d.all$T=="GenomicGC",],                  aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="GenomicENc.prime",],           aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="GenomicGC+GenomicENc.prime",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="Test",],                       aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        scale_alpha_manual( values=c(0.0, 1.0) ) +
+        scale_colour_manual( values=c("GenomicGC"="blue", "GenomicENc.prime"="#208020", "GenomicGC+GenomicENc.prime"="red", "Test"="grey" ) ) +
+        scale_size_manual(   values=c("GenomicGC"=1.0,    "GenomicENc.prime"=1.0,   "GenomicGC+GenomicENc.prime"=1.6,     "Test"=0.6    ) ) +
+        scale_y_continuous( limits=yrange, breaks=c( 0.0, 0.20, 0.40, 0.60 ), labels=c( "0.0", "0.2", "0.4", "0.6" ) ) +
+        labs(x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
+        theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+              panel.grid.major.y = element_line(color="grey", size=0.50),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor = element_blank(),
+              panel.background = element_blank(),
+              aspect.ratio = 0.34
+              )
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    if( profileId==1 )
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(0,100,200,300),
+                                labels=c(0,100,200,300), expand=expand_scale( mult=c(0,0) ) )
+    }
+    else
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(-300,-200,-100,0),
+                                labels=c(-300,-200,-100,0), expand=expand_scale( mult=c(0,0) ) )
+    }
+    print(p)
+    
 }
 
 figure_PartialDeterminationAnalysis2 <- function()
@@ -3507,6 +3583,38 @@ figure_PartialDeterminationAnalysis2 <- function()
 
     ## results.all <- rbind( rt1, rt2, rt3 )
     ## plotPartialDetermination( results.all, "LogGrowthTime", profileId=1, yrange=c(-1.0,1.0) )
+}
+
+
+figure_PartialDeterminationAnalysis_GC_and_ENc.prime <- function()
+{
+    stopifnot( profileMode == "dLFE" )
+    
+    yrange=c(-0.45, 1.00)
+    
+    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicGC", c(1,pyramidLength), profileId=1, extras="" )
+    #print(d1)
+    plotPartialDetermination( d1, "GenomicGC", profileId=1, yrange=yrange )
+    
+    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicGC", c(2,pyramidLength+1), profileId=2, extras="" )
+    #print(d1)
+    #d1$Var1 <- d1$Var1-10
+    plotPartialDetermination( d1, "GenomicGC", profileId=2, yrange=yrange )
+
+    #print(traits$Member_Bacteria_2)
+    #print(nrow(traits))
+    
+    yrange=c(-0.50, 0.50)
+    
+    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(1,pyramidLength), profileId=1, extras="" )
+    #print(d1)
+    plotPartialDetermination( d1, "GenomicENc.prime", profileId=1, yrange=yrange )
+
+    d1 <- partialDeterminationAnalysis( traits,            tree, "GenomicENc.prime", c(2,pyramidLength+1), profileId=2, extras="" )
+    #print(d1)
+    plotPartialDetermination( d1, "GenomicENc.prime", profileId=2, yrange=yrange )
+
+    
 }
 
 
@@ -4061,6 +4169,7 @@ correlationBetweenModelRegions <- function( traits, tree, filterTrait, ranges, u
     
     print(p)
 
+    corValues
 }
 
 figure_CorrelationBetweenModelRegions <- function()
@@ -4078,7 +4187,21 @@ figure_CorrelationBetweenModelRegions <- function()
     ranges <- data.frame( id=range.id, from=range.from, to=range.to, profileId=range.profile, label=range.label )
 
 
-    correlationBetweenModelRegions( traits, tree, "Member_all_1", ranges, useUncorrectedCorrelation=TRUE, halfOnly=0 )
+    corValues <- correlationBetweenModelRegions( traits, tree, "Member_all_1", ranges, useUncorrectedCorrelation=TRUE, halfOnly=0 )
+
+    # print p-values in scientific notation (to see if the unrounded estimated values are all really 0.00000000...)
+    x <- corValues[corValues$Var1==1 & corValues$Var2==2, "Pval"]
+    print(sprintf("%e", x))
+    x <- corValues[corValues$Var1==1 & corValues$Var2==3, "Pval"]
+    print(sprintf("%e", x))
+    x <- corValues[corValues$Var1==1 & corValues$Var2==4, "Pval"]
+    print(sprintf("%e", x))
+    x <- corValues[corValues$Var1==2 & corValues$Var2==3, "Pval"]
+    print(sprintf("%e", x))
+    x <- corValues[corValues$Var1==2 & corValues$Var2==4, "Pval"]
+    print(sprintf("%e", x))
+    x <- corValues[corValues$Var1==3 & corValues$Var2==4, "Pval"]
+    print(sprintf("%e", x))
 
 }
 
@@ -5824,6 +5947,45 @@ figure_DLFEInteractingTraits_RegressionRangeAnalysisByTaxGroup <- function()
 }
 
 
+report_taxonRobustnessForTrait <- function( trait, rangeSpec, profileId=1 )
+{
+    regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
+
+    for( gr in taxGroups )
+    {
+        print(gr)
+        results <- glsRangeAnalysisWithFilter( traits, tree, gr, trait, rangeSpec, profileId=profileId )
+
+        # Store peaks (for each range) for this group
+        if( any( class(results) == "data.frame" ) && nrow(results) )
+        {
+            results <- results[results$Var1==results$Var2,]    # Only include single-window results
+            results$Pvalue.adj <- p.adjust( results$Pvalue, method="fdr" )
+
+            print(results)
+
+            # Iterate over each range to find the relevant peak
+            for( i in 1:length(groupsTableOutputFile.limitRangeFromNt) )
+            {
+                matching <- (results$Var1 >= groupsTableOutputFile.limitRangeFromNt[i]) &
+                            (results$Var2 <= groupsTableOutputFile.limitRangeToNt[i]  )  # Only include ranges within the configured limits
+
+                maxResult <- results[matching,][which.max( abs(results[matching, "Buse.R2"]) ),]  # Choose the result with the highest R^2 
+                medianR2  <- median( results[matching, "Buse.R2"] )
+
+                regressionResultsByTaxGroup <- rbind( regressionResultsByTaxGroup, data.frame( ExplanatoryVar=c(trait),  Range=c(i-1), MaxRangeStart=c(maxResult$Var1), MaxRangeEnd=c(maxResult$Var2), TaxGroup=c(taxGroupToTaxId[gr]), TaxGroupName=c(gr), EffectSize=c(medianR2), Pvalue=c(maxResult$Pvalue.adj), NumSpecies=c(maxResult$NumSpecies) ) )
+            }
+        }
+    }
+
+    #---------------------------------------------------------------------------------------------------------------------------
+    # Save the summarized results, by group, to csv file (plot using: python2 plot_tree_effects_anaylsis_results_on_tree.py)
+    write.csv(regressionResultsByTaxGroup, file=sprintf(groupsTableOutputFile, trait) )
+    
+    regressionResultsByTaxGroup
+}
+
+
 collectTraitInfluenceResultsForMidCDS <- function( allTraits, tree, groups, testTraits )
 {
     results <- data.frame()
@@ -5951,7 +6113,14 @@ figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC <- function()
 
 ############################################################
 
-#figure_PartialDeterminationAnalysis()
+report_taxonRobustnessForTrait( "GenomicGC",          rangeSpec=c(1,31), profileId=1 )
+report_taxonRobustnessForTrait( "GenomicENc.prime",   rangeSpec=c(1,31), profileId=1 )
+report_taxonRobustnessForTrait( "OptimumTemp",        rangeSpec=c(1,31), profileId=1 )
+
+
+#figure_PartialDeterminationAnalysis_GC_and_ENc.prime()
+#figure_PartialDeterminationAnalysis(profileId=1, pyramidSpec=c(1,31) )
+#igure_PartialDeterminationAnalysis(profileId=2, pyramidSpec=c(2,32) )
 #figure_PartialDeterminationAnalysis2()
 #figure_PartialDeterminationAnalysis_NormalizedProfiles()
 #figure_PositiveStretchLengths()
@@ -5964,9 +6133,9 @@ figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC <- function()
 #figure_ContrasingProfileBoxplotsForHighLowGC()
 #figure_CorrelationBetweenRanges()
 #writeWeakDLFEBinaryModelGridSearchResults()
-figure_GLS_GC_vs_endosymbionts()
-#testRegressionForWeakModelComponents()
-#testCompoundClassification()
+#figure_GLS_GC_vs_endosymbionts()
+#report_testRegressionForWeakModelComponents()
+#report_testCompoundClassification()
 #TestCorrelationBetweenScalarTraits()
 
 
