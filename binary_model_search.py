@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
 from mfe_plots import loadProfileData
 from data_helpers import getSpeciesProperty
-from endosymbionys import isEndosymbiont
+from endosymbionts import isEndosymbiont
 
 
 def getProfilesForAllGroups(args):
