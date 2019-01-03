@@ -10,7 +10,7 @@ import scipy.spatial.distance
 from sklearn import decomposition
 #from scipy.stats import spearmanr
 from collections import Counter
-from mfe_plots import saveHistogram
+#from mfe_plots import saveHistogram
 
 # Configuration
 #metric = metrics.mean_squared_error
@@ -108,11 +108,11 @@ def calcDiversityMetrics( points, metric=defaultMetric, saveHistogramAs=None ):
         absDeviations.append( metric( center,
                                       np.asarray(points[i]).reshape(1,-1) ) )
 
-    if (not saveHistogramAs is None) and len(pairwiseDistances)>1:
-        saveHistogram(np.asarray(pairwiseDistances), saveHistogramAs)
+    #if (not saveHistogramAs is None) and len(pairwiseDistances)>1:
+    #    saveHistogram(np.asarray(pairwiseDistances), saveHistogramAs)
         
-    if (not saveHistogramAs is None) and len(absDeviations)>1:
-        saveHistogram(np.asarray(absDeviations), "absDev_" + saveHistogramAs)
+    #if (not saveHistogramAs is None) and len(absDeviations)>1:
+    #    saveHistogram(np.asarray(absDeviations), "absDev_" + saveHistogramAs)
 
     return np.median( np.asarray(absDeviations) )
 
@@ -273,8 +273,8 @@ def plotDistancesDistribution(profilesArray, savePlotAs=None):
         for j in range(i, profilesArray.shape[0]):
             data.append(distances[i,j])
 
-    if not savePlotAs is None:
-        saveHistogram(np.asarray(data), savePlotAs)
+    #if not savePlotAs is None:
+    #    saveHistogram(np.asarray(data), savePlotAs)
 
 
 
