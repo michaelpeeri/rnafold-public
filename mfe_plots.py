@@ -356,7 +356,7 @@ Plot the profile for a single species (contained in 'data'), save into a file, a
  data    - profile data for multiple species (including the one specified by taxId...)
  yrange  - y-range scale (this allows all tiles to have the same scale)
 """
-def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None, profilesGroup=0):
+def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phylosignalProfiles=None, profilesGroup=0, profileTilesFirstLineFix=False):
     if not taxId in data:
         print("getProfileHeatmapTile(): taxId {} not found".format(taxId))
         return None
@@ -373,6 +373,9 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
 
     # read profile data
     series = data[taxId]
+
+    if profileTilesFirstLineFix: # fix for some end-profiles with invalid first element (i.e. based on very partial data)
+        series = series[1:]
     
     cmapNormalizer        = CenterPreservingNormlizer(yrange[0], yrange[1])
     phylosignalNormalizer = None
@@ -381,7 +384,7 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
 
     # read phylosignal profile (if used)
     phylosignalProfile = None
-    if( not phylosignalProfiles is None and taxId in phylosignalProfiles.index ):
+    if( not phylosignalProfiles is None and taxId in phylosignalProfiles.index ): # note: this does not support end-referenced profiles
         phylosignalProfile = phylosignalProfiles.loc[taxId,:]
         
         if( len(series) < len(phylosignalProfile) ):
@@ -1075,7 +1078,7 @@ def estimateModeUsingKDE(xs):
     
 
 class LayerConfig(object):
-    _defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False, showTickMarks=False )
+    _defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False, showTickMarks=False, debug=False )
 
     def __init__(self, **kw):
         self._kw = LayerConfig._defaults.copy()
@@ -1175,10 +1178,10 @@ def saveHistogram(data, filename):
     
     
     
-def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}):
+def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0):
     filteredProfiles = {}
     for key, profile in biasProfiles.items():
-        if not np.any(np.isnan(profile)):
+        if (not np.any(np.isnan(profile))) and (key in traitValues):
             filteredProfiles[key] = profile
     biasProfiles = filteredProfiles
     
@@ -1273,14 +1276,14 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 # is there overlap?
                 if overlapAction=="hide":
                     bbox = (x-imw, y-imh, x+imw, y+imh)
-                    print("---"*10)
-                    print("new: {} {}".format(label, bbox))
+                    #print("---"*10)
+                    #print("new: {} {}".format(label, bbox))
                     matches = spIndex.intersect( bbox )
-                    for m in matches:
-                        print("-X- {} {}".format(m, dinfo[m]))
+                    #for m in matches:
+                    #    print("-X- {} {}".format(m, dinfo[m]))
 
                     if matches and taxId not in highlightSpecies:
-                        print( "Hiding profile at {}".format( (x,y) ) )
+                        #print( "Hiding profile at {}".format( (x,y) ) )
                         showProfile = False
                     else:
                         spIndex.insert( label, bbox )
@@ -1336,6 +1339,7 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                     cIdx = c
 
                 #ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingScale, pca.components_[D0,cIdx]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.6, linewidth=2.0, color='red'), color='red', zorder=200 )
+
                 ax4.annotate( "",   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingVectorsScale, pca.components_[D0,cIdx]*loadingVectorsScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), color=colors[i], zorder=50 )
 
                 ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(tlx-imw*1.9, bry-imh*2.2*(i+4)), xytext=(tlx-imw*0.4, bry-imh*2.2*(i+4)),  fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), zorder=200 )
@@ -1373,11 +1377,11 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 ys.append( X_reduced[i,D0] )
                 cs.append( traitValues.get(taxId, None) )
                 
-            traitPlot = ax4.scatter(xs, ys, c=cs, s=7.0, alpha=1.0, edgecolors='none', cmap="plasma_r", label="genomicGC",  )
+            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale, alpha=1.0, edgecolors='none', cmap="viridis", label="Trait"  )
             fig.colorbar(traitPlot, shrink=0.5)
             
 
-        if debug:
+        if layerConfig.debug:
             ax4.scatter(debugSymbols[0], debugSymbols[1], s=50, alpha=0.8, c="green", marker="+", zorder=300 )
             ax4.annotate( "*", xy=(D1_peak[0], D0_peak[0]), alpha=0.5, color='red', zorder=250 )
 
@@ -1443,8 +1447,13 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     #_defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False )
     plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
     plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True ) )
-
     overlayImages( ["pca_profiles_density.png", "pca_profiles.png"], "pca_profiles_combined.png" )
+
+
+    plotPCALayer(LayerConfig(output="pca_profiles_d",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True, debug=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_density_d", showDensity=True, debug=True ) )
+    overlayImages( ["pca_profiles_density_d.png", "pca_profiles_d.png"], "pca_profiles_combined_d.png" )
+    
 
     plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showLoadingVectors=True ) )
     overlayImages( ["pca_profiles_trait.png"], "pca_profiles_trait_combined.png" )
