@@ -14,7 +14,8 @@ from ncbi_taxa import ncbiTaxa
 # Configuration
 numShuffledGroups = 20
 
-speciesToExclude = frozenset((405948,999415,946362,470, 1280, 4932, 508771, 2850, 753081, 195065, 641309 ))
+#speciesToExclude = frozenset((405948,999415,946362,470, 1280, 4932, 508771, 2850, 753081, 195065, 641309 ))
+speciesToExclude = frozenset(( 195065, 641309 ))
 # 158189,456481,272632,1307761,505682
 
 shortNames = getSpeciesShortestUniqueNamesMapping_memoized()
@@ -496,7 +497,7 @@ def speciesStatisticsAndValidityReport(args):
         (numNativeSeqs, gcCounts, totalCounts, cdsWarnings, warnings, firstAA, lastAA) = result
         speciesDf.at[taxId, 'NumNativeSeqs'] = numNativeSeqs
 
-        speciesDf.at[taxId, 'GCContentInCDS'] = float(gcCounts)/float(totalCounts)*100.0
+        speciesDf.at[taxId, 'GCContentInCDS'] = round( float(gcCounts)/float(totalCounts)*100.0, 1)
         
         speciesDf.at[taxId, 'CDSWarnings'] = cdsWarnings
         
