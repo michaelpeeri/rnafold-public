@@ -1,4 +1,4 @@
-# Create a tax-id to kingdom table for all species (for use by R code...)
+# Create a tax-id to taxonomic-group memberships table for all species (for use by R code...)
 import pandas as pd
 import csv  # for QUOTE_NONNUMERIC
 from data_helpers import allSpeciesSource, getSpeciesShortestUniqueNamesMapping, getSpeciesName
