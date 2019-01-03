@@ -11,11 +11,11 @@ from ncbi_taxa import ncbiTaxa
 minimalTaxonSize = 9   # Note - this should match the value in tree_traits_analysis_with_taxgroups.r
 
 #--------------------------------------------------------------
-# Input file - choose one
+# Sample input file - choose one (now uses input argument)
 
 # Possible input 1: GLS regression result for individual taxonomic groups and position ranges (created by tree_traits_effects_analysis_with_taxgroups.r)
 #csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.dLFE.length.300.csv"
-csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.abs(dLFE).length.300.csv"
+#csvRegressionEffectsByGroupCsv = "tree_traits_effects_analysis_with_taxgroups.out.abs(dLFE).length.300.csv"
 
 # Possible input 2: Raw profile value outliers, i.e., profiles with positive dLFE at position 0 (created by find_trait_values_outliers.r)
 #csvRegressionEffectsByGroupCsv = "find_trait_values_outliers.out.dLFE.csv"
@@ -84,11 +84,11 @@ class DummyResourceManager(object):
     def __exit__(self, exc_type, exc_val, exc_tb):  pass
 
 
-def plotRegressionEffectsByGroup():
+def plotRegressionEffectsByGroup(args):
     majorGroups = getMajorTaxonomicGroups( taxidToLineage )
     majorGroupsTree = ncbiTaxa.get_topology( [x[0] for x in majorGroups] )
 
-    df = pd.read_csv( csvRegressionEffectsByGroupCsv )
+    df = pd.read_csv( args.regressions_file )
     print(df)
 
 
@@ -251,8 +251,18 @@ def plotRegressionEffectsByGroup():
             
 
 
-def test():
-    plotRegressionEffectsByGroup()
+def standalone():
+    import argparse
+    import os
+
+    argsParser = argparse.ArgumentParser()
+    argsParser.add_argument("--regressions-file", type=str, required=True )
+    args = argsParser.parse_args()
+    
+    plotRegressionEffectsByGroup(args)
 
 
-test()
+if __name__=="__main__":
+    import sys
+    sys.exit(standalone())
+
