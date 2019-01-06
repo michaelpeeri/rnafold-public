@@ -1,0 +1,59 @@
+{
+    "plotOutput" :
+    {
+        "width":  2200,
+        "height": 1400,
+        "fileName": "Endosymbionts.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/Boxplots_all.png",
+            "x": 0.01,
+            "y": 0.03,
+            "w": 0.55,
+            "h": 0.28
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/Boxplots_gammaproteobacteria.png",
+            "x": 0.50,
+            "y": 0.03,
+            "w": 0.55,
+            "h": 0.28
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/alltaxa.proteobacteria.with.endosymbionts.svg.png",
+            "x": 0.01,
+            "y": 0.36,
+            "w": 0.58,
+            "h": 0.62
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/pca_profiles_trait_combined.png",
+            "x": 0.78,
+            "y": 0.38,
+            "w": 0.22,
+            "h": 0.70
+        },
+        {
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/pca_profiles_combined.png",
+            "x": 0.50,
+            "y": 0.36,
+            "w": 0.32,
+            "h": 0.74
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Endosymbionts/Endosymbiont_legend.svg.png",
+            "x": 0.92,
+            "y": 0.45,
+            "w": 0.12,
+            "h": 0.12
+        }
+    ]
+}
