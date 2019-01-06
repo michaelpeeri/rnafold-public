@@ -1,8 +1,8 @@
 {
     "plotOutput" :
     {
-        "width":  1300,
-        "height": 1000,
+        "width":  1950,
+        "height": 1500,
         "fileName": "Workflow combined.png"
     },
     "panels" :
@@ -10,17 +10,17 @@
         {
             "label": "A",
             "fileName": "/home/michael/rnafold/figures/Workflow/Forces scheme new.svg.png",
-            "x": 0.005,
-            "y": 0.05,
-            "w": 0.32,
-            "h": 0.40
+            "x": 0.004,
+            "y": 0.03,
+            "w": 0.30,
+            "h": 0.48
         },
         {
             "label": "B",
-            "fileName": "/home/michael/rnafold/figures/Workflow/Workflow_B01.svg.png",
-            "x": 0.33,
-            "y": 0.05,
-            "w": 0.67,
+            "fileName": "/home/michael/rnafold/figures/Workflow/Workflow_B02.svg.png",
+            "x": 0.34,
+            "y": 0.03,
+            "w": 0.60,
             "h": 0.98
         },
         {
