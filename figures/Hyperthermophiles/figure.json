@@ -1,0 +1,70 @@
+{
+    "plotOutput" :
+    {
+        "width":  2000,
+        "height": 1500,
+        "fileName": "Hyperthermophiles.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/alltaxa.euryarchaea.with.temperature.svg.png",
+            "x": 0.01,
+            "y": 0.03,
+            "w": 0.50,
+            "h": 0.63
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/pca_profiles_combined.cropped.euryarchaeota.png",
+            "x": 0.52,
+            "y": 0.03,
+            "w": 0.24,
+            "h": 0.32
+        },
+        {
+            "label": "C",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/Euryarchaeota_pca_profiles_trait_combined.png",
+            "x": 0.75,
+            "y": 0.03,
+            "w": 0.24,
+            "h": 0.32
+        },
+        {
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/pca_profiles_combined.cropped.all.png",
+            "x": 0.52,
+            "y": 0.34,
+            "w": 0.24,
+            "h": 0.36
+        },
+        {
+            "label": "E",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/All_pca_profiles_trait_combined.png",
+            "x": 0.75,
+            "y": 0.34,
+            "w": 0.26,
+            "h": 0.36
+        },
+        {
+            "label": "F",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/Hyperthermophiles_boxplots_comparison.svg.png",
+            "x": 0.01,
+            "y": 0.64,
+            "w": 0.97,
+            "h": 0.33
+        },
+        {
+            "label": "G",
+            "fileName": "/home/michael/rnafold/figures/Hyperthermophiles/OptimumTemp_GLS_regression.svg.png",
+            "x": 0.71,
+            "y": 0.64,
+            "w": 0.29,
+            "h": 0.36
+        }
+    ],
+    "annotations" :
+    [
+    ]
+}
