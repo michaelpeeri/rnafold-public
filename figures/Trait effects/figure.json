@@ -1,0 +1,27 @@
+{
+    "plotOutput" :
+    {
+        "width":  2000,
+        "height": 1600,
+        "fileName": "Trait effects.png"
+    },
+    "panels" :
+    [
+        {
+            "label": "A",
+            "fileName": "/home/michael/rnafold/figures/Trait effects/Trait effects.svg.png",
+            "x": 0.01,
+            "y": 0.025,
+            "w": 0.985,
+            "h": 0.65
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/Trait effects/Hyperthermophiles_boxplots_comparison.svg.png",
+            "x": 0.01,
+            "y": 0.70,
+            "w": 0.99,
+            "h": 0.295
+        }
+    ]
+}
