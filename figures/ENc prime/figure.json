@@ -1,8 +1,8 @@
 {
     "plotOutput" :
     {
-        "width":  1500,
-        "height": 1500,
+        "width":  1800,
+        "height": 1800,
         "fileName": "ENc-prime response.png"
     },
     "panels" :
@@ -10,55 +10,79 @@
         {
             "label": "A",
             "fileName": "/home/michael/rnafold/figures/ENc prime/R2_ENcPrime_begin.png",
-            "x": 0.023,
+            "x": 0.001,
             "y": 0.05,
-            "w": 0.45,
-            "h": 0.27
+            "w": 0.99,
+            "h": 0.24
         },
         {
-            "label": "B",
+            "label": "",
             "fileName": "/home/michael/rnafold/figures/ENc prime/R2_ENcPrime_end.png",
             "x": 0.47,
             "y": 0.05,
-            "w": 0.53,
-            "h": 0.35
+            "w": 0.99,
+            "h": 0.24
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/R2_legend.png",
+            "x": 0.895,
+            "y": 0.01,
+            "w": 0.14,
+            "h": 0.14
+        },
+        {
+            "label": "B",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/Partial_R2_begin.svg.png",
+            "x": 0.038,
+            "y": 0.290,
+            "w": 0.99,
+            "h": 0.158
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/Partial_R2_end.svg.png",
+            "x": 0.481,
+            "y": 0.294,
+            "w": 0.99,
+            "h": 0.1536
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/Partial_R2_legend.png",
+            "x": 0.895,
+            "y": 0.31,
+            "w": 0.105,
+            "h": 0.105
         },
         {
             "label": "C",
-            "fileName": "/home/michael/rnafold/figures/ENc prime/R2comparison_GenomicGC_GenomicENc.prime.vs.dLFE.pdf.png",
-            "x": 0.026,
-            "y": 0.28,
-            "w": 0.594,
-            "h": 0.40
-        },
-        {
-            "label": "D",
             "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_combined.cropped.png",
-            "x": 0.03,
-            "y": 0.45,
-            "w": 0.45,
+            "x": 0.10,
+            "y": 0.46,
+            "w": 0.99,
             "h": 0.28
         },
         {
-            "label": "E",
-            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.dLFE.strength.annotated.png",
-            "x": 0.50,
-            "y": 0.45,
+            "label": "D",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.ENc.png",
+            "x": 0.55,
+            "y": 0.46,
             "w": 0.45,
             "h": 0.30
         },
         {
-            "label": "F",
-            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.ENc.png",
-            "x": 0.03,
-            "y": 0.72,
-            "w": 0.45,
-            "h": 0.29
+            "label": "E",
+            "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.dLFE.strength.annotated.png",
+            "x": 0.10,
+            "y": 0.73,
+            "w": 0.99,
+            "h": 0.315
         },
         {
-            "label": "G",
+            "label": "F",
             "fileName": "/home/michael/rnafold/figures/ENc prime/pca_profiles_trait_combined.classification.png",
-            "x": 0.50,
+            "x": 0.54,
             "y": 0.72,
             "w": 0.45,
             "h": 0.28

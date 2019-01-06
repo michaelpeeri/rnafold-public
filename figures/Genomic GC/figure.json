@@ -1,58 +1,74 @@
 {
     "plotOutput" :
     {
-        "width":  1100,
-        "height": 900,
+        "width":  1800,
+        "height": 1800,
         "fileName": "GenomicGC influence.png"
     },
     "panels" :
     [
         {
             "label": "A",
-            "fileName": "/home/michael/rnafold/figures/Genomic GC/R2comparison_GenomicGC_profile_1_all.svg.png",
-            "x": 0.01,
-            "y": 0.04,
-            "w": 0.393,
-            "h": 0.29
-        },
-        {
-            "label": "B",
-            "fileName": "/home/michael/rnafold/figures/Genomic GC/R2comparison_GenomicGC_profile_2_all.svg.png",
-            "x": 0.46,
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/R2_multigroup_GC_begin.png",
+            "x": 0.001,
             "y": 0.035,
-            "w": 0.45,
-            "h": 0.24
+            "w": 0.6,
+            "h": 0.195
         },
         {
-            "label": "D",
-            "fileName": "/home/michael/rnafold/figures/Genomic GC/pca_profiles_GenomicGC_combined.cropped.png",
-            "x": 0.15,
-            "y": 0.82,
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/R2_multigroup_GC_end.png",
+            "x": 0.4555,
+            "y": 0.035,
+            "w": 0.6,
+            "h": 0.1973
+        },
+        {
+            "label": "",
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/R2_legend.png",
+            "x": 0.83,
+            "y": 0.035,
+            "w": 0.15,
+            "h": 0.15
+        },
+        {
+            "label": "E",
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/pca_profiles_trait_combined_GC_begin.png",
+            "x": 0.18,
+            "y": 0.77,
             "w": 0.25,
             "h": 0.45
         },
         {
             "label": "",
-            "fileName": "/home/michael/rnafold/figures/Genomic GC/pca_profiles_trait_combined.end.png",
-            "x": 0.55,
-            "y": 0.75,
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/pca_profiles_trait_combined_GC_end.png",
+            "x": 0.43,
+            "y": 0.77,
             "w": 0.20,
             "h": 0.25
         },
         {
-            "label": "C",
+            "label": "B",
             "fileName": "/home/michael/rnafold/figures/Genomic GC/GC_High_Low_dLFE_boxplot_comparison.svg.png",
-            "x": 0.042,
-            "y": 0.27,
+            "x": 0.0375,
+            "y": 0.24,
             "w": 0.99,
-            "h": 0.60
+            "h": 0.51
         },
         {
             "label": "",
+            "fileName": "/home/michael/rnafold/figures/Genomic GC/GC_High_Low_dLFE_boxplot_comparison.legend.only.svg.png",
+            "x": 0.83,
+            "y": 0.35,
+            "w": 0.13,
+            "h": 0.13
+        },
+        {
+            "label": "F",
             "fileName": "/home/michael/rnafold/figures/Genomic GC/GenomicGC summary.png",
-            "x": 0.67,
-            "y": 0.76,
-            "w": 0.33,
+            "x": 0.63,
+            "y": 0.78,
+            "w": 0.32,
             "h": 0.30
         }
     ],
