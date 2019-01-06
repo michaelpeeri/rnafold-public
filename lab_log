@@ -16,6 +16,11 @@
 
 January
 
+--07--
+>>> Backup mysql
+~/anaconda2N/bin/mysqldump --databases rnafold -h compute-0-93 -P 14404 -u rnafold -p | bzip2 >rnafold_dump.sql.bz2
+
+
 --02--
 
 >>> Refreshing "taxon robustness" plots:
