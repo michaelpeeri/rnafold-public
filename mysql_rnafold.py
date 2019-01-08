@@ -99,10 +99,6 @@ sequence_floats2 = Table("sequence_floats2", md,
                          Column("value", Float),
                          Column("source", Integer, primary_key=True))
 
-sequence_integers2 = Table("sequence_integers2", md,
-                       Column("sequence_id", Integer, primary_key=True),
-                       Column("value", Integer),
-                       Column("source", Integer, primary_key=True))
 
 #######################################################
 # Table definitions for ORM use
@@ -155,11 +151,6 @@ class SequenceFloats2(Base):
     value = Column(Float)
     source = Column(Integer, primary_key=True)
 
-class SequenceIntegers2(Base):
-    __tablename__ = "sequence_integers2"
-    sequence_id = Column(Integer, primary_key=True)
-    value = Column(Integer)
-    source = Column(Integer, primary_key=True)
 
 # TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY #
 Session = sessionmaker(bind=db)

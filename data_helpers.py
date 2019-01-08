@@ -21,7 +21,7 @@ from binascii import crc32
 from Bio import SeqIO
 import config
 import mysql_rnafold as db
-from mysql_rnafold import Sequence2, SequenceSeries2, SequenceSeries2Updates, SequenceFloats2, SequenceIntegers2 # expose ORM objects through this namespace
+from mysql_rnafold import Sequence2, SequenceSeries2, SequenceSeries2Updates, SequenceFloats2 # expose ORM objects through this namespace
 from sqlalchemy import sql
 from sqlalchemy.sql.expression import func
 from sqlalchemy.exc import IntegrityError # expose errors through this namespace
