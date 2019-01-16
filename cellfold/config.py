@@ -3,22 +3,22 @@ import logging
 
 # redis
 host = "compute-0-89"
-port = 6379
+port = 6380
 db = 0
-password = "rnafold"
+password = "cellfold"
 
 # sqlite
-sqlite_base_path = "/a/home/cc/students/enginer/mich1/rnafold/data/"
+sqlite_base_path = "/tamir1/mich1/cellfold/data"
 def make_sqlite_host_connection(filename):
     return 'sqlite:///%s/%s.db' % (sqlite_base_path, filename)
 
 # mysql
-mysql_host_connection = 'mysql://---username---:---password---@---host---:---port---/rnafold'
+mysql_host_connection = 'mysql://---username---:---password---@---host---:---port---/cellfold'
 run_without_mysql_server = False
 
 # data files
-base_data_dir    = "/a/home/cc/students/enginer/mich1/rnafold/data/"
-ensembl_data_dir = "/a/home/cc/students/enginer/mich1/rnafold/data/Ensembl/"
+base_data_dir    = "/tamir1/mich1/cellfold/data"
+ensembl_data_dir = "/tamir1/mich1/cellfold/data"
 
 
 # Pushover
