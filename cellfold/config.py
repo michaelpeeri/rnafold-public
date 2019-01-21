@@ -13,7 +13,7 @@ def make_sqlite_host_connection(filename):
     return 'sqlite:///%s/%s.db' % (sqlite_base_path, filename)
 
 # mysql
-mysql_host_connection = 'mysql://---username---:---password---@---host---:---port---/cellfold'
+mysql_host_connection = 'mysql+mysqlconnector://---username---:---password---@---host---:---port---/cellfold'
 run_without_mysql_server = False
 
 # data files
