@@ -1,3 +1,4 @@
+from builtins import str
 import os
 import sys
 import re
@@ -40,7 +41,7 @@ reSkippingAmbiguousSeq = re.compile("Skipping record (\S+), containing non-nucle
 
 
 #Skipping OEU05659.1 (sequence lcl|KV784598.1_cds_OEU05659.1_18098, alternate ids=[])
-reSkippingExcludedSeq = re.compile("Skipping (\S+) [(]sequence (\S+), alternate ids=[[][^]]*[]][)]")
+reSkippingExcludedSeq = re.compile("Skipping (\S+) \(sequence (\S+), alternate ids=\[[^]]*\]\)")
 #Skipping pseudo-gene entry lcl|KV784402.1_cds_17051
 
 #"Skipping pseudo-gene entry (\S+)"
@@ -142,7 +143,7 @@ def ingestGenome(args):
 
     if( args.variant == "Ensembl" and args.fetch_ftp_files ):
     
-        ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection)
+        ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection, server=args.server)
         (genomefn, cdsfn, gff3fn) = ftp.fetchAll()
         ftp.close()
 
@@ -212,7 +213,7 @@ def standaloneRun():
     #argsParser.add_argument("--verbose", type=int, default=0)
     argsParser.add_argument("--local-name", type=str, required=False)
     argsParser.add_argument("--remote-name", type=str, required=False)
-    argsParser.add_argument("--release", type=int, default=37)
+    argsParser.add_argument("--release", type=int, default=95)
     argsParser.add_argument("--section", type=str, default="bacteria")
     argsParser.add_argument("--subsection", type=str, required=False)
     argsParser.add_argument("--nuclear-genetic-code", type=int, required=True)
@@ -224,6 +225,7 @@ def standaloneRun():
     argsParser.add_argument("--gff3", type=str, required=False)
     argsParser.add_argument("--cds", type=str, required=False)
     argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
+    argsParser.add_argument("--server", type=str, required=False, default=None)
     
     args = argsParser.parse_args()
 
