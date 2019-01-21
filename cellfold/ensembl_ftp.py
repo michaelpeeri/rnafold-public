@@ -1,3 +1,5 @@
+from builtins import map
+from builtins import object
 from ftplib import FTP
 import os
 import re
@@ -69,16 +71,20 @@ def selectGff3File(options):
 
 
 class EnsemblFTP(object):
-    def __init__(self, localDir, speciesDirName, release=37, section="bacteria", subsection=None):
+    def __init__(self, localDir, speciesDirName, release=37, section="bacteria", subsection=None, server="ftp.ensemblgenomes.org"):
         self._release = release
         self._section = section
         self._subsection = subsection
         self._speciesDirName = speciesDirName
+        if server is None:  # allow None to also be specified for default (easier with command-line args)
+            server = "ftp.ensemblgenomes.org"
+        self._server = server
+        
 
         self._localDir = "%s/%s" % (ensembl_data_dir, localDir)
         self.prepareLocalDir()
         
-        self._ftp = FTP("ftp.ensemblgenomes.org")
+        self._ftp = FTP(self._server)
         self._ftp.login()
 
     def prepareLocalDir(self):
@@ -99,6 +105,7 @@ class EnsemblFTP(object):
     def getDirName(self, category="fasta", subdir=None):
         #ftp.dir("/pub/bacteria/release-36/fasta/bacteria_3_collection/wolinella_succinogenes_dsm_1740", x)
         #ftp.dir("/pub/protists/release-36/fasta/protists_stramenopiles1_collection/thalassiosira_oceanica_ccmp1005", x)
+        #ftp.dir("/pub/release-95/fasta/homo_sapiens/", x)
         if subdir is None:
             return "/pub/%s/release-%d/%s/%s/%s/"    % (self._section, self._release, category, self._subsection, self._speciesDirName)
         else:
@@ -110,7 +117,7 @@ class EnsemblFTP(object):
         dirName = self.getDirName(category, subdir)
         
         self._ftp.dir(dirName, names)
-                                                                 
+
         return list(map(parseDirListingLine_returnFilenames, names.get()))
 
     def determineCDSPath(self):
@@ -136,9 +143,9 @@ class EnsemblFTP(object):
         genomePath = self.determineGenomePath()
         items = self.listSpeciesItems("fasta", genomePath)
 
-        genomeMatches    = list(filter( lambda x:x[1].endswith("dna_rm.toplevel.fa.gz"), items))
-        readmeMatches    = list(filter( lambda x:x[1] == "README"                      , items))
-        checksumsMatches = list(filter( lambda x:x[1] == "CHECKSUMS"                   , items))
+        genomeMatches    = list([x for x in items if x[1].endswith("dna_rm.toplevel.fa.gz")])
+        readmeMatches    = list([x for x in items if x[1] == "README"])
+        checksumsMatches = list([x for x in items if x[1] == "CHECKSUMS"])
 
         localGenomeFilename = self.getLocalFilename(genomeMatches[0][1])
 
@@ -175,9 +182,9 @@ class EnsemblFTP(object):
         cdsPath = self.determineCDSPath()
         items = self.listSpeciesItems("fasta", cdsPath)
 
-        cdsMatches       = list(filter( lambda x:x[1].endswith(".cds.all.fa.gz")       , items))
-        readmeMatches    = list(filter( lambda x:x[1] == "README"                      , items))
-        checksumsMatches = list(filter( lambda x:x[1] == "CHECKSUMS"                   , items))
+        cdsMatches       = list([x for x in items if x[1].endswith(".cds.all.fa.gz")])
+        readmeMatches    = list([x for x in items if x[1] == "README"])
+        checksumsMatches = list([x for x in items if x[1] == "CHECKSUMS"])
 
         localCDSfilename = self.getLocalFilename(cdsMatches[0][1])
         
@@ -213,9 +220,9 @@ class EnsemblFTP(object):
     def fetchGFF3Files(self):
         items = self.listSpeciesItems("gff3")
 
-        gff3Matches      = list(filter( lambda x:(x[1].endswith(".gff3.gz") and x[1].find(".abinitio.")==-1), items))
-        readmeMatches    = list(filter( lambda x:x[1] == "README"                            , items))
-        checksumsMatches = list(filter( lambda x:x[1] == "CHECKSUMS"                         , items))
+        gff3Matches      = list([x for x in items if (x[1].endswith(".gff3.gz") and x[1].find(".abinitio.")==-1)])
+        readmeMatches    = list([x for x in items if x[1] == "README"])
+        checksumsMatches = list([x for x in items if x[1] == "CHECKSUMS"])
 
         selectedGff3 = selectGff3File( gff3Matches )
         localGFF3Filename = self.getLocalFilename( gff3Matches[selectedGff3][1] )
