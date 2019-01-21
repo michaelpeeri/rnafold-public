@@ -1,3 +1,5 @@
+from builtins import str
+from builtins import object
 import sys
 from sqlalchemy import create_engine, Table, Column, Integer, Text, String, SmallInteger, Float, MetaData
 from sqlalchemy.dialects.mysql import BLOB
@@ -157,13 +159,13 @@ Session = sessionmaker(bind=db)
 #Session = None
 
 
-class Alphabets:
+class Alphabets(object):
     DNA = 1
     RNA = 2
     RNA_Huff = 3
 
 # Note: this mixes source numbers for the sequences and sequence_series tables
-class Sources:
+class Sources(object):
     External = 1 # imported sequence
     Computed = 2
     ShuffleCDSv2_matlab = 10

@@ -1,4 +1,5 @@
 from __future__ import print_function
+from builtins import map
 import argparse
 import gff
 
@@ -28,7 +29,7 @@ def parseOption(possibleValues, name):
 
 def parseList(conversion=str):
     def convert(values):
-        return map(conversion, values.split(","))
+        return list(map(conversion, values.split(",")))
     return convert
 
 argsParser = argparse.ArgumentParser()
@@ -159,7 +160,7 @@ for area in allAreas:
                 continue
                 
             assert(len(_Dbxrefs)>0)
-            Dbxrefs = dict(map( lambda x: tuple(x.split(":")), _Dbxrefs))
+            Dbxrefs = dict([tuple(x.split(":")) for x in _Dbxrefs])
 
             # Extract the gene name
             #geneId = Dbxrefs['GeneID']

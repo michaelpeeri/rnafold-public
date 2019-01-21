@@ -1,6 +1,14 @@
 #
 #
 from __future__ import print_function
+from future import standard_library
+standard_library.install_aliases()
+from builtins import str
+from builtins import zip
+from builtins import map
+from builtins import range
+from past.builtins import basestring
+from builtins import object
 import sys
 import time
 import datetime
@@ -12,10 +20,9 @@ from socket import gethostname
 from collections import Iterable, Set
 from os import getpid
 try:
-    from StringIO import StringIO
+    from io import StringIO
 except ImportError:
     from io import StringIO
-from string import maketrans
 import redis
 from binascii import crc32
 from Bio import SeqIO
@@ -117,11 +124,11 @@ def getSpeciesFileName(taxId):
     return p[0][0] + p[1]
 
 skipWords = frozenset(("group", "candidatus", "candidate", "phyla", "bacterium", "sp.", "marine", "i", "subsp.", "strain", "str.", "serovar"))
-badTaxonomicNameChars = maketrans(".()", "***")
+badTaxonomicNameChars = str.maketrans(".()", "***")
 def _getSpeciesFileName2(taxId):
     terms = r.get("species:taxid:%d:name" % taxId).split(" ")
-    p = list(filter(lambda x: x.lower() not in skipWords, terms))
-    p = list(filter(lambda x: x.translate(badTaxonomicNameChars).find("*") == -1, p))
+    p = list([x for x in terms if x.lower() not in skipWords])
+    p = list([x for x in p if x.translate(badTaxonomicNameChars).find("*") == -1])
     isStandardBinomial = (len(p)==len(terms))
     #print("%d %s %s" % (taxId, p, isStandardBinomial))
     assert(len(p) > 1)
@@ -394,7 +401,7 @@ class CDSHelper(object):
         
     def shuffledSeqIds(self, shuffleType):
         assert( shuffleType in allowedShuffleTypes )
-        return self._getListRedisProperty( "shuffled-seq-ids-{}".format(shuffleType), shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), lambda x: map(int, x) )
+        return self._getListRedisProperty( "shuffled-seq-ids-{}".format(shuffleType), shuffledSeqIdsKey % (self._taxId, self._protId, getShuffleTypeIdentifier(shuffleType) ), lambda x: list(map(int, x)) )
 
     def getProtId(self):
         return self._protId
@@ -581,7 +588,7 @@ class CDSHelper(object):
 
         print("Got %d results from db" % (len(records)))
 
-        out = dict( zip( shuffleIds, [None]*len(requestedSeqIds) ) )
+        out = dict( list(zip( shuffleIds, [None]*len(requestedSeqIds) )) )
 
         for record in records:
             compressed = record[0]
@@ -597,7 +604,7 @@ class CDSHelper(object):
 
         if( parseAsJson ):
             out2 = {}
-            for shuffleId, encoded in out.items():
+            for shuffleId, encoded in list(out.items()):
                 if( encoded is None ):
                     #print("Warning: Missing data for protein %s, shuffle-id %d" % (protId, shuffleId))
                     decoded = None
@@ -654,7 +661,7 @@ class CDSHelper(object):
                 return None
 
         #print("shuffleIds= %s" % shuffleIds)
-        requestedSeqIds = filter( lambda x: not x is None, map(shuffleIdToSeqId, shuffleIds))
+        requestedSeqIds = [x for x in map(shuffleIdToSeqId, shuffleIds) if not x is None]
 
         # get the existing results for all sequences
         results = db.connection.execute( sql.select(( db.sequence_series2.c.sequence_id, db.sequence_series2.c.content)).select_from(db.sequence_series2).where(
@@ -688,7 +695,7 @@ class CDSHelper(object):
         out = [None]*len(shuffleIds)
 
         # map each sequence-id to its position in shuffleIds
-        sequenceIdToPos = dict(zip(map(shuffleIdToSeqId, shuffleIds), range(len(shuffleIds))))
+        sequenceIdToPos = dict(list(zip(list(map(shuffleIdToSeqId, shuffleIds)), list(range(len(shuffleIds))))))
 
         # iterate over each returned result, i.e., the existing results for all requested shuffle-ids in this gene
         for n, record in enumerate(records):
@@ -1020,7 +1027,7 @@ def seriesUpdatesSource(calculationId, bulkSize=500, startFromId=0, stopAtId=-1)
         out = []
         # Merge original and updated results on sequence_id (use left merge)
         
-        originalsById = dict( zip( [x[0] for x in originals], originals ) )
+        originalsById = dict( list(zip( [x[0] for x in originals], originals )) )
         assert(len(originalsById)==len(originals))
         
         for updateRecord in updates:
@@ -1083,7 +1090,7 @@ Return all native CDS sequences for the specied species.
 Supports getting a random fraction of the sequences (using getAllNativeCDSsForSpecies)
 """
 def nativeSequencesSource(taxId, fraction=None, numFractions=None):
-    for (seqId, seqData) in getAllNativeCDSsForSpecies(taxId, fraction, numFractions).items():
+    for (seqId, seqData) in list(getAllNativeCDSsForSpecies(taxId, fraction, numFractions).items()):
         cdsSeq = decompressNucleicSequence(seqData)
         del seqData
         yield (seqId, cdsSeq)
@@ -1224,7 +1231,7 @@ class DropSequenceWithResults(object):
         droppedSeqResults = 0
         
         # 1) Delete pointers to sequences being dropped from redis, by updating all owner sequences
-        for owner, sequenceIdsToDelete in self._owners.items():
+        for owner, sequenceIdsToDelete in list(self._owners.items()):
             taxId  = owner[0]
             protId = owner[1]
             keyId = shuffledSeqIdsKey % (taxId, protId, getShuffleTypeIdentifier(shuffleType) )

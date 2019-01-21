@@ -1,6 +1,11 @@
 # Compress and de-compress nucleic acid sequences using a Huffman code
 #
 from __future__ import print_function
+from builtins import hex
+from builtins import str
+from builtins import map
+from builtins import range
+from builtins import object
 import struct
 import itertools
 import random

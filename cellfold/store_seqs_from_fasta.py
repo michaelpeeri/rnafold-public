@@ -3,6 +3,7 @@
 # Store the sequences in MySql, and add the sequence-ids to the metadata in redis.
 #
 from __future__ import print_function
+from builtins import str
 import sys
 import re
 import argparse
