@@ -13,12 +13,12 @@ def make_sqlite_host_connection(filename):
     return 'sqlite:///%s/%s.db' % (sqlite_base_path, filename)
 
 # mysql
-mysql_host_connection = 'mysql+mysqlconnector://---username---:---password---@---host---:---port---/cellfold'
+mysql_host_connection = 'mysql+mysqlconnector://---username---:---password---@---host---:---port---/cellfold?charset=latin1'
 run_without_mysql_server = False
 
 # data files
 base_data_dir    = "/tamir1/mich1/cellfold/data"
-ensembl_data_dir = "/tamir1/mich1/cellfold/data"
+ensembl_data_dir = "/tamir1/mich1/cellfold/data/Ensembl"
 
 
 # Pushover
