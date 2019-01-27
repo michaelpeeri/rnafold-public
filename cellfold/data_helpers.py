@@ -15,6 +15,7 @@ import datetime
 import gzip
 import json
 import logging
+import codecs
 from math import floor
 from socket import gethostname
 from collections import Iterable, Set
@@ -941,8 +942,8 @@ def createWorkerKey(computationTag):
 """
 Calculate CRC for a given sequence
 """
-def calcCrc(seq):
-    return crc32(str(seq).lower()) & 0xffffffff
+def getCrc(seq):
+    return crc32(codecs.encode(str(seq).lower(), encoding="ascii")) & 0xffffffff
 
 
 def splitLongSequenceIdentifier(longIdentifier):

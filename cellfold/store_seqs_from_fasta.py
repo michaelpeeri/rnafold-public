@@ -9,7 +9,7 @@ import re
 import argparse
 import gzip
 import redis
-from binascii import crc32
+import codecs
 from Bio import SeqIO
 from Bio.Alphabet import generic_dna
 import config
@@ -111,9 +111,6 @@ else:
 
 
 
-def getCrc(seq):
-    return crc32(str(seq).lower()) & 0xffffffff
-
 reNuclearYeastGene = re.compile("Y[A-P][RL]\d+[CW](-[A-Z])?")
 geneIdsToInclude = set()
 if(args.gene_ids_file):
@@ -137,15 +134,17 @@ if args.headers_from_another_fasta:
 cdsCount = 0
 notFoundCount = 0
 skippedCount = 0
+validNucleotideChars = str.maketrans( "ACGTacgt", "%%%%%%%%" )
+#print("Opening fasta file: {}".format(f))
 for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
-    #proteinId = regexLocusId.match(record.id).group(1) # Work-around for multiple-transcript identifiers in JGI's Chlamy genome 
+    #proteinId = regexLocusId.match(record.id).group(1) # Work-around for multiple-transcript identifiers in JGI's Chlamy genome
 
     if args.headers_from_another_fasta:
         record.description = headersFromAnotherFasta[record.id]
 
-    nonNucleotideChars = str(record.seq).translate(None, 'acgtACGT')
-    if nonNucleotideChars:
-        print("Skipping record %s, containing non-nucleotide or ambiguous symbols '%s'" % (record.id, nonNucleotideChars))
+    numNonNucleotideChars = len(record.seq) - str(record.seq).translate( validNucleotideChars ).count("%")
+    if numNonNucleotideChars:
+        print("Skipping record %s, containing non-nucleotide or ambiguous symbols '%s'" % (record.id, numNonNucleotideChars))
         skippedCount +=1
         continue
 
@@ -228,16 +227,11 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
 
     elif(args.variant=="Ensembl"):
         # Sample id: ABD29211.1
-        if( record.id[-2] == '.' ):
-            if( record.id[-2:] == '.1' ):
-                # Use the protein id, without the trailing transcript id.
-                # If this is not the first transcript for this protein-id, skip it.
-                proteinId = record.id[:-2]
-                additionalProteinIds.add(record.id) # also allow matching the full format (including the transcript-id) - some CDS files include it...
-            else:
-                print("Skipping %s (secondary transcript)" % record.id )
-                skippedCount += 1
-                continue
+        dotPos = record.id.rfind('.')
+        if( dotPos > 3 ):
+            proteinId = record.id[:dotPos]
+            additionalProteinIds.add(record.id) # also allow matching the full format (including the transcript-id) - some CDS files include it...
+            
         else:
             proteinId = record.id
 
@@ -336,7 +330,7 @@ for record in SeqIO.parse(f, "fasta", alphabet=generic_dna):
             r.set( proteinIdKey % (taxId, proteinId), altProteinId )
         
         # Store the CDS checksum
-        crc1 = getCrc(record.seq)
+        crc1 = data_helpers.getCrc(record.seq)
         r.set(cdsSeqChecksumKey % (taxId, proteinId), crc1)
     elif( seqSourceTag == db.Sources.ShuffleCDSv2_matlab):
         #
