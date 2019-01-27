@@ -76,7 +76,7 @@ def SpeciesCDSSource(taxId):
     assert(r.exists(speciesNameKey % taxId))
 
     for protId in r.sscan_iter(speciesCDSList % taxId):
-        yield protId
+        yield str(protId, encoding="ascii")
 
 
 """
