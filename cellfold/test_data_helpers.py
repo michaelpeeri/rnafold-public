@@ -1,10 +1,11 @@
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
-from data_helpers import SpeciesCDSSource, CDSHelper, RateLimit, countSpeciesCDS, calcCrc
+from data_helpers import SpeciesCDSSource, CDSHelper, countSpeciesCDS, calcCrc
 from runningstats import RunningStats
+from rate_limit import RateLimit
 
 # Configuration
-taxId = 3055
+taxId = 9066
 
 statsLength = RunningStats()
 statsShuffles = RunningStats()
