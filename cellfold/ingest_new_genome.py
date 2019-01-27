@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import subprocess
+import codecs
 from ensembl_ftp import EnsemblFTP
 from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList
 from config import ensembl_data_dir
@@ -72,6 +73,7 @@ def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True)
     skippedGenes = []
     for line in report.splitlines():
         # Note: Order cases from most to least common (for performance)
+        line = codecs.decode(line, encoding="ascii")
         match = reSequenceOkLine.match(line)
         if match:
             loadedGenes.append(match.group(1))
@@ -110,7 +112,7 @@ def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True)
         
         else:
             unknownLinesCount+= 1  # Count "unexpected" lines
-            print(line)
+            print("? {}".format(line))
             continue
         
     if unknownLinesCount:
@@ -123,7 +125,8 @@ def ingestGenome(args):
     # Sanity test 1 -- genes list file doesn't already exists (if it does, short name may have been reused...)
     genesListFilename = "%s/coding_genes_list.%s.list" % (ensembl_data_dir, args.short_name)
     print(genesListFilename)
-    assert(not os.path.exists(genesListFilename))
+    if args.fetch_ftp_files:
+        assert(not os.path.exists(genesListFilename))
 
     # Sanity test 2 -- this species doesn't already exist in the DB
     if r.exists(speciesNameKey % args.taxid):
