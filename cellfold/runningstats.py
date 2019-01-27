@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Functions for on-line (streaming, O(1) memory) calculation of mean, variance and stdev
 # Refs:
 # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
