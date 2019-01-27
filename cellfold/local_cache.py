@@ -1,4 +1,6 @@
 # Provide persistent string->string mapping (backed by sqlite file containing a single table). Multiple mappings can be created by passing different identifiers to the constructor.
+from builtins import range
+from builtins import object
 import sys
 from sqlalchemy import create_engine, Table, Column, MetaData, sql, String
 from sqlalchemy.dialects.sqlite import INTEGER, FLOAT, VARCHAR

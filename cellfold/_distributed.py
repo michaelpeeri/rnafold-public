@@ -1,3 +1,7 @@
+from __future__ import division
+from builtins import str
+from builtins import range
+from builtins import object
 import json
 import re
 from hashlib import md5
@@ -43,14 +47,14 @@ def testUniformShardKey(N=1000):
     totalWork = 7000
     meanWorkPerGroup = float(totalWork)/N
     
-    counts = Counter( map(lambda x: hN.getKey(str(x)), range(70000000, 70000000+totalWork)) )
+    counts = Counter( [hN.getKey(str(x)) for x in range(70000000, 70000000+totalWork)] )
     workloadOfBusiestGroup = counts.most_common(1)[0][1]
     print("Parameters: total work: %.4g tasks; groups: %d" % (totalWork, N))
     print("Even workload: %.4g tasks/group" % meanWorkPerGroup)
     print("---------------------------------------------------------")
     print("Test results:")
     print("Busiest group: %.4g tasks" % workloadOfBusiestGroup)
-    print("Deviation: %.2g%%" % ((workloadOfBusiestGroup/meanWorkPerGroup-1.0)*100) )
+    print("Deviation: %.2g%%" % (((workloadOfBusiestGroup/meanWorkPerGroup)-1.0)*100))
 
     
 if __name__=="__main__":

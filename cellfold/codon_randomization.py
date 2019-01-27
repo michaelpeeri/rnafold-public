@@ -1,4 +1,11 @@
-from itertools import compress, chain, imap
+from __future__ import division
+from builtins import str
+from builtins import map
+from builtins import zip
+from builtins import next
+from builtins import range
+from builtins import object
+from itertools import compress, chain
 from copy import copy
 from math import factorial
 import random
@@ -8,7 +15,7 @@ from local_cache import LocalStringsCache
 
 def splitCodons(seq):
     assert(len(seq)%3==0)
-    return [seq[i*3:i*3+3] for i in range(len(seq)/3)]
+    return [seq[i*3:i*3+3] for i in range(len(seq)//3)]
 
 """
 Convert a forward codon table to a backwards codon table (AA->codons)
@@ -17,7 +24,7 @@ Note: the returned table does not include include entries for start/stop codons
 """
 def make_full_back_table(forward_table):
     ret = {}
-    for codon,aa in forward_table.items():
+    for codon,aa in list(forward_table.items()):
         codon = codon.lower()
         if aa is None:
             continue
@@ -32,7 +39,7 @@ def applyCodonsPermutation(mutableSeq, newCodons, positions):
     for newCodon, pos in zip(newCodons, positions):
         mutableSeq[pos] = newCodon
 
-negate = lambda p: imap( lambda x: not x, p ) # return a sequence where each element is negated
+negate = lambda p: map( lambda x: not x, p ) # return a sequence where each element is negated
 
 class SynonymousCodonPermutingRandomization(object):
     """
@@ -52,10 +59,10 @@ class SynonymousCodonPermutingRandomization(object):
 
         randomizedCodonsSeq = copy(codonsSeq)
         permutationsCount = 1
-        for aa,aaCodons in self._back_table.items(): # Iterate over each AA and its codons
+        for aa,aaCodons in list(self._back_table.items()): # Iterate over each AA and its codons
             aaCodonsSet = frozenset(aaCodons)
-            isSynonymousPosition = map( lambda x: x in aaCodonsSet, codonsSeq)
-            synonymousPositions = filter(lambda x:x != -1, [i if v else -1 for v,i in zip(isSynonymousPosition, range(len(isSynonymousPosition)))])
+            isSynonymousPosition = [x in aaCodonsSet for x in codonsSeq]
+            synonymousPositions = [x for x in [i if v else -1 for v,i in zip(isSynonymousPosition, list(range(len(isSynonymousPosition))))] if x != -1]
 
             if(sum([int(x) for x in isSynonymousPosition]) < 2): # nothing to permute
                 continue
@@ -70,7 +77,7 @@ class SynonymousCodonPermutingRandomization(object):
             for c in aaCodons:
                 countOfC = sum( [1 if x==c else 0 for x in codonsSeq] )
                 permutationsCountDenom *= factorial(countOfC)
-            permutationsCount *= factorial(len(pool)) / permutationsCountDenom
+            permutationsCount *= factorial(len(pool)) // permutationsCountDenom
 
             # Permute synonymous codons for the current aa
             random.shuffle(pool)
@@ -112,7 +119,7 @@ class SynonymousCodonPermutingRandomization(object):
     """
     def randomizeWithMask(self, nucleotideSeq, codonMask):
         assert( len(nucleotideSeq)%3 == 0 )   # length must be divisible by 3
-        nucleotideMask = list(chain(*zip(codonMask,codonMask,codonMask))) # repeat each element of codonMask 3 times
+        nucleotideMask = list(chain(*list(zip(codonMask,codonMask,codonMask)))) # repeat each element of codonMask 3 times
         assert( len(nucleotideMask) == len(nucleotideSeq) )  
 
         originalMaskedNucleotides   = ''.join(compress( nucleotideSeq,        nucleotideMask  ))
@@ -127,10 +134,10 @@ class SynonymousCodonPermutingRandomization(object):
         
         (permutationsCount, identity, randomizedMaskedNucleotides) = self.randomize( originalMaskedNucleotides )
 
-        idxMasked   = iter(range(len(originalMaskedNucleotides)))
-        idxUnmasked = iter(range(len(unmaskedNucleotides)))
+        idxMasked   = iter(list(range(len(originalMaskedNucleotides))))
+        idxUnmasked = iter(list(range(len(unmaskedNucleotides))))
 
-        resultingSeq = ''.join(imap( lambda isMasked: randomizedMaskedNucleotides[next(idxMasked)] if isMasked else unmaskedNucleotides[next(idxUnmasked)],
+        resultingSeq = ''.join(map( lambda isMasked: randomizedMaskedNucleotides[next(idxMasked)] if isMasked else unmaskedNucleotides[next(idxUnmasked)],
                             nucleotideMask ))
         assert( len(resultingSeq) == len(nucleotideSeq) )
         #for i in range(0, len(nucleotideSeq), 40):
@@ -139,7 +146,7 @@ class SynonymousCodonPermutingRandomization(object):
         #    print( nucleotideSeq[i:i+40] )
         #    print(           ret[i:i+40] )
 
-        assert( all( map( lambda x: True if x[2] else x[0]==x[1],  zip( resultingSeq, nucleotideSeq, nucleotideMask ) ) ) ) # all unmasked nucleotide must remain unchanged
+        assert( all( [True if x[2] else x[0]==x[1] for x in zip( resultingSeq, nucleotideSeq, nucleotideMask )] ) ) # all unmasked nucleotide must remain unchanged
         assert(Seq(resultingSeq).translate(table=self._code) == origSeqTranslation)  # translation was not maintained by randomization!
         identity = identity*maskedFraction + 1.0*(1-maskedFraction)
         
@@ -147,13 +154,13 @@ class SynonymousCodonPermutingRandomization(object):
         
     def verticalPermutation( self, cdss ):
         assert(all([x%3==0 for x in map(len, cdss)]))  # length of all CDSs must be divisible by 3
-        longestLengthNt = max(map(len, cdss)) # find the length of the longest CDS
+        longestLengthNt = max(list(map(len, cdss))) # find the length of the longest CDS
 
-        cdsCodons = map( splitCodons, cdss )
+        cdsCodons = list(map( splitCodons, cdss ))
 
         identities = []
         
-        for codonPos in range(longestLengthNt/3):
+        for codonPos in range(longestLengthNt//3):
             print("--- Doing codon {} ---".format(codonPos))
 
             # Collect all codons in position codonPos
@@ -185,7 +192,7 @@ class SynonymousCodonPermutingRandomization(object):
 
             identities.append( identity )
 
-        ret = list( map( lambda x: ''.join(x), cdsCodons ) )
+        ret = list( [''.join(x) for x in cdsCodons] )
 
         # Check all translations are unaltered
         for (u,v) in zip(cdss, ret):
@@ -217,7 +224,7 @@ class VerticalRandomizationCache(object):
             return
 
         # write all seqs
-        for protId, seq in nativeSeqsMap.items():
+        for protId, seq in list(nativeSeqsMap.items()):
             entry_key = self._make_entry_key( protId, -1 )
             self._cache.insert_value(entry_key, seq)
 
@@ -279,7 +286,7 @@ class VerticalRandomizationCache(object):
         
         shuffledSeqs, _ = self._randomizer( nativeSeqs )
         assert( len(shuffledSeqs) == len(nativeSeqs) )
-        assert( map(len, shuffledSeqs) == map(len, nativeSeqs) )
+        assert( list(map(len, shuffledSeqs)) == list(map(len, nativeSeqs)) )
 
         for protId, shuffledSeq in zip( protIds, shuffledSeqs ):
             entry_key = self._make_entry_key( protId, shuffleId )
@@ -316,7 +323,7 @@ def testCountRandomizations(N=50000):
         s.add( perm )
     print('-----------------')
     print('Iters: %d; Found %d unique randomizations' % (N, len(s)))
-    print('Sequence length: %d codons' % (len(testSeq)/3))
+    print('Sequence length: %d codons' % (len(testSeq)//3, ))
     print('Total randomizations: %g' % float(totalPermutationsCount))
     return 0
 
@@ -342,13 +349,13 @@ def testMaskedRandomization(N=10000):
     #testSeq  = 'atctaataaatcccgcgcccacctaataacacagcgatcagaagaagaagaagaccgctcagaccacatatacgatcggactcgtatacgatcgga'
     #testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
 
-    assert(len(testSeq)/3==len(testMask))
+    assert((len(testSeq)//3)==len(testMask))
     for i in range(N):
         totalPermutationsCount, identity, perm = c.randomizeWithMask(testSeq, testMask)
         s.add( perm )
     print('-----------------')
     print('Iters: %d; Found %d randomizations' % (N, len(s)))
-    print('Sequence length: %d codons' % (len(testSeq)/3))
+    print('Sequence length: %d codons' % (len(testSeq)//3), )
     print('Total randomizations: %g' % float(totalPermutationsCount))
     return 0
 
@@ -361,14 +368,14 @@ def testVerticalShuffling():
     fixedSeqLength = 621
     
     protIds = ["PROT{}.1".format(x) for x in range(numSeqs) ]
-    seqs = list(map( lambda _: randseq(fixedSeqLength), protIds ))
+    seqs = list([randseq(fixedSeqLength) for _ in protIds])
 
 
     scpr = SynonymousCodonPermutingRandomization( geneticCode )
     randomizer = lambda cdss: scpr.verticalPermutation( cdss )
     cache = VerticalRandomizationCache(shuffleType=9999,
                                        taxId=555,
-                                       nativeSeqsMap=dict(zip(protIds, seqs)),
+                                       nativeSeqsMap=dict(list(zip(protIds, seqs))),
                                        geneticCode=geneticCode,
                                        randomizer=randomizer )
 
@@ -389,7 +396,7 @@ def printCounterAsHistogram(counter, stops=(0,1,5,20,50,100,200,300,400,500,600,
     #currLevel = 0
 
     def getCounterElementByRange( s0, s1 ):
-        return sum([x[1] for x in counter.items() if (x[0]>=s0 and x[0]<s1) ] )
+        return sum([x[1] for x in list(counter.items()) if (x[0]>=s0 and x[0]<s1) ] )
 
     if counter:
         levels.append( getCounterElementByRange( min( min(counter.keys()), stops[0]-1), stops[0] ) )

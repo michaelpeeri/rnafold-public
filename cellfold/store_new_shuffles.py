@@ -1,3 +1,5 @@
+from builtins import zip
+from builtins import range
 import mysql_rnafold as db
 from data_helpers import CDSHelper, AddShuffledSequences, SpeciesCDSSource, getSpeciesTranslationTable
 from codon_randomization import SynonymousCodonPermutingRandomization, VerticalRandomizationCache
@@ -73,11 +75,11 @@ def getRandomizedSequenceCacheForVerticalPermutations(taxId):
         randomizer = lambda cdss: scpr.verticalPermutation( cdss )
         cache = VerticalRandomizationCache(shuffleType=db.Sources.ShuffleCDS_vertical_permutation_1nt,
                                            taxId=taxId,
-                                           nativeSeqsMap=dict(zip(protIds, cdss)),
+                                           nativeSeqsMap=dict(list(zip(protIds, cdss))),
                                            geneticCode=geneticCode,
                                            randomizer=randomizer )
         _caches[(taxId, db.Sources.ShuffleCDS_vertical_permutation_1nt)] = cache
-        print(_caches.keys())
+        print(list(_caches.keys()))
 
         
     return cache
@@ -99,7 +101,7 @@ def storeNewShuffles(taxId, protId, newShuffleIds, shuffleType=db.Sources.Shuffl
     elif shuffleType == db.Sources.ShuffleCDS_vertical_permutation_1nt:
         cache = getRandomizedSequenceCacheForVerticalPermutations( taxId )
 
-        seqs = map( lambda shuffleId: cache.getShuffledSeq( protId, shuffleId ), newShuffleIds )
+        seqs = [cache.getShuffledSeq( protId, shuffleId ) for shuffleId in newShuffleIds]
         print(seqs)
 
         if dontStore: return seqs
@@ -117,7 +119,7 @@ def storeNewShuffles(taxId, protId, newShuffleIds, shuffleType=db.Sources.Shuffl
 if __name__=="__main__":
     import sys
     taxId = int(sys.argv[1])
-    storeNewShuffles( taxId, "dummy_protid", range(20), db.Sources.ShuffleCDS_vertical_permutation_1nt, dontStore=True ) # force the creation of 20 sets of randomized sequences for the specified species
+    storeNewShuffles( taxId, "dummy_protid", list(range(20)), db.Sources.ShuffleCDS_vertical_permutation_1nt, dontStore=True ) # force the creation of 20 sets of randomized sequences for the specified species
 
 
 

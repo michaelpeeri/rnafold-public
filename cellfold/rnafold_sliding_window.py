@@ -1,6 +1,11 @@
 # Create mRNA folding energy profiles for sequences, by calculation energy for windows missing from the profile
 # (Read sequences and existing results, do the processing for missing values, and store the result in the sequence's entry)
 # This module can be used as a stand-alone worker process for calculating RNA folding energy profiles, or expose this functionality for use elsewhere
+from builtins import str
+from builtins import map
+from builtins import zip
+from builtins import range
+from builtins import object
 import os
 import subprocess
 import gzip
@@ -68,7 +73,7 @@ test = [-4, None, None, None, None, None, None, None, None, None, -14, None, Non
 def prettyPrintProfile(profile):
     for start in range(0, len(profile), 10):
         elements = profile[start:start+10]
-        print("[{:4}]\t{}\t[{:4}]".format(start, ",\t".join(map(lambda x: "{:5}".format(x), elements)), start+len(elements)-1))
+        print("[{:4}]\t{}\t[{:4}]".format(start, ",\t".join(["{:5}".format(x) for x in elements]), start+len(elements)-1))
         
 
 class RNAFold(object):
@@ -125,7 +130,7 @@ class RNAFold(object):
 
         # Create a list of the windows we need to calculate for this CDS
         if reference == "begin":
-            requestedWindowStarts = frozenset(range(0, min(lastWindowStart+1, cds.length()-self._windowWidth-1), windowStep ))
+            requestedWindowStarts = frozenset(list(range(0, min(lastWindowStart+1, cds.length()-self._windowWidth-1), windowStep)))
             if( len(requestedWindowStarts) == 0):
                 e = "No windows exist for calculation taxid=%d, protId=%s, CDS-length=%d, lastWindowStart=%d, windowStep=%d, windowWidth=%d - Skipping...\n" % (taxId, protId, cds.length(), lastWindowStart, windowStep, self._windowWidth)
                 f.write(e)
@@ -137,7 +142,7 @@ class RNAFold(object):
             #lastWindowCodonStart = (lastPossibleWindowStart-3)-(lastPossibleWindowStart-3)%3
 
             #lastPossibleWindowStart = seqLength - windowWidth # + 1  # disregard lastWindowStart when reference=="end"
-            requestedWindowStarts = frozenset(filter( lambda x: x>=lastWindowStart, range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep)))
+            requestedWindowStarts = frozenset([x for x in range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep) if x>=lastWindowStart])
             
             
             #requestedWindowStarts = frozenset(range(lastWindowCodonStart % windowStep, lastWindowCodonStart, windowStep))
@@ -152,14 +157,14 @@ class RNAFold(object):
         #assert(len(existingResults) >= len(requestedShuffleIds))  # The returned array must be at least as large as the requested ids list
         assert(len(existingResults) == len(requestedShuffleIds))
         logging.info("requestedShuffleIds: %s" % requestedShuffleIds)
-        logging.info("existingResults.keys(): %s" % existingResults.keys())
-        assert(frozenset(requestedShuffleIds)==frozenset(existingResults.keys()))
+        logging.info("existingResults.keys(): %s" % list(existingResults.keys()))
+        assert(frozenset(requestedShuffleIds)==frozenset(list(existingResults.keys())))
         #existingResults = [None] * (max(requestedShuffleIds)+1)
         logging.info("DEBUG: existingResults (%d items): %s\n" % (len(existingResults), existingResults))
 
         # Check for which of the requested shuffle-ids there are values missing
         shuffleIdsToProcess = {}
-        for shuffleId, r in existingResults.items():
+        for shuffleId, r in list(existingResults.items()):
             if r is None:
                 # There are no existing results for shuffled-id n. If it was requested, it should be calculated now (including all windows)
                 if shuffleId in requestedShuffleIds:
@@ -189,7 +194,7 @@ class RNAFold(object):
 
         logging.info("DEBUG: Before (%d items): %s\n" % (len(existingResults), existingResults))
         # Initialize new results records
-        for shuffleId in shuffleIdsToProcess.keys():
+        for shuffleId in list(shuffleIdsToProcess.keys()):
             if existingResults[shuffleId] is None:
                 logging.info(seqIds)
                 logging.info(requestedShuffleIds)
@@ -202,7 +207,7 @@ class RNAFold(object):
 
         # Load the sequences of all shuffle-ids we need to work on
         # TODO - combine loading of multiple sequences into one DB operation
-        for shuffleId, record in existingResults.items():
+        for shuffleId, record in list(existingResults.items()):
             if record is None:
                 logging.info("DEBUG: skipping empty results record for shuffleId={}".format(shuffleId))
                 continue
@@ -374,7 +379,7 @@ def parseTaskDescription(taskDescription):
     # Mandatory fields
     taxId, protId, seqId_, shuffleIds_ = parts[:4]
     taxId = int(taxId)
-    seqIds = map(int, seqId_.split(","))
+    seqIds = list(map(int, seqId_.split(",")))
     requestedShuffleIds = list(map(int, shuffleIds_.split(",")))
     assert(len(requestedShuffleIds) < 50 ) # Maximum number of shuffle-ids allowed to be combined into a single work record
     assert(seqIds)
@@ -454,7 +459,7 @@ def standaloneMainWithRedisQueue():
 
     runUntil = None
     if( args.limit_time ):
-        hours, mins = map(int, args.limit_time.split(':'))
+        hours, mins = list(map(int, args.limit_time.split(':')))
         assert(mins<60)
         runUntil = RunUntil(timedelta(0, 0, 0, 0, mins, hours))
 
@@ -488,7 +493,7 @@ def standaloneMainWithRedisQueue():
             # Mandatory fields
             taxId, protId, seqId_, shuffleIds_ = parts[:4]
             taxId = int(taxId)
-            seqIds = frozenset(map(int, seqId_.split(",")))
+            seqIds = frozenset(list(map(int, seqId_.split(","))))
             requestedShuffleIds = list(map(int, shuffleIds_.split(",")))
             assert(len(requestedShuffleIds) < 50 ) # Maximum number of shuffle-ids allowed to be combined into a single work record
 

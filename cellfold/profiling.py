@@ -1,3 +1,4 @@
+from builtins import object
 from timeit import default_timer # import the best platform- and version-specific timer
 
 """
