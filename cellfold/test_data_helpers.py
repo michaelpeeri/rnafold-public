@@ -1,11 +1,12 @@
 from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
-from data_helpers import SpeciesCDSSource, CDSHelper, countSpeciesCDS, calcCrc
+from data_helpers import SpeciesCDSSource, CDSHelper, countSpeciesCDS, getCrc
+import mysql_rnafold as db
 from runningstats import RunningStats
 from rate_limit import RateLimit
 
 # Configuration
-taxId = 9066
+taxId = 9606
 
 statsLength = RunningStats()
 statsShuffles = RunningStats()
@@ -28,16 +29,16 @@ for protId in SpeciesCDSSource(taxId):
         print("WARNING: incorrect sequence length detected for record (taxid=%d, protId=%s); real-length=%d, recorded-length=%d." % (taxId, protId, len(cds.sequence()), cds.length()))
         warningsCount += 1
 
-    recomputedCrc = calcCrc( cds.sequence() )
+    recomputedCrc = getCrc( cds.sequence() )
     annotatedCrc = cds.crc()
     assert( recomputedCrc == annotatedCrc )
     print(cds.sequence()[:15])
 
     seq1trans = Seq(cds.sequence(), generic_dna).translate()
-    crc1 = calcCrc(seq1trans)
+    crc1 = getCrc(seq1trans)
 
 
-    shuffles = cds.shuffledSeqIds()
+    shuffles = cds.shuffledSeqIds( shuffleType = db.Sources.ShuffleCDSv2_python )
     unique = len(frozenset(shuffles))
 
     if( unique != len(shuffles)):
