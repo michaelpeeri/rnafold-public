@@ -8,6 +8,10 @@
 # 
 # TODO: This script will requeue sequences that have already in the queue but haven't been completed yet.
 # TODO: Add support for step-size >1
+from builtins import str
+from builtins import map
+from builtins import zip
+from builtins import range
 import sys
 import codecs
 import argparse
@@ -30,7 +34,7 @@ config.initLogging()
 
 def parseList(conversion=str):
     def convert(values):
-        return map(conversion, values.split(","))
+        return list(map(conversion, values.split(",")))
     return convert
 
 
@@ -202,7 +206,7 @@ for taxIdForProcessing in species:
         assert(len(requiredWindows) <= maxNumWindows)
             
         requiredShuffles = [-1] # Check that the native profile exists, regardless of the requested range
-        requiredShuffles.extend(range(fromShuffle, toShuffle+1))
+        requiredShuffles.extend(list(range(fromShuffle, toShuffle+1)))
 
         existingResults = None
         try:
@@ -249,7 +253,7 @@ for taxIdForProcessing in species:
                 #ret = scheduler.submit(storeNewShuffles, cds.getTaxId(), cds.getProtId(), completelyMissingShuffles, shuffleType)
                 #newIds = ret.result()
                 print("Created new seqs:")
-                print(zip(completelyMissingShuffles, newIds))
+                print(list(zip(completelyMissingShuffles, newIds)))
 
                 # reload cds helper data
                 del cds
