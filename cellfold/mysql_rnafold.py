@@ -10,7 +10,7 @@ import config
 if config.run_without_mysql_server:
     db = None
 else:
-    db = create_engine(config.mysql_host_connection, encoding='ascii', echo=False, echo_pool=True, pool_recycle=120)
+    db = create_engine( config.mysql_host_connection, encoding='latin1', echo=False, echo_pool=True, pool_recycle=120 )
 connection = None
 
 
