@@ -16,7 +16,7 @@ import argparse
 import numpy as np
 import config
 import mysql_rnafold as db
-from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqsForSpecies, splitLongSequenceIdentifier, decompressSeriesRecord, decodeJsonSeriesRecord, getAllNativeCDSsForSpecies, decompressNucleicSequence, calcCrc
+from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, getSpeciesFileName, SpeciesCDSSource, numItemsInQueue, getAllComputedSeqsForSpecies, splitLongSequenceIdentifier, decompressSeriesRecord, decodeJsonSeriesRecord, getAllNativeCDSsForSpecies, decompressNucleicSequence, getCrc
 from rate_limit import RateLimit
 
 
@@ -128,7 +128,7 @@ def convertResultsToMFEProfiles( results, maxShuffledGroups=20 ):
         # Note: This check is performed here to make sure the shuffles arrive in the expected order
         if "cds-seq" in result:
             recordedCRC = content[0]["seq-crc"]
-            computedCRC = calcCrc(result["cds-seq"])
+            computedCRC = getCrc(result["cds-seq"])
             if (recordedCRC!=computedCRC):
                 raise Exception("CRC mismatch detected in sequence %s" % result)
 
@@ -297,7 +297,7 @@ def calcSampledGCcontent(seq, stepSize=10):
     gc = downsampleVector(GCcounts, stepSize)
     total = downsampleVector(Totalcounts, stepSize)
 
-    return old_div(gc,total)
+    return gc/total
 
 
 
