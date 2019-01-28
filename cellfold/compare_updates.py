@@ -223,7 +223,7 @@ if( args.find_duplicates ):
     duplicates = findDuplicateUpdates()
     print(len(duplicates))
     duplicatesList = sorted(list(duplicates))
-    print(md5(str(duplicatesList)).hexdigest())
+    print(md5(bytes( str(duplicatesList), encoding="ascii" )).hexdigest())
     badUpdateRecords.update(duplicates)
     if len(duplicates) > 0:
         err[ErrorTypes.ConflictingOrDuplicateUpdateRecords] += len(duplicates)
