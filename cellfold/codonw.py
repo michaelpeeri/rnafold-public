@@ -2,7 +2,6 @@ from __future__ import print_function
 from builtins import str
 from builtins import range
 import sys
-from string import maketrans
 import subprocess
 from tempfile import NamedTemporaryFile
 import pandas as pd
@@ -34,7 +33,7 @@ def translateFastaAlphabet(source, mapping):
     s_from = ''.join(list(mapping.keys()))
     s_to = ''.join(list(mapping.values()))
     assert(len(s_from)==len(s_to))
-    trans = maketrans(s_from, s_to)
+    trans = str.maketrans(s_from, s_to)
     
     for orig in source:
         translatedSeq = str(orig.seq).translate(trans)
