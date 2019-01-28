@@ -116,7 +116,7 @@ def getSpeciesName(taxId):
 Get shortened name for species (e.g., Ecoli or Scerevisiae) -- note that this is used for much more than file names...
 """
 def getSpeciesFileName(taxId):
-    p = r.get("species:taxid:%d:name" % taxId).split(" ")
+    p = str( r.get("species:taxid:%d:name" % taxId), encoding="utf-8" ).split(" ")
     return p[0][0] + p[1]
 
 skipWords = frozenset(("group", "candidatus", "candidate", "phyla", "bacterium", "sp.", "marine", "i", "subsp.", "strain", "str.", "serovar"))
