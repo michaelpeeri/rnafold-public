@@ -2,12 +2,18 @@
 # Try to identify errors, inconsistencies and duplications
 # Print stastics on the contents of the updates table
 # 
+from builtins import input
+from builtins import map
+from builtins import str
+from builtins import zip
+from builtins import range
+from builtins import object
 from collections import Counter
 from distutils.util import strtobool 
 import argparse
 from hashlib import md5
 import textwrap
-from itertools import izip_longest
+from itertools import zip_longest
 from data_helpers import seriesUpdatesSource, splitLongSequenceIdentifier, CDSHelper
 from rate_limit import RateLimit
 import mysql_rnafold as db
@@ -32,7 +38,7 @@ rl = RateLimit(30)
 
 
 total = 0
-class ErrorTypes:
+class ErrorTypes(object):
     MergeIdentityErrorCount = 1
     UpdateRecordIdentityMismatch = 2
     OriginalRecordIdentityMismatch = 3
@@ -232,7 +238,7 @@ allWindows_FrameRelativeToEnd = Counter()
 
 def printRecordsSideBySide(record1, record2, columnWidth=40):
     allKeys = set(record1.keys())
-    allKeys.update(record2.keys())
+    allKeys.update(list(record2.keys()))
     
     for key in sorted(allKeys):
         val1 = record1.get(key, None)
@@ -243,7 +249,7 @@ def printRecordsSideBySide(record1, record2, columnWidth=40):
 
         print("[{}]".format(key))
         formatSpec = "{{:{}}}\t{{:{}}}".format(columnWidth, columnWidth)
-        for i1, i2 in izip_longest( l1, l2, fillvalue='' ):
+        for i1, i2 in zip_longest( l1, l2, fillvalue='' ):
             print(formatSpec.format(i1,i2))
 
         
@@ -494,7 +500,7 @@ if( badUpdateRecords and args.perform_delete ):
     if args.auto_confirm:
         response="yes"
     else:
-        response = raw_input("Enter 'yes' to perform deletion of %d updates (or anything else to skip): " % len(badUpdateRecords))
+        response = input("Enter 'yes' to perform deletion of %d updates (or anything else to skip): " % len(badUpdateRecords))
         
     if( response=="yes" ):
         todelete = list(badUpdateRecords)
