@@ -258,6 +258,12 @@ for area in allAreas:
 
         elif(args.variant=="Ensembl"):
             #print("-")
+            biotype = None
+
+            if mRNA is None:
+                skippedGenes += 1
+                continue
+            
             biotype = mRNA.attributes['biotype'][0]
             if( biotype != 'protein_coding' ):
                 skippedGenes += 1
@@ -267,11 +273,6 @@ for area in allAreas:
             if( not geneId ):
                 print("Missing gene-id!")
                 assert(False)
-                
-            
-            print(cds.attributes)
-            #print(mRNA.attributes)
-            #print(gene.attributes)
 
             processCodingGene(geneId, cds, mRNA)
             if( mRNA.id in codingGenes ):
