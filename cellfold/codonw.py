@@ -1,4 +1,6 @@
 from __future__ import print_function
+from builtins import str
+from builtins import range
 import sys
 from string import maketrans
 import subprocess
@@ -29,8 +31,8 @@ def translateFastaAlphabet(source, mapping):
     out = []
 
     # create translation table to be used by str.translate()
-    s_from = ''.join(mapping.keys())
-    s_to = ''.join(mapping.values())
+    s_from = ''.join(list(mapping.keys()))
+    s_to = ''.join(list(mapping.values()))
     assert(len(s_from)==len(s_to))
     trans = maketrans(s_from, s_to)
     

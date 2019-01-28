@@ -1,3 +1,8 @@
+from __future__ import division
+from builtins import zip
+from builtins import str
+from builtins import range
+from builtins import object
 import sys
 import numpy as np
 import numpy.linalg
@@ -126,12 +131,12 @@ randomizationTypesLabels = {11:"Codon shuffle", 12:"Vertical shuffle"}  # TODO -
 def plotMFEProfileForMultipleRandomizations(taxId, profileId, data):
     fig, ax1 = plt.subplots()
 
-    arbitraryKey = data.keys()[0]
+    arbitraryKey = list(data.keys())[0]
     data[arbitraryKey][['native']].plot(ax=ax1)
     labels = []
     labels.append("Native")
     
-    for shuffleType in data.keys():
+    for shuffleType in list(data.keys()):
         data[shuffleType][['shuffled']].plot(ax=ax1)
         labels.append(randomizationTypesLabels[shuffleType])
 
@@ -277,7 +282,7 @@ def scatterPlot(taxId, profileId, data, xvar, yvar, title):
 
     topr = max(yvals)*1.05
     left = min(xvals)
-    scaler = topr/20
+    scaler = topr / 20
     # plot the linear approximation
     plt.annotate(s="Pearson $\\rho$: %1.3f (p<%g)"  % (pearson[0], pearson[1]),                 xy=(left, topr-scaler*1),  fontsize=6 )
     plt.annotate(s="Pearson $r^2$: %1.3f"  % (pearson[0]**2,),                              xy=(left, topr-scaler*2),  fontsize=6 )
@@ -328,10 +333,10 @@ class CenterPreservingNormlizer(matplotlib.colors.Normalize):
         out = values.copy()
 
         
-        factor = self._positiveRange/outHalfScale
+        factor = self._positiveRange / outHalfScale
         #print("+factor: %g" % (factor))
         values[values > 0.0] /= factor
-        factor = self._negativeRange/outHalfScale*-1
+        factor = self._negativeRange / outHalfScale*-1
         #print("-factor: %g" % (factor))
         values[values <= 0.0] /= factor
 
@@ -347,7 +352,7 @@ class CenterPreservingNormlizer(matplotlib.colors.Normalize):
         # plot [0:1] 1/(1+exp(-15*(x-0.5)))
         #
         steepness = 15.0
-        return 1/(1+np.exp(-steepness*(values-0.5)))
+        return 1 / (1+np.exp(-steepness*(values-0.5)))
 
 
 """
@@ -419,7 +424,7 @@ def getProfileHeatmapTile(taxId, data, yrange, ticks=False, profileStep=10, phyl
         ax2.set_yticks(())
         
     if ticks:
-        tickValues = range(10, len(series)-10, 10)
+        tickValues = list(range(10, len(series)-10, 10))
         ax1.set_xticks(tickValues)
         ax1.set_xticklabels(["" for x in tickValues])
     else:
@@ -452,7 +457,7 @@ def getLegendHeatmapTile(yrange):
     series = np.linspace( 10**yrange[0], 1 - 10**(-yrange[1]), 100)  # Create a range whose logit image will cover the range yrange...
     print(series)
     #series = np.linspace( yrange[0], yrange[1], 100)   # linear scale
-    series = np.log10(series/(1-series))  # Logit function (inverse if logistic function)
+    series = np.log10( series / (1-series))  # Logit function (inverse if logistic function)
     #print(series)
     cmapNormalizer = CenterPreservingNormlizer(yrange[0], yrange[1])
 
@@ -515,7 +520,7 @@ def getHeatmaplotProfilesValuesRange(data, dummy1=None, dummy2=None):
     #keysInOrder = data.keys()[:]
     #if not order is None:
     #    keysInOrder.sort( key=lambda x:order(x) )
-    keysInOrder = data.keys()
+    keysInOrder = list(data.keys())
     
 
     # Find the overall range that will be used to normalize all values
@@ -594,7 +599,7 @@ def getHeatmaplotProfilesValuesRange(data, dummy1=None, dummy2=None):
 def plotCorrelations(data, _labels, group_func=None, order=None):
     #fig, axes = plt.subplots(nrows=len(data), ncols=2, sharex='col') #, gridspec_kw={'width_ratios': [4,1]})
 
-    keysInOrder = data.keys()[:]
+    keysInOrder = list(data.keys())[:]
     keysInOrder.sort( key=lambda x:order(x) )
 
     #map  = sns.heatmap()
@@ -705,7 +710,7 @@ def scatterPlotWithKernel2(taxId, profileId, data, xvar, yvar, title):
     topr = 100
     #left = min(xvals)
     left = min_xvals
-    scaler = topr/20
+    scaler = topr / 20
     # plot the linear approximation
     plt.annotate(s="Pearson r: %1.3f (p<%g)"  % (pearson[0], pearson[1]),                 xy=(left, topr-scaler*1),  fontsize=6 )
     plt.annotate(s="Pearson $r^2$: %1.3f"  % (pearson[0]**2,),                              xy=(left, topr-scaler*2),  fontsize=6 )
@@ -832,7 +837,7 @@ def loadProfileData(files):
 
     for h5 in files:
         with pd.io.pytables.HDFStore(h5) as store:
-            for key in store.keys():
+            for key in list(store.keys()):
                 if key[:4] != "/df_":
                     continue
 
@@ -1093,7 +1098,7 @@ class LayerConfig(object):
 
 # Source: https://stackoverflow.com/a/13849249
 def unitVector(v):
-    return v/np.linalg.norm(v)
+    return v / np.linalg.norm(v)
 
 # Source: https://stackoverflow.com/a/13849249
 def angleBetween(v1,v2):
@@ -1180,12 +1185,12 @@ def saveHistogram(data, filename):
     
 def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0):
     filteredProfiles = {}
-    for key, profile in biasProfiles.items():
+    for key, profile in list(biasProfiles.items()):
         if (not np.any(np.isnan(profile))) and (key in traitValues):
             filteredProfiles[key] = profile
     biasProfiles = filteredProfiles
     
-    X = np.vstack(biasProfiles.values()) # convert dict of vectors to matrix
+    X = np.vstack(list(biasProfiles.values())) # convert dict of vectors to matrix
     #X = X[~np.any(np.isnan(X), axis=1)]  # remove points containig NaN
 
 
@@ -1463,7 +1468,7 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     print("            (Total: {})".format(sum(pca.explained_variance_ratio_)))
     print("Components: {}".format(pca.components_[:2,:]))
     
-    a = list(zip(biasProfiles.keys(), X_reduced[:,D0]))
+    a = list(zip(list(biasProfiles.keys()), X_reduced[:,D0]))
     a.sort(key=lambda x:x[1])
     print("top:")
     print(a[:3])

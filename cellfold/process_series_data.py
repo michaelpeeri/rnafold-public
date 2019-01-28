@@ -1,6 +1,10 @@
+from __future__ import division
 #
 #
 #
+from builtins import range
+from past.builtins import basestring
+from builtins import object
 import sys
 import codecs
 import json
@@ -37,7 +41,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
                  getSpeciesName(taxIdForProcessing)))
 
         computed = getAllComputedSeqsForSpecies(seriesSourceNumber, taxIdForProcessing, maxShuffledGroups, shuffleType=shuffleType )
-        computedIds = frozenset(computed.keys())
+        computedIds = frozenset(list(computed.keys()))
         print("Collecting data from %d computation results..." % len(computed))
 
 
@@ -78,7 +82,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
                 continue
 
             # Decode the results
-            results = list(map(lambda x: decodeJsonSeriesRecord(decompressSeriesRecord(x)) if not x is None else None, results))
+            results = list([decodeJsonSeriesRecord(decompressSeriesRecord(x)) if not x is None else None for x in results])
             if( returnCDS ):
                 yield {"taxid":taxIdForProcessing, "content":results, "cds":cds}
             else:
@@ -170,15 +174,15 @@ def profileLength(profileSpec):
     if profileSpec[2] == "begin":
         return int(ceil(float(profileSpec[0]-profileSpec[3]) / profileSpec[1]))  # should be equal to len(range(0, spec[0], spec[1]))
     elif profileSpec[2] == "end":
-        return (profileSpec[0]/profileSpec[1])+1
+        return (profileSpec[0] // profileSpec[1])+1
     else:
         assert(False)
 
 def profileElements(profileSpec):
     if profileSpec[2] == "begin":
-        return range(profileSpec[3], profileSpec[0], profileSpec[1])
+        return list(range(profileSpec[3], profileSpec[0], profileSpec[1]))
     elif profileSpec[2] == "end":
-        return range(-profileSpec[0], 1, profileSpec[1])
+        return list(range(-profileSpec[0], 1, profileSpec[1]))
     else:
         assert(False)
 
@@ -293,7 +297,7 @@ def calcSampledGCcontent(seq, stepSize=10):
     gc = downsampleVector(GCcounts, stepSize)
     total = downsampleVector(Totalcounts, stepSize)
 
-    return gc/total
+    return old_div(gc,total)
 
 
 

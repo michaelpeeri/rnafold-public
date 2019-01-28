@@ -1,6 +1,10 @@
 # Read all computed series data from DB; write summary to hdf5 
 # Replaces convert_data_for_plotting.py
 #
+from builtins import map
+from builtins import zip
+from builtins import range
+from builtins import object
 from collections import Counter  # Testing only
 import argparse
 import csv
@@ -32,7 +36,7 @@ confWindowWidth = 40
 
 def parseList(conversion=str):
     def convert(values):
-        return map(conversion, values.split(","))
+        return list(map(conversion, values.split(",")))
     return convert
     
 def parseProfileSpec():
@@ -173,7 +177,7 @@ class ProfilePlot(object):
                 newDeltas = profileData[0,0::1] - np.mean(profileData[1:,0::1], axis=0)
                 #print("newDeltas: {}".format(newDeltas.shape))
                 #newPositions = range(args.profile[3], profileLength(args.profile), 40)
-                newPositions = range(args.profile[3], args.profile[0], args.profile[1])
+                newPositions = list(range(args.profile[3], args.profile[0], args.profile[1]))
                 deltaspd = pd.DataFrame({'pos':pd.Series(newPositions, dtype='int'), 'delta':pd.Series(newDeltas, dtype='float')})
                 #print("deltaspd: {}".format(deltaspd.shape))
                 deltasForWilcoxon = deltasForWilcoxon.append(deltaspd)
@@ -639,7 +643,7 @@ class ProfilePlot(object):
             print(x3)
 
         print("//"*20)
-        print(combinedData.keys())
+        print(list(combinedData.keys()))
 
         if len(combinedData)>1:
             profileId = "%d_%d_%s" % (args.profile[0], args.profile[1], args.profile[2])
@@ -743,8 +747,8 @@ if __name__=="__main__":
 
     print(results)
     print("Total results: %d" % len(results))
-    print("Succeeded: %d" % len([1 for x in results.values() if not x is None]))
-    failed = [k for k,v in results.items() if v is None]
+    print("Succeeded: %d" % len([1 for x in list(results.values()) if not x is None]))
+    failed = [k for k,v in list(results.items()) if v is None]
     print("Failed: %d (%s)" % (len(failed), failed))
     
 

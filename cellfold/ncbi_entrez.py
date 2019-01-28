@@ -1,5 +1,7 @@
+from __future__ import division
 # Get stuff from NCBI Entrez
 # Try to use biopython libs whenever possible...
+from builtins import map
 from string import replace
 import codecs
 import xml.etree.ElementTree as ET
@@ -130,7 +132,7 @@ def parseCompoundVal(val):
 
     if type(val)==type({}):
         converted = {}
-        for k, v in val.items():
+        for k, v in list(val.items()):
             v = v.strip()
             if reInteger.match(v):
                 v = int(v)
@@ -263,7 +265,7 @@ def taxIdToGenomeId(taxId):
     record = Entrez.read(handle)
     handle.close()
 
-    return map(int, record['IdList'])
+    return list(map(int, record['IdList']))
 
 
 # """
@@ -557,7 +559,7 @@ def testAll():
     print("Total: %d\tEnv found: %d\tTemp found: %d\tStats found: %d" % (totalCount, envFoundCount, tempFoundCount, statsFoundCount))
 
     x = {}
-    for k,v in temps2.items():
+    for k,v in list(temps2.items()):
         if type(v)==type(''):
             if v=='C':
                 v = None
@@ -568,7 +570,7 @@ def testAll():
                 print("Unknown val %s" % v)
         elif type(v)==type(()):
             if len(v)==2:
-                v = (float(v[0])+float(v[1]))/2
+                v = (float(v[0])+float(v[1])) / 2
             else:
                 v = None
                 print("Uknown val %s" % v)
@@ -577,38 +579,38 @@ def testAll():
             x[k] = v
     print(x)
 
-    for taxId, temperature in x.items():
+    for taxId, temperature in list(x.items()):
         setSpeciesProperty( taxId, 'optimum-temperature', '%g'%temperature, "entrez", overwrite=False )
                 
-    for taxId, tempRange in temps1.items():
+    for taxId, tempRange in list(temps1.items()):
         setSpeciesProperty( taxId, 'temperature-range',    tempRange,       "entrez", overwrite=False )
 
-    for taxId, val in salinity.items():
+    for taxId, val in list(salinity.items()):
         if val=='Unknown':
             continue
         setSpeciesProperty( taxId, 'salinity',    val,       "entrez", overwrite=False )
 
-    for taxId, val in habitat.items():
+    for taxId, val in list(habitat.items()):
         if val=='Unknown':
             continue
         setSpeciesProperty( taxId, 'habitat',    val,       "entrez", overwrite=False )
 
-    for taxId, val in oxygenReq.items():
+    for taxId, val in list(oxygenReq.items()):
         if val=='Unknown':
             continue
         setSpeciesProperty( taxId, 'oxygen-req',    val,       "entrez", overwrite=False )
         
-    for taxId, val in proteinCount.items():
+    for taxId, val in list(proteinCount.items()):
         setSpeciesProperty( taxId, 'protein-count',    val,       "entrez", overwrite=False )
 
-    for taxId, val in gcContent.items():
+    for taxId, val in list(gcContent.items()):
         if( val > 90 or val < 10 ):
             continue
         
         if( setSpeciesProperty( taxId, 'gc-content',    "%g"%val,       "entrez", overwrite=False ) ):
             print("[gc-content (taxid=%d) -> %g]" % (taxId, val))
 
-    for taxId, val in genomeSize.items():
+    for taxId, val in list(genomeSize.items()):
         setSpeciesProperty( taxId, 'genome-size-mb',    "%g"%val,       "entrez", overwrite=False )
         
     return 0
