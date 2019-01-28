@@ -53,9 +53,9 @@ for protId in SpeciesCDSSource(taxId):
     for shuffledSeqId in shuffles:
         shufSeq = cds.getShuffledSeq2(shuffledSeqId)
         
-        shuffledCrcs.add( calcCrc(shufSeq) )
+        shuffledCrcs.add( getCrc(shufSeq) )
         seq1shufftrans = Seq(shufSeq, generic_dna).translate()
-        shuffledTransCrcs.add( calcCrc( seq1shufftrans ) )
+        shuffledTransCrcs.add( getCrc( seq1shufftrans ) )
 
     print("Shuffled distinct: %d" % (len(shuffledCrcs)))
     print("Shuffled trans distinct: %d" % len(shuffledTransCrcs))
