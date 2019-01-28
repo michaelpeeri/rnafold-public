@@ -25,7 +25,7 @@ def RNAfold_direct(seq, explicitCalculationTemperature=None):
     else:
         cmdline = "echo %s | %s --temp=%g --noPS" % (seq, vienna_rnafold_path, explicitCalculationTemperature)
         
-    out = subprocess.check_output(cmdline, shell=True)
+    out = str( subprocess.check_output(cmdline, shell=True), encoding="ascii" )
     score = float(reMFEScore.match(out).group(1))
     assert(score<=0.0)
     return score
