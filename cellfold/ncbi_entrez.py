@@ -2,7 +2,6 @@ from __future__ import division
 # Get stuff from NCBI Entrez
 # Try to use biopython libs whenever possible...
 from builtins import map
-from string import replace
 import codecs
 import xml.etree.ElementTree as ET
 #import subprocess
@@ -12,7 +11,7 @@ from pyparsing import Word, Literal, delimitedList, printables, ParseException, 
 from Bio import Entrez
 import requests
 from time import sleep
-from ete3 import NCBITaxa
+#from ete3 import NCBITaxa
 from data_helpers import getSpeciesName, getSpeciesTaxonomicGroup, allSpeciesSource, setSpeciesProperty
 
 
@@ -92,7 +91,7 @@ As a work-around, we strip some formatting (working on the flat string, i.e., be
 """
 def stripHTMLformatting(html):
     for f in elementsToRemove:
-        html = replace(html, f, ' ')
+        html = html.replace( f, ' ' )
     return html
 
 
@@ -100,7 +99,7 @@ missingImgCloseTag = (('<img alt="ftp-genbank" src="/sutils/static/ProtMap/mark5
                       ('<img alt="ftp-refseq" src="/sutils/static/ProtMap/mark4.gif" title="RefSeq FTP">', '<img alt="ftp-refseq" src="/sutils/static/ProtMap/mark4.gif" title="RefSeq FTP"/>'))
 def fixMissingImgCloseTags(html):
     for _from, _to in missingImgCloseTag:
-        html = replace(html, _from, _to)
+        html = html.replace( _from, _to )
     return html
 
 def collectInnerText(elem):
@@ -370,43 +369,45 @@ ncbiTaxa = None
 Get kingdom to which a species belongs, in the format recognized by Entrez (see fetchEntrezAssembliesTableForSpecies())
 """
 def getKingdomForSpecies(taxId):
-    global ncbiTaxa
+    # global ncbiTaxa
     
-    if ncbiTaxa is None: # lazy initialization (not very pythony?)
-        ncbiTaxa = NCBITaxa()
+    # if ncbiTaxa is None: # lazy initialization (not very pythony?)
+    #     ncbiTaxa = NCBITaxa()
 
-    lineage = ncbiTaxa.get_lineage(taxId)
-    assert(lineage[0]==1) # root
+    # lineage = ncbiTaxa.get_lineage(taxId)
+    # assert(lineage[0]==1) # root
 
-    if lineage[1] == 131567: # cellular organisms
-        if lineage[2]==2: # Bacteria
-            return "Bacteria"
-        elif lineage[2] == 2759: # Eukaryota
-            return "Eukaryota"
-        elif lineage[2] == 2157: # Archaea
-            return "Archaea"
+    # if lineage[1] == 131567: # cellular organisms
+    #     if lineage[2]==2: # Bacteria
+    #         return "Bacteria"
+    #     elif lineage[2] == 2759: # Eukaryota
+    #         return "Eukaryota"
+    #     elif lineage[2] == 2157: # Archaea
+    #         return "Archaea"
 
-    raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
+    # raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
+    raise Exception("NotImpl")
     
 
 def getTaxonomicGroupForSpecies(taxId):
-    global ncbiTaxa
+    # global ncbiTaxa
 
-    if ncbiTaxa is None: # lazy initialization (not very pythony?)
-        ncbiTaxa = NCBITaxa()
+    # if ncbiTaxa is None: # lazy initialization (not very pythony?)
+    #     ncbiTaxa = NCBITaxa()
 
-    lineage = ncbiTaxa.get_lineage(taxId)
-    assert(lineage[0]==1) # root
+    # lineage = ncbiTaxa.get_lineage(taxId)
+    # assert(lineage[0]==1) # root
 
-    if lineage[1] == 131567: # cellular organisms
-        if lineage[2]==2: # Bacteria
-            return "Bacteria"
-        elif lineage[2] == 2759: # Eukaryota
-            return "Eukaryota"
-        elif lineage[2] == 2157: # Archaea
-            return "Archaea"
+    # if lineage[1] == 131567: # cellular organisms
+    #     if lineage[2]==2: # Bacteria
+    #         return "Bacteria"
+    #     elif lineage[2] == 2759: # Eukaryota
+    #         return "Eukaryota"
+    #     elif lineage[2] == 2157: # Archaea
+    #         return "Archaea"
         
-    raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
+    # raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
+    raise Exception("NotImpl")
 
 
 
