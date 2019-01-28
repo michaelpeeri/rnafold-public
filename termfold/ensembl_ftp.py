@@ -115,9 +115,6 @@ class EnsemblFTP(object):
     def listSpeciesItems(self, category="fasta", subdir=None):
         names = LinesBuffer()
         dirName = self.getDirName(category, subdir)
-        print("names: {}".format(names))
-        print("category: {}".format(category))
-        print("dirName: {}".format( dirName ))
         
         self._ftp.dir(dirName, names)
 
@@ -134,7 +131,6 @@ class EnsemblFTP(object):
 
     def determineGenomePath(self):
         items = self.listSpeciesItems("fasta")
-        print("determineGenomePath: items={}".format(items))
 
         try:
             if( items.index((True, "dna")) >= 0 ):
