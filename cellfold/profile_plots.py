@@ -123,7 +123,7 @@ class ProfilePlot(object):
 
             fullDeltas = []
 
-            geneLevelScatter = pd.DataFrame({'gc':pd.Series(dtype='float'), 'logpval':pd.Series(dtype='float'), 'abslogpval':pd.Series(dtype='float'), 'protid':pd.Series(dtype='string')})
+            geneLevelScatter = pd.DataFrame({'gc':pd.Series(dtype='float'), 'logpval':pd.Series(dtype='float'), 'abslogpval':pd.Series(dtype='float'), 'protid':pd.Series(dtype='str')})
 
             cdsLengths = []
 
@@ -715,7 +715,7 @@ if __name__=="__main__":
     argsParser.add_argument("--shuffle-types", type=parseList(int) )
     argsParser.add_argument("--num-shuffles", type=int, default=20)
     argsParser.add_argument("--pax-db", type=str, required=False)
-    argsParser.add_argument("--codonw", type=bool, default=False)
+    argsParser.add_argument("--codonw", action="store_true", default=False)
     argsParser.add_argument("--distributed", action="store_true", default=False)
     args = argsParser.parse_args()
 
