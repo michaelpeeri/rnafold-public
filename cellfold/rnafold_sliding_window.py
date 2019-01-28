@@ -16,7 +16,7 @@ from time import sleep
 from datetime import datetime, timedelta
 import argparse
 import mysql_rnafold as db
-from data_helpers import CDSHelper, countSpeciesCDS, calcCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted, getSpeciesTemperatureInfo
+from data_helpers import CDSHelper, countSpeciesCDS, getCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted, getSpeciesTemperatureInfo
 from runningstats import RunningStats
 from rate_limit import RateLimit
 from rnafold_vienna import RNAfold_direct
@@ -73,7 +73,7 @@ test = [-4, None, None, None, None, None, None, None, None, None, -14, None, Non
 def prettyPrintProfile(profile):
     for start in range(0, len(profile), 10):
         elements = profile[start:start+10]
-        print("[{:4}]\t{}\t[{:4}]".format(start, ",\t".join(["{:5}".format(x) for x in elements]), start+len(elements)-1))
+        print("[{}]\t{}\t[{}]".format(start, ",\t".join(["{}".format(x) for x in elements]), start+len(elements)-1))
         
 
 class RNAFold(object):
@@ -91,7 +91,7 @@ class RNAFold(object):
 
 
             
-    def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin", shuffleType=db.Sources.ShuffleCDSv2_python):
+    def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin", shuffleType=db.Sources.ShuffleCDSv2_python, debug=False):
 
         timerForPreFolding.start()
         logging.warning("Parameters: %d %s %s %s %d %d %s %d" % (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, reference, shuffleType))
@@ -339,13 +339,14 @@ class RNAFold(object):
                 MFEprofile[start] = energy
 
             print("///////////////////  shuffleId={} (len={}) //////////////////////////".format(shuffleId, expectedSeqLength))
-            prettyPrintProfile(MFEprofile)
+            if debug:
+                prettyPrintProfile(MFEprofile)
 
             timerForFolding.stop()
             timerForPostFolding.start()
 
             # Format
-            crc = calcCrc(seq)
+            crc = getCrc(seq)
             #result = """{"id":"%s","seq-crc":%d,"MFE-profile":[%s],"MeanMFE":%.6g,v:2}""" % (itemToProcess, crc, ",".join(map(lambda x: "%.3g" % x, MFEprofile)), stats.mean())
             record["seq-crc"] = crc
             record["MFE-profile"] = [round4(x) for x in MFEprofile] # Round items down to save space (these are not exact numbers anyway)
@@ -408,7 +409,7 @@ def parseTaskDescription(taskDescription):
 
 rl = RateLimit(60)
 
-def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription):
+def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription, debug=False):
     config.initLogging()
     logging.warning("Processing task %s" % taskDescription)
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
@@ -425,7 +426,7 @@ def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription):
     
     try:
         #def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
-        ret = f.calculateMissingWindowsForSequence(taxId, protId, seqIds, requestedShuffleIds, firstWindowStart, lastWindowStart, windowStep, windowRef, shuffleType)
+        ret = f.calculateMissingWindowsForSequence(taxId, protId, seqIds, requestedShuffleIds, firstWindowStart, lastWindowStart, windowStep, windowRef, shuffleType, debug=debug)
     except Exception as e:
         logging.error("calculateMissingWindowsForSequence() caught exception")
         logging.error(e)
@@ -551,10 +552,11 @@ if __name__=="__main__":
     #testTask = "553190/ADB14646/47038172,62848063,62848064,62848065,62848066,62848067,62848068,62848069,62848070,62848071,62848072,62848073,62848074,62848075,62848076,62848077,62848078,62848079,62848080,62848081,62848082/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/950/10/begin/11"
     #testTask = "553190/ADB14057/47037869,62848083,62848084,62848085,62848086,62848087,62848088,62848089,62848090,62848091,62848092,62848093,62848094,62848095,62848096,62848097,62848098,62848099,62848100,62848101,62848102/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/890/10/begin/11"
     #testTask = "553190/ADB13694/47037560,62848103,62848104,62848105,62848106,62848107,62848108,62848109,62848110,62848111,62848112,62848113,62848114,62848115,62848116,62848117,62848118,62848119,62848120,62848121,62848122/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/360/10/begin/11"
-    
+    testTask = "9606/ENST00000374610/7890,41638,41639,41640,41641,41642,41643,41644,41645,41646,41647,41648,41649,41650,41651,41652,41653,41654,41655,41656,41657/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/310/10/begin/11"
     
 
-    calculateMissingWindowsForSequence(801, testTask)
+    #calculateMissingWindowsForSequence(801, testTask)
+    calculateMissingWindowsForSequence(102, testTask, debug=True)
     sys.exit(0)
 else:
     # TODO - define args when used as a module
