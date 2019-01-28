@@ -13,14 +13,13 @@ from scipy.stats import pearsonr, spearmanr, kendalltau, linregress, wilcoxon
 import matplotlib
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
-matplotlib.use("cairo")
+#matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
 from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty, getSpeciesShortestUniqueNamesMapping
 from sklearn import decomposition
 from sklearn.neighbors import KernelDensity
-from sklearn.grid_search import GridSearchCV
-from sklearn.cross_validation import KFold
+from sklearn.model_selection import GridSearchCV, KFold
 import seaborn as sns
 import cairo
 from pyqtree import Index
@@ -30,18 +29,25 @@ from rate_limit import RateLimit
 
 def plotMFEProfileWithGC(taxId, profileId, data):
     fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+    #fig, ax1 = plt.subplots()
 
     data[['native', 'shuffled']].plot(ax=ax1)
+    #data['native'].plot(ax=ax1)
+    #data['shuffled'].plot(ax=ax1)
     data[['shuffled75', 'shuffled25']].plot(ax=ax1, style='--')
 
+
+    smfe = data['native']-data['shuffled']
+    ax1.plot( data.index, smfe, zorder=10, label=u"\u0394LFE" )
+    
     speciesName = getSpeciesName(taxId)
 
     plt.title(speciesName)
 
     plt.xlabel('Position (nt, window start, from cds start)')
 
-    ax1.set_title("Mean LFE for %s" % speciesName)
-    ax1.set_ylabel('Mean LFE')
+    ax1.set_title("Mean LFE for %s" % str(speciesName, encoding="latin1") )
+    ax1.set_ylabel(u"\u0394LFE")
     ax1.legend(fontsize=8)
     ax1.grid(True)
 
