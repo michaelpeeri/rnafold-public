@@ -12,7 +12,6 @@ from builtins import object
 import sys
 import time
 import datetime
-import gzip
 import json
 import logging
 import codecs
@@ -20,10 +19,6 @@ from math import floor
 from socket import gethostname
 from collections import Iterable, Set
 from os import getpid
-try:
-    from io import StringIO
-except ImportError:
-    from io import StringIO
 import redis
 from binascii import crc32
 from Bio import SeqIO
@@ -259,13 +254,10 @@ def checkSpeciesExist(taxIds):
 
 
 def decompressSeriesRecord(compressed):
-    if( compressed[:4] != "\x1f\x8b\x08\x00" ):
-        raise Exception("Compressed format not recognized")
+    #if( compressed[:4] != "\x1f\x8b\x08\x00" ):
+    #    raise Exception("Compressed format not recognized")
         
-    f = gzip.GzipFile("", "rb", 9, StringIO(compressed))
-    decoded = f.read()
-    f.close()
-    return decoded
+    return str( codecs.decode( compressed, encoding="zlib_codec" ), encoding='utf-8' )
 
 def decodeJsonSeriesRecord(jsonstr):
     if jsonstr is None:
@@ -444,18 +436,11 @@ class CDSHelper(object):
         if( shuffleId < 0 ):
             seqId = self.seqId()
         else:
-            seqId = self.getShuffledSeqId( shuffleId, shuffleType=shuffleType )
-
-        gzBuffer = StringIO()
-        f = gzip.GzipFile("", "wb", 9, gzBuffer)
-        f.write(results)
-        f.close()
-        print(len(results), len(gzBuffer.getvalue()))
+            seqId = self.getShuffledSeqId( shuffleId, shuffleType=shuffleType )        
 
         # TODO - Add local session (instead of reusing the global one)
-        
         ss2 = db.SequenceSeries2( sequence_id=seqId,
-                                  content=gzBuffer.getvalue(),
+                                  content=codecs.encode( codecs.encode(results, encoding="utf-8") , encoding="zlib_codec" ),
                                   source=calculationId,
                                   ext_index=0)
 
@@ -467,23 +452,14 @@ class CDSHelper(object):
             print(e)
             # Ignore and continue...
             # TODO - improve this...
-        gzBuffer.close()
 
         #r.hset( key, field, value )
 
 
     def saveCalculationResult2(self, calculationId, results, seqId, commit=True):
 
-        gzBuffer = StringIO()
-        f = gzip.GzipFile("", "wb", 9, gzBuffer)
-        f.write(results)
-        f.close()
-        #print(len(results), len(gzBuffer.getvalue()))
-
-        #print(repr(gzBuffer.getvalue())[:100])
-
         ss2 = db.SequenceSeries2Updates( sequence_id=seqId,
-                                         content=gzBuffer.getvalue(),
+                                         content=codecs.encode( codecs.encode(results, encoding="utf-8") , encoding="zlib_codec" ),
                                          source=calculationId,
                                          ext_index=0)
 
@@ -492,8 +468,6 @@ class CDSHelper(object):
             session.commit()
         else:
             self.updatescount += 1
-            
-        gzBuffer.close()
 
     def commitChanges(self):
         print(self.updatescount)
@@ -549,7 +523,7 @@ class CDSHelper(object):
             Results will be uncompressed. In addition, if parseAsJson==True, results will be decoded as JSON.
     """
     def getCalculationResult2(self, calculationId, shuffleIds, parseAsJson=False, shuffleType=db.Sources.ShuffleCDSv2_python ):
-        assert(shuffleIds >= -1)
+        assert( not [x for x in shuffleIds if x < -1] )
         assert( shuffleType in allowedShuffleTypes )
         cdsSeqId = self.seqId()
         allSeqIds = self.shuffledSeqIds(shuffleType=shuffleType)
