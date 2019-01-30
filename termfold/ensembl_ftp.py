@@ -56,16 +56,12 @@ def selectGff3File(options):
     if len(options)==1:
         return 0
         
-    prefix = findCommonPrefix(filterSpecialFiles([x[1] for x in options]))
-    assert(prefix)
-    assert(prefix[-1]==".")
+    filteredOptions = [x for x in options if x[1].find("chromosome")==-1 and x[1].find(".gff3.gz")>5 ]
 
-    expectedName = prefix+"gff3.gz"
-
-    assert(expectedName.find("chromosome") == -1)
-
-    if (False, expectedName) in options:
-        return options.index((False, expectedName))
+    if len(filteredOptions)>1:
+        return None
+    elif len(filteredOptions)==1:
+        return options.index((False, filteredOptions[0][1]))
     else:
         return None
 
@@ -128,6 +124,15 @@ class EnsemblFTP(object):
         except ValueError:
             pass
         raise Exception("Failed to determine 'cds' path")
+
+    def determineCDNAPath(self):
+        items = self.listSpeciesItems("fasta")
+        try:
+            if( items.index((True, "cdna")) >= 0 ):
+                return "cdna"
+        except ValueError:
+            pass
+        raise Exception("Failed to determine 'cdna' path")
 
     def determineGenomePath(self):
         items = self.listSpeciesItems("fasta")
@@ -215,7 +220,46 @@ class EnsemblFTP(object):
                     print("Warning: transfer failed? (response: %s)" % resp)
 
         return localCDSfilename
+
+
+    def fetchCDNAFiles(self):
+        cdnaPath = self.determineCDNAPath()
+        items = self.listSpeciesItems("fasta", cdnaPath)
+
+        cdnaMatches      = list([x for x in items if x[1].endswith(".cdna.all.fa.gz")])
+        readmeMatches    = list([x for x in items if x[1] == "README"])
+        checksumsMatches = list([x for x in items if x[1] == "CHECKSUMS"])
+
+        localCDNAfilename = self.getLocalFilename(cdnaMatches[0][1])
         
+        if cdnaMatches:
+            path = "%s%s" % (self.getDirName("fasta", cdnaPath), cdnaMatches[0][1])
+            print("Fetching CDNAs from %s..." % path)
+            with open(localCDNAfilename, "wb") as f:
+                resp = self._ftp.retrbinary("RETR %s" % path, f.write)
+                if not resp.startswith("226 "):
+                    print("Warning: transfer failed? (response: %s)" % resp)
+        else:
+            raise Exception("Couldn't find CDNA file")
+
+        if readmeMatches:
+            path = "%s%s" % (self.getDirName("fasta", cdnaPath), readmeMatches[0][1])
+            print("Fetching readme from %s..." % path)
+            with open(self.getLocalFilename(readmeMatches[0][1]) + ".cdna", "wb") as f:
+                resp = self._ftp.retrbinary("RETR %s" % path, f.write)
+                if not resp.startswith("226 "):
+                    print("Warning: transfer failed? (response: %s)" % resp)
+        
+        if checksumsMatches:
+            path = "%s%s" % (self.getDirName("fasta", cdnaPath), checksumsMatches[0][1])
+            print("Fetching checksums from %s..." % path)
+            with open(self.getLocalFilename(checksumsMatches[0][1]) + ".cdna", "wb") as f:
+                resp = self._ftp.retrbinary("RETR %s" % path, f.write)
+                if not resp.startswith("226 "):
+                    print("Warning: transfer failed? (response: %s)" % resp)
+
+        return localCDNAfilename
+    
 
     def fetchGFF3Files(self):
         items = self.listSpeciesItems("gff3")
@@ -258,8 +302,9 @@ class EnsemblFTP(object):
     def fetchAll(self):
         fn1 = self.fetchGenomeFiles()
         fn2 = self.fetchCDSFiles()
-        fn3 = self.fetchGFF3Files()
-        return (fn1, fn2, fn3)
+        fn3 = self.fetchCDNAFiles()
+        fn4 = self.fetchGFF3Files()
+        return (fn1, fn2, fn3, fn4)
 
     def close(self):
         self._ftp.quit()
