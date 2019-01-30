@@ -49,15 +49,15 @@ reSkippingExcludedSeq = re.compile("Skipping (\S+) \(sequence (\S+), alternate i
 reSkippingPseudoGene = re.compile("Skipping pseudo-gene entry (\S+)")
 
 reWarningEntriesSkipped = re.compile("Warning: (\d+) entries skipped and (\d+) entries not found")
-def loadCDSSequences(cdsSequencesFilename, genesListFilename, args, dryRun=True):
-    print("Reading CDS sequences file...")
+def loadCDNASequences(cdnaSequencesFilename, genesListFilename, args, dryRun=True):
+    print("Reading CDNA sequences file...")
 
     arguments = (sys.executable, "store_seqs_from_fasta.py",
                  "--taxid", str(args.taxid),
-                 "--input", cdsSequencesFilename,
+                 "--input", cdnaSequencesFilename,
                  "--variant", args.variant,
-                 "--type", "cds",
-                 "--output-fasta", "%s.filtered.fna" % cdsSequencesFilename,
+                 "--type", "cdna",
+                 "--output-fasta", "%s.filtered.fna" % cdnaSequencesFilename,
                  "--gene-ids-file", genesListFilename)
     if dryRun:
         arguments = arguments + ("--dry-run",)
@@ -140,6 +140,7 @@ def ingestGenome(args):
 
     genomefn = None
     cdsfn = None
+    cdnafn = None
     gff3fn = None
     
     # Step 1 - get files from Ensembl FTP
@@ -147,15 +148,16 @@ def ingestGenome(args):
     if( args.variant == "Ensembl" and args.fetch_ftp_files ):
     
         ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection, server=args.server)
-        (genomefn, cdsfn, gff3fn) = ftp.fetchAll()
+        (genomefn, cdsfn, cdnafn, gff3fn) = ftp.fetchAll()
         ftp.close()
 
         assert( os.path.exists(genomefn) and os.path.isfile(genomefn) )
         assert( os.path.exists(cdsfn)    and os.path.isfile(cdsfn) )
+        assert( os.path.exists(cdnafn)   and os.path.isfile(cdnafn) )
         assert( os.path.exists(gff3fn)   and os.path.isfile(gff3fn) )
     else:
         gff3fn = args.gff3
-        cdsfn = args.cds
+        cdnafn = args.cdna
 
     # Step 2 - parse GFF3 file to yield list of acceptable CDS genes
     
@@ -183,7 +185,7 @@ def ingestGenome(args):
 
     # Step 4 - Load CDS sequences to DB
     print("Doing trial run for gene loading...")
-    if not loadCDSSequences(cdsfn, genesListFilename, args, dryRun=True) is None:
+    if not loadCDNAsequences(cdnafn, genesListFilename, args, dryRun=True) is None:
         print("Trial run succeeded.")
         print("Performing actual gene loading...")
         (cdsLoadedCount, cdsIds, skippedGenes) = loadCDSSequences(cdsfn, genesListFilename, args, dryRun=False)
