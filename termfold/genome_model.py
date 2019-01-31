@@ -1,4 +1,6 @@
 import json
+from random import sample
+from collections import Counter
 from intervaltree import IntervalTree, Interval
 from gff import createGffDb
 
@@ -55,18 +57,83 @@ class GenomeMoleculeModel(object):
             end = ft[GenomeMoleculeModel._gf_end]
 
             assert(end >= start)
-            if end > start:
-                self.features.addi( start, end+1, data )  # end is inclusive in GFF3 but not inclusive in intervaltree
-            #print(data)
+            self.features.addi( start, end+1, data )  # end is inclusive in GFF3 but not inclusive in intervaltree
+
+    def findFeatureByStart( self, start ):
+        val = self.features[start:start+1]
+        if val:
+            return list(val)[0]
+        else:
+            return None
+        
+    def findNextFeature(self, start, debug=False):
+        # TODO handle circular chromosomes
+        width = 100
+        while (True):
+
+            candidates = sorted( self.features[start:start+width] )
+
+            if debug:
+                print("Trying with width={} ({}->{})...".format(width, start, start+width))
+                print("candidates: {}".format(candidates))
+
+            if candidates:
+                return candidates[0]
+
+            width *= 5
+            if width > 2000000:
+                return None
             
-            #if len(self.features)>10:
-            #    break
+    def findPrevFeature(self, start, debug=False):
+        # TODO handle circular chromosomes
+        width = 100
+        while (True):
+            
+            candidates = sorted( self.features[start-width:start] )
+
+            if debug:
+                print("Trying with width={} ({}<-{})...".format(width, start-width, start))
+                print("candidates: {}".format(candidates))
+
+            if candidates:
+                return candidates[-1]
+
+            width *= 5
+            if width > 2000000:
+                return None
+
+    def find3PrimeFlankingRegion( self, feature, debug=False ):
         
+        if feature.data['strand']=='+':
+            print("+")
+            next = self.findNextFeature( feature.end, debug=debug )
+            if next is None:
+                return None
+            
+            print("[[{}----->{}]]    [{}--->{}]".format( feature.begin, feature.end, next.begin, next.end ))
+            ret = (feature.end, next.begin)
+        elif feature.data['strand']=='-':
+            print("-")
+            prev = self.findPrevFeature( feature.begin-1, debug=debug )
+            if prev is None:
+                return None
+            
+            print("[{}<---{}]    [[{}<------{}]]".format( prev.begin, prev.end, feature.begin, feature.end ))
+            ret = (prev.end, feature.begin)
+        else:
+            raise ValueError("Unknown strand '{}".format(feature.data['strand']))
+
+        print(ret)
+        if ( ret[1] <= ret[0] ):
+            return None
         
+        return ret
+        
+
         
 class GenomeModel(object):
 
-    _gf_mol_name = 1
+    _gf_mol_name  = 1
     _gf_mol_props = 9
 
     def __init__(self, sequenceFile, gffFile, isLinear, variant):
@@ -91,19 +158,148 @@ class GenomeModel(object):
         print([x.name for x in self.moleculeModels])
         print([len(x.features) for x in self.moleculeModels])
 
+def displayInterval(tree, begin, end):
+    print(tree[begin-10:end+11])
+
+def testForwardIteration(mol):
+    allFeatures = sorted( mol.features.items() )
+    print(len(allFeatures))
+
+    iteratedFeatures = []
+    node = mol.findNextFeature(0)
+    iteratedFeatures.append(node)
+    
+    while (True):
+        node = mol.findNextFeature(node.end+1)
+        
+        if node is None:
+            break
+        
+        iteratedFeatures.append(node)
+        
+    print(len(iteratedFeatures))
+
+    missingFeatures = frozenset(allFeatures) - frozenset(iteratedFeatures)
+    print(missingFeatures)
+    for f in missingFeatures:
+        print("--> missing:")
+        displayInterval( mol.features, f.begin, f.end )
+        
+
+def testBackwardIteration(mol):
+    allFeatures = list( reversed( sorted( mol.features.items() )))
+    print(len(allFeatures))
+
+    last = allFeatures[0]
+
+    iteratedFeatures = []
+    node = mol.findPrevFeature(last.end+100)
+    iteratedFeatures.append(node)
+    
+    while (True):
+        node = mol.findPrevFeature(node.begin)
+        
+        if node is None:
+            break
+        
+        iteratedFeatures.append(node)
+    print(len(iteratedFeatures))
+
+    missingFeatures = frozenset(allFeatures) - frozenset(iteratedFeatures)
+    print(missingFeatures)
+    for f in missingFeatures:
+        print("--> missing:")
+        displayInterval( mol.features, f.begin, f.end )
+
+def test3primeFlankingRegions(mol):
+
+    stats = Counter()
+
+    successSet = set()
+    failSet = set()
+    over500set = set()
+    over10set = set()
+    over40set = set()
+    over100set = set()
+    over500set = set()
+    
+    for feat in mol.features.items():
+        val = mol.find3PrimeFlankingRegion( feat )
+        if val is None:
+            failSet.add(feat)
+            continue
+        
+        (begin, end) = val
+        assert( end > begin )
+        stats.update( (end-begin,) )
+        successSet.add(feat)
+        
+        if end-begin >= 10:
+            over10set.add(feat)
+            if end-begin >= 40:
+                over40set.add(feat)
+                if end-begin >= 100:
+                    over100set.add(feat)
+                    if end-begin >= 500:
+                        over500set.add(feat)
+
+    print("Found {} flanking regions".format(sum(stats)))
+    print(len(successSet))
+    print(stats.most_common(10))
+
+    print("Failed (sample):")
+    for f in sample( failSet, 10 ):
+        print(f)
+
+    print("Over500 (sample):")
+    for f in sample( over500set, 10 ):
+        print(f)
+
+        
+    print("Count (len >  10): {}".format( len( over10set  )))
+    print("Count (len >  40): {}".format( len( over40set  )))
+    print("Count (len > 100): {}".format( len( over100set )))
+    print("Count (len > 500): {}".format( len( over500set )))
+    
+
+    # Test cases:
+    # Overlap over start codon
+    print( mol.findFeatureByStart(550439) )
+    mol.find3PrimeFlankingRegion( mol.findFeatureByStart(550439), debug=True )
+    print(mol.findNextFeature(550493))
+
+    print("---"*10)
+    print(mol.features[59000:60000])
+    print("---"*10)
+    
+
+    f59687 = mol.findFeatureByStart(59687)
+    mol.find3PrimeFlankingRegion( f59687, debug=True )
+    assert( f59687 in over100set )
+    assert( f59687 not in over500set )
+    
+        
 
 def testAll():
-    gm1 = GenomeModel(
-        sequenceFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.dna_rm.toplevel.fa.gz',
-        gffFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.95.gff3.gz',
-        isLinear=True,
-        variant="Ensembl" )
+    # gm1 = GenomeModel(
+    #     sequenceFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.dna_rm.toplevel.fa.gz',
+    #     gffFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.95.gff3.gz',
+    #     isLinear=True,
+    #     variant="Ensembl" )
                                
     gm2 = GenomeModel(
         sequenceFile='/tamir1/mich1/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.dna_rm.toplevel.fa.gz',
         gffFile='/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.37.gff3.gz',
         isLinear=True,
         variant="Ensembl" )
+
+    print("Forward:")
+    testForwardIteration(  gm2.moleculeModels[0] )
+    print("Backward:")
+    testBackwardIteration( gm2.moleculeModels[0] )
+
+    test3primeFlankingRegions( gm2.moleculeModels[0] )
+    
     return 0
 
     
