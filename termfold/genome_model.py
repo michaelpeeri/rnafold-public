@@ -1,8 +1,8 @@
 import json
 from random import sample
-from collections import Counter
 from intervaltree import IntervalTree, Interval
 from gff import createGffDb
+import pyfaidx
 
 
 trueVals = frozenset(('true', 'True', 'TRUE', '1'))
@@ -14,7 +14,7 @@ class GenomeMoleculeModel(object):
     _gf_strand   = 7
     _gf_props    = 9
     
-    def __init__(self, sequenceFile, gff, name, isLinear=None, props={}):
+    def __init__(self, sequenceFile : str, gff, name : str, isLinear =None, props : dict ={}):
         self.sequenceFile = sequenceFile
         if type(gff)==type(""):
             self.gffFile = gff
@@ -59,14 +59,14 @@ class GenomeMoleculeModel(object):
             assert(end >= start)
             self.features.addi( start, end+1, data )  # end is inclusive in GFF3 but not inclusive in intervaltree
 
-    def findFeatureByStart( self, start ):
+    def findFeatureByStart( self, start:int ):
         val = self.features[start:start+1]
         if val:
             return list(val)[0]
         else:
             return None
         
-    def findNextFeature(self, start, debug=False):
+    def findNextFeature(self, start:int, debug:bool=False):
         # TODO handle circular chromosomes
         width = 100
         while (True):
@@ -84,7 +84,7 @@ class GenomeMoleculeModel(object):
             if width > 2000000:
                 return None
             
-    def findPrevFeature(self, start, debug=False):
+    def findPrevFeature(self, start:int, debug:bool=False):
         # TODO handle circular chromosomes
         width = 100
         while (True):
@@ -102,29 +102,37 @@ class GenomeMoleculeModel(object):
             if width > 2000000:
                 return None
 
-    def find3PrimeFlankingRegion( self, feature, debug=False ):
+    def find3PrimeFlankingRegion( self, feature, debug:bool=False ):
         
         if feature.data['strand']=='+':
-            print("+")
             next = self.findNextFeature( feature.end, debug=debug )
             if next is None:
                 return None
+
+            if debug:
+                print("+")
+                print("[[{}----->{}]]    [{}--->{}]".format( feature.begin, feature.end, next.begin, next.end ))
+                
+            ret = (self.name, feature.end, next.begin)
             
-            print("[[{}----->{}]]    [{}--->{}]".format( feature.begin, feature.end, next.begin, next.end ))
-            ret = (feature.end, next.begin)
         elif feature.data['strand']=='-':
-            print("-")
             prev = self.findPrevFeature( feature.begin-1, debug=debug )
             if prev is None:
                 return None
+
+            if debug:
+                print("-")
+                print("[{}<---{}]    [[{}<------{}]]".format( prev.begin, prev.end, feature.begin, feature.end ))
+                
+            ret = (self.name, prev.end, feature.begin)
             
-            print("[{}<---{}]    [[{}<------{}]]".format( prev.begin, prev.end, feature.begin, feature.end ))
-            ret = (prev.end, feature.begin)
         else:
             raise ValueError("Unknown strand '{}".format(feature.data['strand']))
 
-        print(ret)
-        if ( ret[1] <= ret[0] ):
+        if debug:
+            print(ret)
+            
+        if ( ret[2] <= ret[1] ):
             return None
         
         return ret
@@ -136,10 +144,9 @@ class GenomeModel(object):
     _gf_mol_name  = 1
     _gf_mol_props = 9
 
-    def __init__(self, sequenceFile, gffFile, isLinear, variant):
+    def __init__(self, sequenceFile:str, gffFile:str, isLinear =None, variant:str ="Ensembl"):
         self.sequenceFile = sequenceFile
         self.gffFile = gffFile
-        self.isLinear = isLinear
         self.variant = variant
 
         print("Loading gff3 file...")
@@ -153,12 +160,19 @@ class GenomeModel(object):
         #assert(self.molecules)
         #print( [json.loads(c.astuple()[9]) for c in self.gff.features_of_type( "chromosome" )] )
 
-        self.moleculeModels = [GenomeMoleculeModel(sequenceFile, self.gff, name, props=props) for (name,props) in zip(moleculeNames, moleculeProps)]
+        self.moleculeModels = [GenomeMoleculeModel(sequenceFile, self.gff, name, isLinear=isLinear, props=props) for (name,props) in zip(moleculeNames, moleculeProps)]
 
         print([x.name for x in self.moleculeModels])
         print([len(x.features) for x in self.moleculeModels])
 
-def displayInterval(tree, begin, end):
+        self.fasta = pyfaidx.Fasta(sequenceFile)
+
+    def getRegion(self, region:tuple, rc=False):
+        (chromosome, begin, end) = region
+        return self.fasta.get_seq(chromosome, begin, end, rc=rc)
+
+        
+def displayInterval(tree, begin:int, end:int):
     print(tree[begin-10:end+11])
 
 def testForwardIteration(mol):
@@ -212,6 +226,7 @@ def testBackwardIteration(mol):
         displayInterval( mol.features, f.begin, f.end )
 
 def test3primeFlankingRegions(mol):
+    from collections import Counter
 
     stats = Counter()
 
@@ -221,6 +236,7 @@ def test3primeFlankingRegions(mol):
     over10set = set()
     over40set = set()
     over100set = set()
+    over250set = set()
     over500set = set()
     
     for feat in mol.features.items():
@@ -229,7 +245,7 @@ def test3primeFlankingRegions(mol):
             failSet.add(feat)
             continue
         
-        (begin, end) = val
+        (chromosome, begin, end) = val
         assert( end > begin )
         stats.update( (end-begin,) )
         successSet.add(feat)
@@ -240,8 +256,10 @@ def test3primeFlankingRegions(mol):
                 over40set.add(feat)
                 if end-begin >= 100:
                     over100set.add(feat)
-                    if end-begin >= 500:
-                        over500set.add(feat)
+                    if end-begin >= 250:
+                        over250set.add(feat)
+                        if end-begin >= 500:
+                            over500set.add(feat)
 
     print("Found {} flanking regions".format(sum(stats)))
     print(len(successSet))
@@ -251,14 +269,15 @@ def test3primeFlankingRegions(mol):
     for f in sample( failSet, 10 ):
         print(f)
 
-    print("Over500 (sample):")
-    for f in sample( over500set, 10 ):
+    print("Over100 (sample):")
+    for f in sample( over100set, 20 ):
         print(f)
 
         
     print("Count (len >  10): {}".format( len( over10set  )))
     print("Count (len >  40): {}".format( len( over40set  )))
     print("Count (len > 100): {}".format( len( over100set )))
+    print("Count (len > 250): {}".format( len( over250set )))
     print("Count (len > 500): {}".format( len( over500set )))
     
 
@@ -276,8 +295,60 @@ def test3primeFlankingRegions(mol):
     f59687 = mol.findFeatureByStart(59687)
     mol.find3PrimeFlankingRegion( f59687, debug=True )
     assert( f59687 in over100set )
-    assert( f59687 not in over500set )
+    #assert( f59687 not in over500set )  - fails because some CDSs in the middle of this UTR are missing
+
+def CDS3PrimeFlankingRegionSource( mol, minLength:int=10 ):
+    for feat in mol.features.items():
+        region = mol.find3PrimeFlankingRegion( feat )
+        if not region is None:
+            length = region[2]-region[1]
+            if length >= minLength:
+                yield( feat, region )
     
+
+def writeFlankingSeqToFasta( genomeModel, minLength:int=10 ):
+    from Bio import SeqIO
+    from Bio.SeqRecord import SeqRecord
+    from Bio.Seq import Seq
+    from Bio.Alphabet import generic_dna
+    
+    #recs = []
+    for mol in genomeModel.moleculeModels:
+        for feat, region in CDS3PrimeFlankingRegionSource( mol, minLength=minLength ):
+            #print("-----------"*3)
+            #print(feat)
+            #print(region)
+            
+            if feat.data['strand']=='+':
+                #begin = region[1]-30
+                begin = feat.begin
+                end = region[2]
+                seq = genomeModel.getRegion( (region[0], begin, end) )
+            
+            elif feat.data['strand']=='-':
+                begin = region[1]  -1
+                #end = region[2]+30 -1
+                end = feat.end -1
+                seq = genomeModel.getRegion( (region[0], begin, end), rc=True )
+
+            else:
+                raise ValueError("Unknown strand '{}".format(feature.data['strand']))
+
+            #print(seq[:42])
+            ntSeq = Seq( seq.seq, generic_dna )
+            
+            #if feat.data['strand']=='-':
+            #    ntSeq = ntSeq.reverse_complement()
+
+            aaSeq = ntSeq.translate()
+            #print(aaSeq)
+            
+            #recs.append( SeqRecord( Seq(seq), id=seq.name, name=seq.fancy_name, description=orig.description) )
+
+
+    #with open(args.output_fasta, "w") as outfile:
+    #    out = SeqIO.write( outRecords, outfile, "fasta")
+
         
 
 def testAll():
@@ -288,8 +359,8 @@ def testAll():
     #     variant="Ensembl" )
                                
     gm2 = GenomeModel(
-        sequenceFile='/tamir1/mich1/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.dna_rm.toplevel.fa.gz',
-        gffFile='/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.37.gff3.gz',
+        sequenceFile='/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.dna_rm.toplevel.fa', # bgzip compression is not supported yet!
+        gffFile=     '/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.37.gff3.gz',
         isLinear=True,
         variant="Ensembl" )
 
@@ -299,6 +370,9 @@ def testAll():
     testBackwardIteration( gm2.moleculeModels[0] )
 
     test3primeFlankingRegions( gm2.moleculeModels[0] )
+
+    writeFlankingSeqToFasta( gm2, minLength=100 )
+        
     
     return 0
 
