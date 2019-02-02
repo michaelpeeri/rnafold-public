@@ -4,11 +4,13 @@ import sys
 import re
 import subprocess
 import codecs
+import json
 from ensembl_ftp import EnsemblFTP
 from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList
+import mysql_rnafold as db
 from config import ensembl_data_dir
-
-
+from genome_model import GenomeModel, CDSWith3PrimeSequencesSource
+from store_seqs_from_fasta import storeSeqInDB
 
 
 
@@ -33,92 +35,31 @@ def processGff3(gff3Filename, genesListFilename, args):
         print(e)
 
 
-# ~/anaconda2/bin/python2 store_seqs_from_fasta.py --taxid 203267 --input ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.cds.all.fa.gz --variant Ensembl --type cds --output-fasta ./data/Ensembl/Twhipplei/Tropheryma_whipplei_str_twist.ASM748v1.cds.all.fa.gz.filtered.fna --gene-ids-file ./data/Ensembl/coding_genes_list.Twhi.list --dry-run
-reSequenceOkLine = re.compile("Inserting (\S+) [(]sequence \S+[)]...")
-reEntryCountLine = re.compile("Processed (\d+) CDS entries")
-reTotalCountLine = re.compile("[(]out of \d+ CDS entries for this species[)]")
-reConnectionRecycling = re.compile(".*sqlalchemy.pool.QueuePool.*exceeded timeout; recycling")
-reSkippingAmbiguousSeq = re.compile("Skipping record (\S+), containing non-nucleotide or ambiguous symbols.*")
+def loadCDSwith3UTRSequences(genomeModel, genesListFilename, args, dryRun:bool =True) -> int:
 
+    count = 0
+    for (feat,region,ntSeq,stopCodonPos) in CDSWith3PrimeSequencesSource( genomeModel, minLength=1, debug=False ):
 
-#Skipping OEU05659.1 (sequence lcl|KV784598.1_cds_OEU05659.1_18098, alternate ids=[])
-reSkippingExcludedSeq = re.compile("Skipping (\S+) \(sequence (\S+), alternate ids=\[[^]]*\]\)")
-#Skipping pseudo-gene entry lcl|KV784402.1_cds_17051
+        #Interval(2598882, 2599761, {'strand': '-', 'props': '{"ID":["CDS:AAC75531"],"Parent":["transcript:AAC75531"],"protein_id":["AAC75531"]}'})
+        props = json.loads( feat.data['props'] )
+        proteinId = props['protein_id'][0]
+        assert(len(proteinId)>3)
+        print(proteinId)
 
-#"Skipping pseudo-gene entry (\S+)"
-reSkippingPseudoGene = re.compile("Skipping pseudo-gene entry (\S+)")
+        count += 1
 
-reWarningEntriesSkipped = re.compile("Warning: (\d+) entries skipped and (\d+) entries not found")
-def loadCDNASequences(cdnaSequencesFilename, genesListFilename, args, dryRun=True):
-    print("Reading CDNA sequences file...")
+        if dryRun == False:
+            storeSeqInDB(nucSeq = ntSeq,
+                         taxId = args.taxid,
+                         proteinId = proteinId,
+                         seqSourceTag = db.Sources.CDSwith3primeFlankingRegion,
+                         stopCodonPos = stopCodonPos )
+                         #genomeCoords = (feat.begin, feat.end)  )
+            
+    return count
 
-    arguments = (sys.executable, "store_seqs_from_fasta.py",
-                 "--taxid", str(args.taxid),
-                 "--input", cdnaSequencesFilename,
-                 "--variant", args.variant,
-                 "--type", "cdna",
-                 "--output-fasta", "%s.filtered.fna" % cdnaSequencesFilename,
-                 "--gene-ids-file", genesListFilename)
-    if dryRun:
-        arguments = arguments + ("--dry-run",)
-
-    if args.ignore_id_check:
-        arguments = arguments + ("--ignore-id-check",)
-
-    report = subprocess.check_output(arguments, shell=False)
-    
-    unknownLinesCount = 0
-    loadedGenesCount = 0
-    loadedGenes = []
-    skippedGenes = []
-    for line in report.splitlines():
-        # Note: Order cases from most to least common (for performance)
-        line = codecs.decode(line, encoding="ascii")
-        match = reSequenceOkLine.match(line)
-        if match:
-            loadedGenes.append(match.group(1))
-            continue
         
-        elif reEntryCountLine.match(line):
-            loadedGenesCount = int(reEntryCountLine.match(line).group(1))
-            print(line)
-            continue
-        
-        elif reTotalCountLine.match(line):
-            print(line)
-            continue
-        
-        elif reSkippingAmbiguousSeq.match(line):
-            skippedGenes.append( reSkippingAmbiguousSeq.match(line).group(1) )
-            print(line)
-            continue
 
-        elif reSkippingExcludedSeq.match(line):
-            skippedGenes.append( reSkippingExcludedSeq.match(line).group(1) )
-            print(line)
-            continue
-
-        elif reSkippingPseudoGene.match(line):
-            skippedGenes.append( reSkippingPseudoGene.match(line).group(1) )
-            print(line)
-            continue
-        
-        elif reConnectionRecycling.match(line):
-            continue
-        
-        elif reWarningEntriesSkipped.match(line):
-            print(line)
-            continue
-        
-        else:
-            unknownLinesCount+= 1  # Count "unexpected" lines
-            print("? {}".format(line))
-            continue
-        
-    if unknownLinesCount:
-        return None
-    else:
-        return (loadedGenesCount, loadedGenes, skippedGenes)
     
 def ingestGenome(args):
 
@@ -156,8 +97,8 @@ def ingestGenome(args):
         assert( os.path.exists(cdnafn)   and os.path.isfile(cdnafn) )
         assert( os.path.exists(gff3fn)   and os.path.isfile(gff3fn) )
     else:
-        gff3fn = args.gff3
-        cdnafn = args.cdna
+        gff3fn   = args.gff3
+        genomefn = args.genome
 
     # Step 2 - parse GFF3 file to yield list of acceptable CDS genes
     
@@ -183,22 +124,26 @@ def ingestGenome(args):
     #redis-cli -h power5 -a rnafold set "species:taxid:203267:genomic-transl-table"  "11"
     r.set(speciesTranslationTableKey % args.taxid, args.nuclear_genetic_code)
 
+    gm = GenomeModel(
+        sequenceFile = genomefn,
+        gffFile=gff3fn,
+        isLinear=False,
+        variant=args.variant,
+        geneticCode=args.nuclear_genetic_code )
+    
+
     # Step 4 - Load CDS sequences to DB
     print("Doing trial run for gene loading...")
-    if not loadCDNAsequences(cdnafn, genesListFilename, args, dryRun=True) is None:
+    if loadCDSwith3UTRSequences(gm, genesListFilename, args, dryRun=True) > 400:
         print("Trial run succeeded.")
         print("Performing actual gene loading...")
-        (cdsLoadedCount, cdsIds, skippedGenes) = loadCDSSequences(cdsfn, genesListFilename, args, dryRun=False)
+        cdsLoadedCount = loadCDSwith3UTRSequences(gm, genesListFilename, args, dryRun=False)
         print("Loaded %d CDS genes..." % cdsLoadedCount)
-        if skippedGenes:
-            print("Skipped genes: %s" % skippedGenes)
+        
     else:
         print("Dry-run loading may have encountered errors; aborting without actual load...")
         return -1
 
-    # Step 5 - Generate randomized sequences
-    # TODO
-    
     return 0
 
 _knownBoolVals = {"true":True, "false":False}
@@ -228,7 +173,8 @@ def standaloneRun():
     argsParser.add_argument("--variant", type=str, default="Ensembl")
     argsParser.add_argument("--fetch-ftp-files", type=parseBool, default=True)
     argsParser.add_argument("--gff3", type=str, required=False)
-    argsParser.add_argument("--cds", type=str, required=False)
+    argsParser.add_argument("--genome", type=str, required=False)
+    argsParser.add_argument("--cds-with-3utr", action="store_true", default=False)
     argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
     argsParser.add_argument("--server", type=str, required=False, default=None)
     
@@ -242,8 +188,8 @@ def standaloneRun():
         if( (not args.local_name) or (not args.remote_name) ):
             raise Exception("--remote-name and --local-name are required when --fetch-ftp-files=True")
         
-        if( args.gff3 or args.cds ):
-            raise Exception("--gff3 and --cds are not supported when --fetch-ftp-files=True")
+        if( args.gff3 or args.genome ):
+            raise Exception("--gff3 and --genome are not supported when --fetch-ftp-files=True")
         
         if args.variant != "Ensembl":
             raise Exception("Only --variant=Ensembl is supported with --fetch-ftp-files=True")
@@ -251,8 +197,8 @@ def standaloneRun():
         if( args.local_name or args.remote_name ):
             raise Exception("--remote-name and --local-name cannot be used when --fetch-ftp-files=False")
         
-        if( (not args.gff3) or (not args.cds) ):
-            raise Exception("--gff3 and --cds are required when --fetch-ftp-files=False")
+        if( (not args.gff3) or (not args.genome) ):
+            raise Exception("--gff3 and --genome are required when --fetch-ftp-files=False")
         
 
     sys.exit(ingestGenome(args))
