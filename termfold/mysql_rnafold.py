@@ -168,6 +168,7 @@ class Alphabets(object):
 class Sources(object):
     External = 1 # imported sequence
     Computed = 2
+    CDSwith3primeFlankingRegion = 3
     ShuffleCDSv2_matlab = 10
     ShuffleCDSv2_python = 11
     ShuffleCDS_vertical_permutation_1nt = 12
