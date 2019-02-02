@@ -1,8 +1,10 @@
 import json
 from random import sample
+from Bio.Seq import Seq
+from Bio.Alphabet import generic_dna
+import pyfaidx
 from intervaltree import IntervalTree, Interval
 from gff import createGffDb
-import pyfaidx
 
 
 trueVals = frozenset(('true', 'True', 'TRUE', '1'))
@@ -102,7 +104,7 @@ class GenomeMoleculeModel(object):
             if width > 2000000:
                 return None
 
-    def find3PrimeFlankingRegion( self, feature, debug:bool=False ):
+    def find3PrimeFlankingRegion( self, feature, debug:bool =False ):
         
         if feature.data['strand']=='+':
             next = self.findNextFeature( feature.end, debug=debug )
@@ -144,10 +146,11 @@ class GenomeModel(object):
     _gf_mol_name  = 1
     _gf_mol_props = 9
 
-    def __init__(self, sequenceFile:str, gffFile:str, isLinear =None, variant:str ="Ensembl"):
+    def __init__(self, sequenceFile:str, gffFile:str, isLinear =None, variant:str ="Ensembl", geneticCode:int =1):
         self.sequenceFile = sequenceFile
         self.gffFile = gffFile
         self.variant = variant
+        self.geneticCode = geneticCode
 
         print("Loading gff3 file...")
         self.gff = createGffDb(gffFile, variant)
@@ -297,27 +300,24 @@ def test3primeFlankingRegions(mol):
     assert( f59687 in over100set )
     #assert( f59687 not in over500set )  - fails because some CDSs in the middle of this UTR are missing
 
-def CDS3PrimeFlankingRegionSource( mol, minLength:int=10 ):
+def CDS3PrimeFlankingRegionSource( mol, minLength:int=10, debug=False ):
     for feat in mol.features.items():
-        region = mol.find3PrimeFlankingRegion( feat )
+        region = mol.find3PrimeFlankingRegion( feat, debug=debug )
         if not region is None:
             length = region[2]-region[1]
             if length >= minLength:
                 yield( feat, region )
     
 
-def writeFlankingSeqToFasta( genomeModel, minLength:int=10 ):
-    from Bio import SeqIO
-    from Bio.SeqRecord import SeqRecord
-    from Bio.Seq import Seq
-    from Bio.Alphabet import generic_dna
+def CDSWith3PrimeSequencesSource( genomeModel, minLength:int=10, debug=False ):
+    numRegions = 0
     
-    #recs = []
     for mol in genomeModel.moleculeModels:
-        for feat, region in CDS3PrimeFlankingRegionSource( mol, minLength=minLength ):
-            #print("-----------"*3)
-            #print(feat)
-            #print(region)
+        for feat, region in CDS3PrimeFlankingRegionSource( mol, minLength=minLength, debug=debug ):
+            if debug:
+                print("-----------"*3)
+                print(feat)
+                print(region)
             
             if feat.data['strand']=='+':
                 #begin = region[1]-30
@@ -336,16 +336,61 @@ def writeFlankingSeqToFasta( genomeModel, minLength:int=10 ):
 
             #print(seq[:42])
             ntSeq = Seq( seq.seq, generic_dna )
+            if debug:
+                print(ntSeq)
+                print(len(seq.seq))
             
             #if feat.data['strand']=='-':
             #    ntSeq = ntSeq.reverse_complement()
 
-            aaSeq = ntSeq.translate()
-            #print(aaSeq)
+            aaSeq = ntSeq.translate(table=genomeModel.geneticCode)
+            numRegions += 1
+
+            stopCodonPos = feat.end - feat.begin - 3
+
+            if debug:
+                print(aaSeq)
+                print(aaSeq[((stopCodonPos-6)//3):((stopCodonPos+9)//3):])
+
+            aaAtStopCodonPosition = aaSeq[stopCodonPos//3]
+            if not (aaAtStopCodonPosition=="*" or aaAtStopCodonPosition=="X"):
+                print("Warning: stop codon not found...")
+            
+                
+            yield (feat, region, ntSeq, stopCodonPos)
+            
+
+
+    print("Found {} regions".format(numRegions))
+
+def writeFlankingSeqToFasta( genomeModel, minLength:int=10, debug=False ):
+    #from Bio import SeqIO
+    #from Bio.SeqRecord import SeqRecord
+    #from Bio.Seq import Seq
+    #from Bio.Alphabet import generic_dna
+
+    numRegions = 0
+
+    for (feat,region,ntSeq,stopCodonPos) in CDSWith3PrimeSequencesSource( genomeModel, minLength=minLength, debug=debug ):
+
+            #print(seq[:42])
+            if debug:
+                print(ntSeq)
+                print(len(ntSeq))
+            
+            #if feat.data['strand']=='-':
+            #    ntSeq = ntSeq.reverse_complement()
+
+            aaSeq = ntSeq.translate(table=genomeModel.geneticCode)
+            numRegions += 1
+            
+            if debug:
+                print(aaSeq)
             
             #recs.append( SeqRecord( Seq(seq), id=seq.name, name=seq.fancy_name, description=orig.description) )
 
 
+    print("Found {} regions".format(numRegions))
     #with open(args.output_fasta, "w") as outfile:
     #    out = SeqIO.write( outRecords, outfile, "fasta")
 
@@ -356,13 +401,15 @@ def testAll():
     #     sequenceFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.dna_rm.toplevel.fa.gz',
     #     gffFile='/tamir1/mich1/cellfold/data/Ensembl/Homo.sapiens/Homo_sapiens.GRCh38.95.gff3.gz',
     #     isLinear=True,
-    #     variant="Ensembl" )
+    #     variant="Ensembl",
+    #     geneticCode=1 )
                                
     gm2 = GenomeModel(
         sequenceFile='/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.dna_rm.toplevel.fa', # bgzip compression is not supported yet!
         gffFile=     '/tamir1/mich1/termfold/data/Ensembl/Ecoli/Escherichia_coli_str_k_12_substr_mg1655.ASM584v2.37.gff3.gz',
         isLinear=True,
-        variant="Ensembl" )
+        variant="Ensembl",
+        geneticCode=11 )
 
     print("Forward:")
     testForwardIteration(  gm2.moleculeModels[0] )
@@ -371,7 +418,8 @@ def testAll():
 
     test3primeFlankingRegions( gm2.moleculeModels[0] )
 
-    writeFlankingSeqToFasta( gm2, minLength=100 )
+    #writeFlankingSeqToFasta( gm2, minLength=1, debug=True )
+    writeFlankingSeqToFasta( gm2, minLength=1, debug=True )
         
     
     return 0
