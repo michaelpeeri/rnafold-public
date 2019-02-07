@@ -2,7 +2,7 @@ from builtins import zip
 from builtins import range
 import mysql_rnafold as db
 from data_helpers import CDSHelper, AddShuffledSequences, SpeciesCDSSource, getSpeciesTranslationTable
-from codon_randomization import SynonymousCodonPermutingRandomization, VerticalRandomizationCache
+from codon_randomization import SynonymousCodonPermutingRandomization, VerticalRandomizationCache, NucleotidePermutationRandomization, CDSand3UTRRandomization
 import logging
 
 def storeRandomizedSequences(cds, seqs, shuffleIds, shuffleType):
@@ -47,6 +47,41 @@ def createRandomizedSeqs(cds, newShuffleIds, shuffleType=db.Sources.ShuffleCDSv2
     return newShuffles
 
 
+# Return randomized sequences for the specified native sequence object
+def createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType=db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation):
+    #NucleotidePermutationRandomization, CDSand3UTRRandomization
+    cdsRand = SynonymousCodonPermutingRandomization(cds.getTranslationTable())
+    utrRand = NucleotidePermutationRandomization()
+
+    shuffler = CDSand3UTRRandomization( cdsRand, utrRand )
+
+    nativeSeq = cds.sequence()
+    stopCodonPos = cds.stopCodonPos()
+    #print(nativeSeq[:10])
+
+    newShuffles = []
+    for shuffleId in newShuffleIds:
+        totalPermutationsCount, identity, newseq = None, None, None
+
+        try:
+            totalPermutationsCount, identity, newseq = shuffler.randomize( nativeSeq, stopCodonPos )
+        except Exception as e:
+            print(e)
+            raise
+
+        assert((identity <= 1.0) and (identity > 0.0))
+        
+        if(identity > 0.95):
+            print("Warning: Identity of randomized sequence is high - %.3g%% (length=%d nt, total permutations=%.2g)" % (identity*100.0, len(newseq), totalPermutationsCount))
+        
+        if(totalPermutationsCount < 500):
+            raise Exception("Low number of possible permutations %.2g (length=%d nt, identity=%.3g%%)" % (totalPermutationsCount, len(newseq), identity*100.0))
+        newShuffles.append( newseq )
+    
+    return newShuffles
+
+
+
 _caches = {}
     
 def getRandomizedSequenceCacheForVerticalPermutations(taxId):
@@ -89,7 +124,7 @@ def getRandomizedSequenceCacheForVerticalPermutations(taxId):
 def storeNewShuffles(taxId, protId, newShuffleIds, shuffleType=db.Sources.ShuffleCDSv2_python, dontStore=False):
     
     cds = CDSHelper(taxId, protId)
-    print(protId)
+    #print(protId)
     
     if shuffleType == db.Sources.ShuffleCDSv2_python:
         return storeRandomizedSequences(cds,
@@ -111,6 +146,17 @@ def storeNewShuffles(taxId, protId, newShuffleIds, shuffleType=db.Sources.Shuffl
                                         newShuffleIds,
                                         shuffleType)
                                 
+    elif shuffleType == db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation:
+        print("store: before")
+        a = createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType)
+        print("store: {}".format(a))
+
+        return storeRandomizedSequences(cds,
+                                        createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType),
+                                        newShuffleIds,
+                                        shuffleType
+        )
+
     else:
         raise Exception("Unsupported shuffleType={}".format(shuffleType))
     
