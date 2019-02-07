@@ -6,12 +6,15 @@ from builtins import next
 from builtins import range
 from builtins import object
 from itertools import compress, chain
+from collections import Counter
 from copy import copy
 from math import factorial
 import random
 from Bio.Seq import Seq
 import Bio.Data
 from local_cache import LocalStringsCache
+from nucleic_compress import randseq, allseq
+from data_helpers import getCrc
 
 def splitCodons(seq):
     assert(len(seq)%3==0)
@@ -46,7 +49,7 @@ class SynonymousCodonPermutingRandomization(object):
     Args:
     skipIdenticalSequences - refuse returning sequences identical to the source (even though they are valid permutation). This means the sampling from the population of random perumtations is done without replacement; This can be thought of as either distorting the distribution or avoiding distrortion; The difference is only noticeble for sequences which have a very small number of permutations (compared to the number actually generated).
     """
-    def __init__(self, geneticCode=1, skipIdenticalSequences=True):
+    def __init__(self, geneticCode=1, skipIdenticalSequences=False):
         self._geneticCode = geneticCode
         self._code = Bio.Data.CodonTable.unambiguous_dna_by_id[geneticCode]
         self._back_table = make_full_back_table(self._code.forward_table)
@@ -82,7 +85,6 @@ class SynonymousCodonPermutingRandomization(object):
             # Permute synonymous codons for the current aa
             random.shuffle(pool)
             applyCodonsPermutation( randomizedCodonsSeq, pool, synonymousPositions)
-
         # Final checks
         # refuse providing permutations if the number of possible permutations is very small
         if(permutationsCount < 50):
@@ -308,8 +310,91 @@ class VerticalRandomizationCache(object):
         assert(shuffleId in self._availableShuffles)  # now shuffleId must be stored...
         return self._cache.get_value( entry_key )
 
+
+class NucleotidePermutationRandomization(object):
+    Nucleotides = frozenset(('a','c','g','t'))
+    def __init__(self):
+        pass
+
+    def randomize(self, nucleotideSeq):
+
+        ## TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY ####
+        #nucleotideSeq = Seq(nucleotideSeq.lower() + 'c')
+        ## TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY ####
+        nucleotideSeq = Seq(nucleotideSeq.lower() )
+        
+        # Calculate the total number of permutations
+        permutationsCountDenom = 1
+        countOfACGT = 0
+        for n in NucleotidePermutationRandomization.Nucleotides:
+            countOfN = sum( [1 if x==n else 0 for x in nucleotideSeq] )
+            permutationsCountDenom *= factorial(countOfN)
+            countOfACGT += countOfN
+        permutationsCount = factorial(countOfACGT) // permutationsCountDenom
+
+        isSynonymousPosition = [x in NucleotidePermutationRandomization.Nucleotides for x in nucleotideSeq]
+        pool = list(compress(nucleotideSeq, isSynonymousPosition))
+        random.shuffle(pool)
+
+        newSeq = list(nucleotideSeq)
+        for newNuc, pos in zip( pool, compress(range(len(newSeq)), isSynonymousPosition) ):
+            newSeq[pos] = newNuc
+
+        identity = sum([x==y for (x,y) in zip(nucleotideSeq, newSeq)]) / len(newSeq)
+        assert(identity >= 0.0)
+        assert(identity <= 1.0)
+
+        return (permutationsCount, identity, ''.join(newSeq))
+        
+    """
+    Permute a sequence, allowing substitutions only in positions specified by a mask. Positions can include an arbitrary list of codons, specified by positions
+
+    nucleotideSeq - nucleotide sequence.
+    nucleotideMask - List of logical values of length nucleotideSeq
+                True  = randomize this nucleotide
+                False = keep this nucleotide
+    """
+    def randomizeWithMask(self, nucleotideSeq, nucleotideMask):
+
+        originalMaskedNucleotides = ''.join( [c if msk else 'n' for (c, msk) in zip(nucleotideSeq, nucleotideMask)] )
+        (permutationsCount, identity, randomizedMaskedNucleotides) = self.randomize( originalMaskedNucleotides )
+
+        #idxMasked   = iter(list(range(len(originalMaskedNucleotides))))
+        #idxUnmasked = iter(list(range(len(unmaskedNucleotides))))
+
+        resultingSeq = ''.join( [u if msk else v for (u, v, msk) in zip( randomizedMaskedNucleotides, nucleotideSeq, nucleotideMask ) ] )
+        #assert( len(resultingSeq) == len(nucleotideSeq) )
+        return (permutationsCount, identity, resultingSeq)
         
 
+class CDSand3UTRRandomization(object):
+    """
+    """
+    def __init__(self, cdsRand, utrRand):
+        self.cdsRand = cdsRand
+        self.utrRand = utrRand
+
+    def randomize(self, nucleotideSeq, endCodonPos ):
+
+        CDSseq = nucleotideSeq[:endCodonPos+3] 
+        (CDSpermCount, CDSidentity, randomizedCDS) = self.cdsRand.randomize( CDSseq )
+
+        _3UTRseq = nucleotideSeq[endCodonPos+3:]
+        if len(_3UTRseq)>1:
+            (UTRpermCount, UTRidentity, randomizedUTR) = self.utrRand.randomize( _3UTRseq )
+        else:
+            UTRpermCount = 1
+            UTRidentity = 1.0
+            randomizedUTR = _3UTRseq
+
+        totalPerms = CDSpermCount * UTRpermCount
+        
+        totalIdentity = ((CDSidentity * len(CDSseq))+ (UTRidentity * len( _3UTRseq ))) / (len(CDSseq) + len( _3UTRseq ))
+        
+        return (UTRpermCount, totalIdentity, randomizedCDS+randomizedUTR)
+        
+
+    
 #map( lambda x: x[1] if x[0] else x[2], zip( [0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1], [8]*20, [1]*20 ) )
 
 def testCountRandomizations(N=50000):
@@ -338,7 +423,8 @@ def testMaskedRandomization(N=10000):
     #
     testSeq  = 'atcccgcgcccacctaataacacagcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcgatcgcgatcagcgaaccacatatacgatcggaaagccctacgcgagagcactcg'
     #testMask = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    #testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    testMask = [  0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     #
     #testSeq  =       'atcccgcgcccacctaataacacagcgatcagaccgctcagaccacatatacgatcggactcg'
     #testMask =       [  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
@@ -419,7 +505,123 @@ def printCounterAsHistogram(counter, stops=(0,1,5,20,50,100,200,300,400,500,600,
             print("{: >5}-{: <5} {:7} {}".format( currRange[0], currRange[1], level, "="*int(round(float(level)/sum(counter.values())*200)) ) )
         else:
             print("{: >5}-{: <5} {:7}".format(    currRange[0], currRange[1], level ) )
+
+
+def testNucleotidePermutationRandomization(N:int =20000, seqLength:int=16) -> None:
+    rand = NucleotidePermutationRandomization()
+
+    minFoundFraction = 1.01
+    minFoundFractionSeq = None
+
+    for i in range(200):
+        seq0 = randseq(seqLength, alphabet='acgtn')
+        freq0 = Counter(seq0)
+        isUnknownNuc0 = [x in NucleotidePermutationRandomization.Nucleotides for x in seq0]
+
+        a = set()
+
+        for j in range(N):
+            (permCount, nucIdentity, seq1) = rand.randomize(seq0)
+            freq1 = Counter(seq1)
+            isUnknownNuc1 = [x in NucleotidePermutationRandomization.Nucleotides for x in seq1]
+
+            #print("Seq0: {}".format(seq0))
+            #print("Seq1: {}".format(seq1))
+
+
+            if freq0 != freq1:
+                print("Error: frequencies changed!")
+                print("Seq0: {}".format(seq0))
+                print("Seq1: {}".format(seq1))
+                print(freq0)
+                print(freq1)
+
+            if isUnknownNuc0 != isUnknownNuc1:
+                print("Error: Unknown nucleotide positions changed!")
+                print("Seq0: {}".format(seq0))
+                print("Seq1: {}".format(seq1))
+                print(isUnknownNuc0)
+                print(isUnknownNuc1)
+
+            a.add( getCrc( seq1 ) )
+
+        foundFraction = len(a) / permCount
+        if foundFraction < minFoundFraction:
+            minFoundFraction = foundFraction
+            minFoundFractionSeq = seq0
+            
+        print("-------")
+        print(seq0)
+        print("Total possible: {}".format(permCount))
+        print("Obtained (after {} tries): {}".format(N, len(a)))
+
+    print("============"*5)
+    print(minFoundFraction)
+    print(minFoundFractionSeq)
         
+
+def testNucleotidePermutationRandomizationWithMask(N:int =20000, seqLength:int=16) -> None:
+    rand = NucleotidePermutationRandomization()
+
+    minFoundFraction = 1.01
+    minFoundFractionSeq = None
+
+    for i in range(10):
+        seq0 = randseq(seqLength, alphabet='acgtn')
+        freq0 = Counter(seq0)
+        isUnknownNuc0 = [x in NucleotidePermutationRandomization.Nucleotides for x in seq0]
+
+        mask = [True if x=='1' else False for x in randseq(seqLength, alphabet='011')]
+
+        a = set()
+
+        for j in range(N):
+            (permCount, nucIdentity, seq1) = rand.randomizeWithMask(seq0, mask)
+            freq1 = Counter(seq1)
+            isUnknownNuc1 = [x in NucleotidePermutationRandomization.Nucleotides for x in seq1]
+
+            #print("Seq0: {}".format(seq0))
+            #print("Seq1: {}".format(seq1))
+
+
+            if freq0 != freq1:
+                print("Error: frequencies changed!")
+                print("Seq0: {}".format(seq0))
+                print("Seq1: {}".format(seq1))
+                print("Mask: {}".format(mask))
+                print(freq0)
+                print(freq1)
+
+            if isUnknownNuc0 != isUnknownNuc1:
+                print("Error: Unknown nucleotide positions changed!")
+                print("Seq0: {}".format(seq0))
+                print("Seq1: {}".format(seq1))
+                print("Mask: {}".format(mask))
+                print(isUnknownNuc0)
+                print(isUnknownNuc1)
+
+            if not all([u==v if not m else True for (u, v, m) in zip(seq0, seq1, mask)]):
+                print("Error: Mask not respected!")
+                print("Seq0: {}".format(seq0))
+                print("Seq1: {}".format(seq1))
+                print("Mask: {}".format(mask))
+
+            a.add( getCrc( seq1 ) )
+
+        foundFraction = len(a) / permCount
+        if foundFraction < minFoundFraction:
+            minFoundFraction = foundFraction
+            minFoundFractionSeq = seq0
+            
+        print("-------")
+        print(seq0)
+        print("Total possible: {}".format(permCount))
+        print("Obtained (after {} tries): {}".format(N, len(a)))
+
+    print("============"*5)
+    print(minFoundFraction)
+    print(minFoundFractionSeq)
+
 
 
 def testAll():
@@ -429,8 +631,14 @@ def testAll():
     #ret = testMaskedRandomization(N=20000)
     #if ret: return ret
 
-    ret = testVerticalShuffling()
+    #ret = testNucleotidePermutationRandomization(N=50000, seqLength=10)
+    #if ret: return ret
+
+    ret = testNucleotidePermutationRandomizationWithMask( N=20000, seqLength=14 )
     if ret: return ret
+
+    #ret = testVerticalShuffling()
+    #if ret: return ret
     
     return 0
 
