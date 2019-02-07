@@ -46,7 +46,7 @@ def plotMFEProfileWithGC(taxId, profileId, data):
 
     plt.xlabel('Position (nt, window start, from cds start)')
 
-    ax1.set_title("Mean LFE for %s" % str(speciesName, encoding="latin1") )
+    ax1.set_title("Mean LFE for %s" % speciesName)
     ax1.set_ylabel(u"\u0394LFE")
     ax1.legend(fontsize=8)
     ax1.grid(True)
