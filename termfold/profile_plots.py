@@ -50,7 +50,7 @@ def parseProfileSpec():
         o[1] = int(o[1])
         assert(o[1]>0)
         
-        assert(o[2]=="begin" or o[2]=="end")
+        assert(o[2]=="begin" or o[2]=="end" or o[2]=="stop3utr")
 
         if( len(o) == 4 ):
             o[3] = int(o[3])
@@ -90,6 +90,8 @@ class ProfilePlot(object):
         print("*********** {} ***********".format(shuffleTypes))
 
         combinedData = {}
+
+        stopCodonFreq = Counter()
 
         for shuffleType in shuffleTypes:
             n = 0
@@ -140,11 +142,22 @@ class ProfilePlot(object):
                     , args.profile[3], args.profile[0], args.profile[1], args.profile[2]):
 
                 fullCDS = result["cds-seq"]
-                seq = fullCDS[args.profile[3]:args.profile[0]]
+
+                if args.profile[2]=="stop3utr":
+                    # TODO FIX THIS
+                    seq = fullCDS[args.profile[3]:args.profile[0]]
+                else:
+                    seq = fullCDS[args.profile[3]:args.profile[0]]
 
                 if not seq:
                     continue
 
+                                    
+
+                stopCodonPos = result['content'][0]['stop-codon-pos']
+                assert(stopCodonPos%3==0)
+                stopCodonFreq.update( (fullCDS[stopCodonPos:stopCodonPos+3], ) )
+                
                 protId = result["cds"].getProtId()
                 #print("Length: {}nt".format(result["cds"].length()))
 
@@ -152,11 +165,15 @@ class ProfilePlot(object):
 
 
                 profileData = result["profile-data"]
+                #print("ppl: {}".format( profileData.shape))
                 assert(profileData.shape[0] >= numShuffledGroups)
                 #print(profileData.shape)
                 #print(profileData)
 
                 #print(profileData[:,0].T)
+
+                #print( profileData[:, [0,99,-1]] )
+                print(profileData.shape)
 
                 # Prepare mean MFE profiles
                 nativeMeanProfile.add( profileData[0,None] )
@@ -273,32 +290,34 @@ class ProfilePlot(object):
             # Test for significance of the mean dLFE (postive or negative) at each position along the genome
             # (This will answer questions such as "how many genomes have (significantly) negative dLFE at position X?")
             #------------------------------------------------------------------------------------------------------------------
-            wilcoxonDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float'), 'N':pd.Series(dtype='int') })
-            if( True ):
-                print("Processing full deltas...")
+            # wilcoxonDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float'), 'N':pd.Series(dtype='int') })
+            # if( True ):
+            #     print("Processing full deltas...")
 
-                # Perform statistical tests based on the deltas for each position (from all proteins)
-                for pos in range(profileLength(args.profile)):
+            #     # Perform statistical tests based on the deltas for each position (from all proteins)
+            #     for pos in range(profileLength(args.profile)):
 
-                    # Collect all deltas for this position (data will be an list of arrays of length 20 - one for each protein long enough to have deltas at this position)
-                    data = [x[:,pos] for x in fullDeltas if x.shape[1]>pos]
-                    dataar = np.concatenate(data)  # flatten all deltas
-                    assert(dataar.ndim == 1)
+            #         # Collect all deltas for this position (data will be an list of arrays of length 20 - one for each protein long enough to have deltas at this position)
+            #         print("pos: {} len: {}".format( pos, len(fullDeltas)))
+            #         data = [x[:,pos] for x in fullDeltas if x.shape[1]>pos]
+            #         print(data.shape)
+            #         dataar = np.concatenate(data)  # flatten all deltas
+            #         assert(dataar.ndim == 1)
 
-                    # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
-                    wilcoxonPval = wilcoxon(dataar).pvalue  # 2-sided test
-                    if wilcoxonPval>0.0:
-                        logWilcoxonPval = log10(wilcoxonPval)
-                    else:
-                        logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
+            #         # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
+            #         wilcoxonPval = wilcoxon(dataar).pvalue  # 2-sided test
+            #         if wilcoxonPval>0.0:
+            #             logWilcoxonPval = log10(wilcoxonPval)
+            #         else:
+            #             logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
 
-                    N = dataar.shape[0]
+            #         N = dataar.shape[0]
                     
-                    wilcoxonDf = wilcoxonDf.append(pd.DataFrame({'pos':pd.Series(xRange[pos]), 'N':pd.Series([N]), 'logpval': pd.Series([logWilcoxonPval]) } ) )
+            #         #wilcoxonDf = wilcoxonDf.append(pd.DataFrame({'pos':pd.Series(xRange[pos]), 'N':pd.Series([N]), 'logpval': pd.Series([logWilcoxonPval]) } ) )
                     
-                    #alldeltas = np.concatenate(fullDeltas)
-                #print(wilcoxonDf)
-                del(data); del(dataar)
+            #         #alldeltas = np.concatenate(fullDeltas)
+            #     #print(wilcoxonDf)
+            #     del(data); del(dataar)
 
             #------------------------------------------------------------------------------------------------------------------
 
@@ -306,106 +325,106 @@ class ProfilePlot(object):
             # Find "transition peak"
             #------------------------------------------------------------------------------------------------------------------
             # Calculate the dLFE
-            print("-TransitionPeak-TransitionPeak-TransitionPeak-TransitionPeak-")
-            meanDeltaLFE = nativeMeanProfile.value() - shuffledMeanProfile.value()
-            peakPos = np.argmin( meanDeltaLFE )
-            peakVal = meanDeltaLFE[peakPos]
+            # print("-TransitionPeak-TransitionPeak-TransitionPeak-TransitionPeak-")
+            # meanDeltaLFE = nativeMeanProfile.value() - shuffledMeanProfile.value()
+            # peakPos = np.argmin( meanDeltaLFE )
+            # peakVal = meanDeltaLFE[peakPos]
             
-            guPeakDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float') })
+            # guPeakDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float') })
             
-            if peakVal <= 0.0:
-                print("{} {}".format(peakPos, peakVal))
-                if not wilcoxonDf[wilcoxonDf['pos']==peakPos*10].empty:
-                    logpval = wilcoxonDf[wilcoxonDf['pos']==peakPos*10].logpval.loc[0]
-                    print(type(logpval))
-                    #print(logpval.shape)
-                    print(logpval)
+            # if peakVal <= 0.0:
+            #     print("{} {}".format(peakPos, peakVal))
+            #     if not wilcoxonDf[wilcoxonDf['pos']==peakPos*10].empty:
+            #         logpval = wilcoxonDf[wilcoxonDf['pos']==peakPos*10].logpval.loc[0]
+            #         print(type(logpval))
+            #         #print(logpval.shape)
+            #         print(logpval)
 
-                    if logpval < -2.0:
-                        #
+            #         if logpval < -2.0:
+            #             #
 
-                        # Collect all deltas for this position (data will be an list of arrays of length 20 - one for each protein long enough to have deltas at this position)
+            #             # Collect all deltas for this position (data will be an list of arrays of length 20 - one for each protein long enough to have deltas at this position)
 
-                        for otherPos in range(profileLength(args.profile)):
+            #             for otherPos in range(profileLength(args.profile)):
 
-                            data1 = [x[:,peakPos] for x in fullDeltas if x.shape[1]>max(peakPos,otherPos)]
-                            peakData = np.concatenate(data1)  # flatten all deltas
-                            assert(peakData.ndim == 1)
+            #                 data1 = [x[:,peakPos] for x in fullDeltas if x.shape[1]>max(peakPos,otherPos)]
+            #                 peakData = np.concatenate(data1)  # flatten all deltas
+            #                 assert(peakData.ndim == 1)
 
-                            data2 = [x[:,otherPos] for x in fullDeltas if x.shape[1]>max(peakPos,otherPos)]
-                            otherData = np.concatenate(data2)  # flatten all deltas
+            #                 data2 = [x[:,otherPos] for x in fullDeltas if x.shape[1]>max(peakPos,otherPos)]
+            #                 otherData = np.concatenate(data2)  # flatten all deltas
 
-                            assert(len(peakData)==len(otherData))
-                            datax = otherData-peakData
+            #                 assert(len(peakData)==len(otherData))
+            #                 datax = otherData-peakData
 
-                            print("/-: {} {} {}".format(peakPos, otherPos, np.mean(datax)))
+            #                 print("/-: {} {} {}".format(peakPos, otherPos, np.mean(datax)))
 
-                            #if( peakPos==otherPos ):
-                            #    print(datax)
+            #                 #if( peakPos==otherPos ):
+            #                 #    print(datax)
 
-                            wilcoxonPval = None
-                            if np.allclose(otherData, peakData):
-                                logWilcoxonPval = 0.0
-                            else:
-                                # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
-                                wilcoxonPval = wilcoxon(peakData, otherData).pvalue  # 2-sided test (not ideal in this situation...)
-                                if wilcoxonPval>0.0:
-                                    logWilcoxonPval = log10(wilcoxonPval)
-                                elif wilcoxonPval==0.0:
-                                    logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
-                                else:
-                                    logWilcoxonPval = None
+            #                 wilcoxonPval = None
+            #                 if np.allclose(otherData, peakData):
+            #                     logWilcoxonPval = 0.0
+            #                 else:
+            #                     # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
+            #                     wilcoxonPval = wilcoxon(peakData, otherData).pvalue  # 2-sided test (not ideal in this situation...)
+            #                     if wilcoxonPval>0.0:
+            #                         logWilcoxonPval = log10(wilcoxonPval)
+            #                     elif wilcoxonPval==0.0:
+            #                         logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
+            #                     else:
+            #                         logWilcoxonPval = None
 
-                            if not logWilcoxonPval is None:
-                                guPeakDf = guPeakDf.append(pd.DataFrame({'pos':pd.Series(xRange[otherPos]), 'logpval': pd.Series([logWilcoxonPval]) } ) )
+            #                 if not logWilcoxonPval is None:
+            #                     #guPeakDf = guPeakDf.append(pd.DataFrame({'pos':pd.Series(xRange[otherPos]), 'logpval': pd.Series([logWilcoxonPval]) } ) )
 
 
-                        print(guPeakDf)
+            #             print(guPeakDf)
 
 
             #------------------------------------------------------------------------------------------------------------------
             # Calculate edge-referenced wilcoxon
             #------------------------------------------------------------------------------------------------------------------
 
-            edgePos = profileEdgeIndex(args.profile)
-            data0 = [x[:,edgePos] if x.shape[1]>pos else None for x in fullDeltas]
-            edgeWilcoxonDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float') })
+            # edgePos = profileEdgeIndex(args.profile)
+            # data0 = [x[:,edgePos] if x.shape[1]>pos else None for x in fullDeltas]
+            # edgeWilcoxonDf = pd.DataFrame({'pos':pd.Series(dtype='int'), 'logpval':pd.Series(dtype='float') })
             
-            for pos in range(profileLength(args.profile)):
-                data1 = [x[:,pos] if x.shape[1]>pos else None for x in fullDeltas]
-                assert(len(data0)==len(data1))
-                if not data1[0] is None:
-                    print("]]]]]]]]]]]]] {}".format(data1[0].shape))
+            # for pos in range(profileLength(args.profile)):
+            #     data1 = [x[:,pos] if x.shape[1]>pos else None for x in fullDeltas]
+            #     assert(len(data0)==len(data1))
+            #     if not data1[0] is None:
+            #         print("]]]]]]]]]]]]] {}".format(data1[0].shape))
 
-                diffs = []
-                for d0, d1 in zip(data0, data1):
-                    if (not d0 is None) and (not d1 is None):
-                        #print("{} {}".format(d0.shape, d1.shape))
-                        d = d1-d0 
-                        diffs.append( d[~np.isnan(d)] )
+            #     diffs = []
+            #     for d0, d1 in zip(data0, data1):
+            #         if (not d0 is None) and (not d1 is None):
+            #             #print("{} {}".format(d0.shape, d1.shape))
+            #             d = d1-d0 
+            #             diffs.append( d[~np.isnan(d)] )
 
-                alldiffs = np.concatenate( diffs )
-                #print(alldiffs.shape)
-                print(pos)
-                #print(alldiffs[:100])
-                print(alldiffs.shape)
+            #     alldiffs = np.concatenate( diffs )
+            #     #print(alldiffs.shape)
+            #     print(pos)
+            #     #print(alldiffs[:100])
+            #     print(alldiffs.shape)
                 
-                wilcoxonPval = None
-                if np.allclose(alldiffs, 0):
-                    logWilcoxonPval = 0.0
-                else:
-                    # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
-                    wilcoxonPval = wilcoxon(alldiffs).pvalue  # 2-sided test (not ideal in this situation...)
-                    if wilcoxonPval>0.0:
-                        logWilcoxonPval = log10(wilcoxonPval)
-                    elif wilcoxonPval==0.0:
-                        logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
-                    else:
-                        logWilcoxonPval = None
+            #     wilcoxonPval = None
+            #     if np.allclose(alldiffs, 0):
+            #         logWilcoxonPval = 0.0
+            #     else:
+            #         # Perform 1-sample Wilcoxon signed-rank test on the deltas (testing whether the deltas are symmetrical)
+            #         wilcoxonPval = wilcoxon(alldiffs).pvalue  # 2-sided test (not ideal in this situation...)
+            #         if wilcoxonPval>0.0:
+            #             logWilcoxonPval = log10(wilcoxonPval)
+            #         elif wilcoxonPval==0.0:
+            #             logWilcoxonPval = -324.0 # ~minimum value for log10(0.000.....)
+            #         else:
+            #             logWilcoxonPval = None
 
-                if not logWilcoxonPval is None:
-                    edgeWilcoxonDf = edgeWilcoxonDf.append(pd.DataFrame({'pos':pd.Series(xRange[pos]), 'logpval': pd.Series([logWilcoxonPval]) } ))
-            print(edgeWilcoxonDf)
+            #     #if not logWilcoxonPval is None:
+            #         #edgeWilcoxonDf = edgeWilcoxonDf.append(pd.DataFrame({'pos':pd.Series(xRange[pos]), 'logpval': pd.Series([logWilcoxonPval]) } ))
+            # #print(edgeWilcoxonDf)
 
             # Count the mininum number of sequences
             minCount = 1000000
@@ -424,6 +443,9 @@ class ProfilePlot(object):
             profileId = "%d_%d_%s_t%d" % (args.profile[0], args.profile[1], args.profile[2], shuffleType)
 
 
+            print(nativeMeanProfile.value())
+            print(xRange)
+            
             df = pd.DataFrame( { "native": nativeMeanProfile.value(), "shuffled": shuffledMeanProfile.value(), "gc":GCProfile.value(), "position": xRange, "shuffled25":shuffled25Profile.value(), "shuffled75":shuffled75Profile.value()}, index=xRange )
             print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
             if( not CUBmetricsProfile is None ):
@@ -464,7 +486,8 @@ class ProfilePlot(object):
 
             plotMFEProfileWithGC(taxid, profileId, df)
 
-            plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, wilcoxon=wilcoxonDf, transitionPeak=guPeakDf, transitionPeakPos=peakPos*10, edgeWilcoxon=edgeWilcoxonDf, ProfilesCount=minCount)
+            #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, ProfilesCount=minCount)
+            #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, wilcoxon=wilcoxonDf, transitionPeak=guPeakDf, transitionPeakPos=peakPos*10, edgeWilcoxon=edgeWilcoxonDf, ProfilesCount=minCount)
 
             # Plot the number of genes included in each profile position
             plotXY(
@@ -626,9 +649,9 @@ class ProfilePlot(object):
                 store["statistics_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = statisticsDF
                 if( args.codonw ):
                     store["profiles_spearman_rho_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = dfProfileCorrs
-                store["wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = wilcoxonDf
-                store["transition_peak_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = guPeakDf
-                store["edge_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = edgeWilcoxonDf
+                #store["wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = wilcoxonDf
+                #store["transition_peak_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = guPeakDf
+                #store["edge_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = edgeWilcoxonDf
                 
                 store.flush()
 
@@ -644,6 +667,8 @@ class ProfilePlot(object):
 
         print("//"*20)
         print(list(combinedData.keys()))
+
+        print("Found stop codons: {}".format(stopCodonFreq))
 
         if len(combinedData)>1:
             profileId = "%d_%d_%s" % (args.profile[0], args.profile[1], args.profile[2])
@@ -732,7 +757,7 @@ if __name__=="__main__":
 
     checkSpeciesExist(args.taxid)  # Check for non-existant taxids to avoid doomed runs
 
-    if( args.profile[2] != "begin" and args.profile[2] != "end" ):
+    if( args.profile[2] != "begin" and args.profile[2] != "end" and args.profile[2] != "stop3utr" ):
         raise Exception("Unsupported profile reference '%s'" % args.profile[2]) # Currently only profile with reference to CDS 'begin' are implemented...
 
     results = None

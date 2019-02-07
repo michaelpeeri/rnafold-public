@@ -95,6 +95,9 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
                 print("# %s - %d records included, %d records skipped" % (datetime.now().isoformat(), selected, skipped))
 
 
+"""
+Read raw series results (i.e. values computed on the sequences)
+"""
 def readSeriesResultsForSpeciesWithSequence( seriesSourceNumber, species, minShuffledGroups=20, maxShuffledGroups=20, shuffleType=db.Sources.ShuffleCDSv2_python, cdsFilter=None, returnCDS=True ):
     if isinstance(species, Iterable):  # usually, species will be a sequence of numeric taxid values
         if isinstance(species, basestring):
@@ -153,6 +156,7 @@ def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, int
         if reference=="begin":
             maxPosition = min(endPosition, fullProfile.shape[1])
             result["profile-data"] = fullProfile[:, startPosition:maxPosition:interval]  # replace the full profile with the sampled profile
+            
         elif reference=="end":
             lastPosition = fullProfile.shape[1]-1
             #print("lastPosition: {}".format(lastPosition))
@@ -163,6 +167,40 @@ def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, int
             #print("startPosition: {}".format(startPosition))
             result["profile-data"] = fullProfile[:, firstPosition:(lastPosition+interval):interval]  # replace the full profile with the sampled profile
             #print(result["profile-data"].shape)
+            
+        elif reference=="stop3utr":
+            stopCodonPos = result['content'][0]['stop-codon-pos']
+            assert(stopCodonPos%3 == 0)
+            assert(stopCodonPos>4)
+
+            lastFullCDSwindow = stopCodonPos+2 - 40 # TODO - read from configuration
+            values = fullProfile[:, max(0, lastFullCDSwindow-(endPosition//2)):lastFullCDSwindow+(endPosition//2):interval]
+
+            
+            print("uut: {} -> {}".format( fullProfile.shape, values.shape ))
+            print("uut: stop:{} lastFullCDSWindow: {} [:, {}:{}:{}]".format( stopCodonPos, lastFullCDSwindow, max(0, lastFullCDSwindow-(endPosition//2)), lastFullCDSwindow+(endPosition//2), interval ))
+            
+            #values.shape = (21,real_len)
+            if lastFullCDSwindow < endPosition//2:
+                paddingLeft =  endPosition//2 - lastFullCDSwindow
+                print("uut: pad: endCodonPos {}: paddingLeft: {} endPos: {} endPos//2: {}".format(stopCodonPos, paddingLeft, endPosition, endPosition//2))
+                values2 = np.hstack( (np.full( (values.shape[0], paddingLeft), np.nan ), values ) )
+                values = values2
+                print("uut: pad: {}".format(values.shape))
+
+            result["profile-data"] = values
+
+            print("============"*5)
+            print(values.shape)
+            print("---nan---")     # 39 empties
+            print(np.sum( np.isnan(values), axis=0))
+            print(np.sum( np.isnan(values), axis=1))
+            print("---0.0---")   # end missing values
+            print(np.sum( values==0, axis=0))
+            print(np.sum( values==0, axis=1))
+
+            
+            
         else:
             assert(False)
             
@@ -175,6 +213,8 @@ def profileLength(profileSpec):
         return int(ceil(float(profileSpec[0]-profileSpec[3]) / profileSpec[1]))  # should be equal to len(range(0, spec[0], spec[1]))
     elif profileSpec[2] == "end":
         return (profileSpec[0] // profileSpec[1])+1
+    elif profileSpec[2] == "stop3utr":
+        return (profileSpec[0] // profileSpec[1])
     else:
         assert(False)
 
@@ -183,6 +223,8 @@ def profileElements(profileSpec):
         return list(range(profileSpec[3], profileSpec[0], profileSpec[1]))
     elif profileSpec[2] == "end":
         return list(range(-profileSpec[0], 1, profileSpec[1]))
+    elif profileSpec[2] == "stop3utr":
+        return list(range(-(profileSpec[0]//2), (profileSpec[0]//2), profileSpec[1] ))
     else:
         assert(False)
 
@@ -190,12 +232,14 @@ def profileElements(profileSpec):
 Find the position (index) of the "edge" (0nt) element
 """
 def profileEdgeIndex(profileSpec):
-    if profileSpec[2] == "begin":
-        return list(range(profileSpec[3], profileSpec[0], profileSpec[1])).index(0)
-    elif profileSpec[2] == "end":
-        return list(range(-profileSpec[0], 1, profileSpec[1])).index(0)
-    else:
-        assert(False)
+    raise Exception("Not impl")
+
+    # if profileSpec[2] == "begin":
+    #     return list(range(profileSpec[3], profileSpec[0], profileSpec[1])).index(0)
+    # elif profileSpec[2] == "end":
+    #     return list(range(-profileSpec[0], 1, profileSpec[1])).index(0)
+    # else:
+    #     assert(False)
 
     
 class MeanProfile(object):

@@ -32,22 +32,25 @@ import nucleic_compress
 
 
 # Configuration
-speciesCDSList = "species:taxid:%d:CDS"
-speciesNameKey = "species:taxid:%d:name"
-queueItemsKey = "queue:tag:awaiting-%s:members"
-seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
-cdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
-cdsSeqChecksumKey = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
-shuffledSeqIdsKey = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-%s"
-workerKeepAliveKey = "status:worker-keep-alive"
-jobStatusKey = "status:job:%s:progress"
-taxGroupKey = "species:taxid:%d:tax-group"
+queueItemsKey        = "queue:tag:awaiting-%s:members"
+seqLengthKey_CDSOnly = "CDS:taxid:%d:protid:%s:cds-length-nt"  # not stored currently
+seqLengthKey_Total   = "CDS:taxid:%d:protid:%s:length-nt"
+stopCodonPosKey      = "CDS:taxid:%d:protid:%s:stop-codon-pos"
+cdsSeqIdKey          = "CDS:taxid:%d:protid:%s:seq-id"
+cdsSeqWith3UTRIdKey  = "CDS:taxid:%d:protid:%s:cds-3utr-seq-id"
+cdsSeqChecksumKey    = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
+shuffledSeqIdsKey    = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-%s"
+workerKeepAliveKey  = "status:worker-keep-alive"
+jobStatusKey        = "status:job:%s:progress"
+speciesCDSList             = "species:taxid:%d:CDS"
+speciesNameKey             = "species:taxid:%d:name"
+taxGroupKey                = "species:taxid:%d:tax-group"
 speciesTranslationTableKey = "species:taxid:%d:genomic-transl-table"
-speciesPropertyValueKey = "species:taxid:%d:properties:%s"
-speciesPropertySourceKey = "species:taxid:%d:properties:%s:source"
-speciesTaxIdKey = "species:name:%s:taxid"
+speciesPropertyValueKey    = "species:taxid:%d:properties:%s"
+speciesPropertySourceKey   = "species:taxid:%d:properties:%s:source"
+speciesTaxIdKey            = "species:name:%s:taxid"
 
-allowedShuffleTypes = frozenset((db.Sources.ShuffleCDSv2_python, db.Sources.ShuffleCDS_vertical_permutation_1nt))
+allowedShuffleTypes = frozenset((db.Sources.ShuffleCDSv2_python, db.Sources.ShuffleCDS_vertical_permutation_1nt, db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation))
 
 def getShuffleTypeIdentifier(shuffleType = db.Sources.ShuffleCDSv2_python):
     assert( shuffleType in allowedShuffleTypes )
@@ -109,7 +112,7 @@ def countSpeciesCDS(taxId):
 Look-up the species name, by taxid (e.g., for display)
 """
 def getSpeciesName(taxId):
-    return r.get("species:taxid:%d:name" % taxId)
+    return str( r.get("species:taxid:%d:name" % taxId), encoding="utf-8" )
 
 """
 Get shortened name for species (e.g., Ecoli or Scerevisiae) -- note that this is used for much more than file names...
@@ -271,15 +274,20 @@ def decompressNucleicSequence(compressed):
 def version():
     return "1.0"
 
+class RegionsOfInterset(object):
+    CDSonly    = 100
+    CDSand3UTR = 101
+
 """
 Wrapper for common CDS-related operations
 """
 class CDSHelper(object):
-    def __init__(self, taxId, protId):
+    def __init__(self, taxId:int, protId:str, regionOfInterest:int=RegionsOfInterset.CDSand3UTR):
         self._taxId = taxId
         self._protId = protId
         self._cache = {}
         self.updatescount = 0
+        self.regionOfInterest = regionOfInterest
 
     def _getScalarRedisProperty(self, cacheTag, redisKey, convertFunc = None):
         cachedVal = self._cache.get(cacheTag)
@@ -381,15 +389,44 @@ class CDSHelper(object):
         else:
             return ret
 
-
     def length(self):
-        return self._getScalarRedisProperty( "cds-length-nt", seqLengthKey % (self._taxId, self._protId), int)
+        if self.regionOfInterest == RegionsOfInterset.CDSonly:
+            return self.CDSLength()
         
+        elif self.regionOfInterest == RegionsOfInterset.CDSand3UTR:
+            return self.totalLength()
+        
+        else:
+            assert(False)
+        
+
+    def CDSlength(self):
+        return self._getScalarRedisProperty( "cds-length-nt", seqLengthKey_CDSOnly % (self._taxId, self._protId), int)
+
+    def totalLength(self):
+        return self._getScalarRedisProperty( "length-nt", seqLengthKey_Total % (self._taxId, self._protId), int)
+    
     def crc(self):
         return self._getScalarRedisProperty( "cds-crc", cdsSeqChecksumKey % (self._taxId, self._protId), int)
 
+    def stopCodonPos(self):
+        if self.regionOfInterest == RegionsOfInterset.CDSonly:
+            return self.CDSLength()-3
+        
+        elif self.regionOfInterest == RegionsOfInterset.CDSand3UTR:
+            return self._getScalarRedisProperty( "stop-codon-pos", stopCodonPosKey % (self._taxId, self._protId), int)
+        
+    
     def seqId(self):
-        return self._getScalarRedisProperty( "cds-seq-id", cdsSeqIdKey % (self._taxId, self._protId), int)
+        
+        if self.regionOfInterest == RegionsOfInterset.CDSonly:
+            return self._getScalarRedisProperty( "cds-seq-id", cdsSeqIdKey % (self._taxId, self._protId), int)
+        
+        elif self.regionOfInterest == RegionsOfInterset.CDSand3UTR:
+            return self._getScalarRedisProperty( "cds-3utr-seq-id", cdsSeqWith3UTRIdKey % (self._taxId, self._protId), int)
+        
+        else:
+            assert(False)
         
     def shuffledSeqIds(self, shuffleType):
         assert( shuffleType in allowedShuffleTypes )
