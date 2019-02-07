@@ -17,6 +17,7 @@ import codecs
 import argparse
 from random import randint
 from collections import Counter
+from itertools import compress
 import logging
 import traceback
 import config
@@ -49,7 +50,7 @@ argsParser.add_argument("--shuffle-type", type=str, default="")
 argsParser.add_argument("--insert-sequences-only", type=bool, default=False)
 argsParser.add_argument("--analyze-only", type=bool, default=False)
 argsParser.add_argument("--completion-notification", type=bool, default=False)
-argsParser.add_argument("--max-num-windows", type=int, default=1000)
+argsParser.add_argument("--max-num-windows", type=int, default=200)
 argsParser.add_argument("--profile-reference", type=str, default="begin")
 argsParser.add_argument("--series-source", type=int, default=db.Sources.RNAfoldEnergy_SlidingWindow40_v2)
 
@@ -75,7 +76,8 @@ shuffleTypesMapping = {""                   :db.Sources.ShuffleCDSv2_python,
                        "ShuffleCDSv2_python":db.Sources.ShuffleCDSv2_python,
                        "12"                 :db.Sources.ShuffleCDS_vertical_permutation_1nt,
                        "ShuffleCDS_vertical_permutation_1nt"
-                                            :db.Sources.ShuffleCDS_vertical_permutation_1nt }
+                                            :db.Sources.ShuffleCDS_vertical_permutation_1nt,
+                       "20"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation }
 shuffleType=shuffleTypesMapping[args.shuffle_type]
 
 #if not args.log is None:
@@ -113,7 +115,7 @@ totalMissingResults = 0
 queuedDelayedCalls = []
 
 for taxIdForProcessing in species:
-    print("Procesing %d sequences for tax-id %d (%s)..."
+    print("Processing %d sequences for tax-id %d (%s)..."
           % (countSpeciesCDS(taxIdForProcessing),
              taxIdForProcessing,
              getSpeciesName(taxIdForProcessing)))
@@ -151,14 +153,15 @@ for taxIdForProcessing in species:
 
         cds = CDSHelper(taxIdForProcessing, protId)
 
-        seqLength = cds.length()
+        seqLength    = cds.length()
+        stopCodonPos = cds.stopCodonPos()
+        
         if seqLength is None:
             print("Warning: Could not find CDS length entry for taxid=%d, protid=%s" % (taxIdForProcessing, protId) )
             skipped += 1
             stats['skipped-cds-length-missing'] += 1
             continue
 
-        assert( seqLength > 3 )
         # Skip sequences with length <40nt (window width)
         if(seqLength < windowWidth + 1 ):
             print("short seq")
@@ -185,7 +188,7 @@ for taxIdForProcessing in species:
 
             requiredWindows = list(range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep))
 
-            if len(requiredWindows) > maxNumWindows:
+            if len(requiredWindows) > maxNumWindows:  # calculate at most N windows from the end (N=maxNumWindows)
                 requiredWindows = requiredWindows[-maxNumWindows:]
                 assert(len(requiredWindows) == maxNumWindows)
             
@@ -199,6 +202,12 @@ for taxIdForProcessing in species:
             # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
             #requiredWindows = []
             # DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY ###  DEBUG ONLY #
+
+        elif profileReference=="stop3utr":
+
+            # Up to maxNumWindows windows, split evenly before and after the stop codon
+            isRequired = [1 if abs(pos-stopCodonPos)<((maxNumWindows//2)*windowStep) else 0 for pos in range(0, seqLength - windowWidth, windowStep)]
+            requiredWindows = list( compress( range(seqLength), isRequired ) )
             
         else:
             assert(False)
@@ -271,7 +280,7 @@ for taxIdForProcessing in species:
 
         if args.insert_sequences_only:
             continue
-            
+
         # ------------------------------------------------------------------------------------------
         # Submit a tasks for calculating LFE values for all series that have some values missing
         # ------------------------------------------------------------------------------------------
@@ -280,6 +289,8 @@ for taxIdForProcessing in species:
             lastwin = requiredWindows[-1]
         elif profileReference == "end":
             lastwin = requiredWindows[0]
+        elif profileReference=="stop3utr":
+            lastwin = maxNumWindows
         else:
             assert(False)
             
@@ -298,7 +309,7 @@ for taxIdForProcessing in species:
             requiredSeqIds = list(map(shuffleIdToSeqId, shuffleIdsToProcess))
 
             queueItem = "%d/%s/%s/%s/%d/%d/%s/%d" % (cds.getTaxId(), cds.getProtId(), ",".join(map(str, requiredSeqIds)), ",".join(map(str, shufflesWithMissingWindows + completelyMissingShuffles)), lastwin, windowStep, profileReference, shuffleType)
-            #print(queueItem)
+            print(queueItem)
 
             # To maximize node utilization, we will delay the main part of the calcualtion, the energy calculation, until after
             # we finished creating all necessary sequences (Otherwise, both types of calculations are interleaved and we may
