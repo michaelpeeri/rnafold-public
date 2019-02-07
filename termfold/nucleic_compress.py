@@ -157,8 +157,8 @@ def test(seq, debug=True):
 """
 Generate a random sequence of length N
 """
-def randseq(N):
-    return ''.join([c for c in itertools.starmap(lambda:random.choice('acgt'), itertools.repeat((), N))])
+def randseq(N, alphabet='acgt'):
+    return ''.join([c for c in itertools.starmap(lambda:random.choice(alphabet), itertools.repeat((), N))])
 
 """
 Exhaustively generate all sequences of length N
