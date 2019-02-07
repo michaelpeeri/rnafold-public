@@ -172,6 +172,7 @@ class Sources(object):
     ShuffleCDSv2_matlab = 10
     ShuffleCDSv2_python = 11
     ShuffleCDS_vertical_permutation_1nt = 12
+    ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation = 20
     RNAfoldEnergy_SlidingWindow40_v2 = 102
     RNAfoldEnergy_SlidingWindow40_v2_alt = 103
     RNAfoldEnergy_SlidingWindow40_v2_native_temp = 110
