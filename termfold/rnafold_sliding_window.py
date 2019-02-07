@@ -12,6 +12,7 @@ import gzip
 import json
 import logging
 import profiling
+from itertools import compress
 from time import sleep
 from datetime import datetime, timedelta
 import argparse
@@ -110,11 +111,10 @@ class RNAFold(object):
             else:
                 optimalSpeciesGrowthTemperature = float(optimalSpeciesGrowthTemperature)
                 assert(optimalSpeciesGrowthTemperature >= -30.0 and optimalSpeciesGrowthTemperature <= 150.0)
-        
 
-        if( reference != "begin" and reference != "end"):
+        if( reference != "begin" and reference != "end" and reference != "stop3utr"):
             timerForPreFolding.stop()
-            e = "Specificed profile reference '%s' is not supported! (" % reference
+            e = "Specificed profile reference '%s' is not supported!" % reference
             logging.error(e)
             raise Exception(e)
 
@@ -143,7 +143,15 @@ class RNAFold(object):
 
             #lastPossibleWindowStart = seqLength - windowWidth # + 1  # disregard lastWindowStart when reference=="end"
             requestedWindowStarts = frozenset([x for x in range(lastPossibleWindowStart % windowStep, lastPossibleWindowStart+1, windowStep) if x>=lastWindowStart])
+
+        elif reference == "stop3utr":
+            seqLength = cds.length()
+            stopCodonPos = cds.stopCodonPos()
             
+            isRequired = [1 if abs(pos-stopCodonPos)<((lastWindowStart//2)*windowStep) else 0 for pos in range(0, seqLength - self._windowWidth, windowStep)]
+            requestedWindowStarts = frozenset( compress( range(seqLength), isRequired ) )
+            
+
             
             #requestedWindowStarts = frozenset(range(lastWindowCodonStart % windowStep, lastWindowCodonStart, windowStep))
             #pass
@@ -351,6 +359,10 @@ class RNAFold(object):
             record["seq-crc"] = crc
             record["MFE-profile"] = [round4(x) for x in MFEprofile] # Round items down to save space (these are not exact numbers anyway)
             record["MeanMFE"] = stats.mean()
+            
+            if reference == "stop3utr":
+                record["stop-codon-pos"] = cds.stopCodonPos()
+                
             result = json.dumps(record)
 
             f.write(result)
@@ -412,6 +424,7 @@ rl = RateLimit(60)
 def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription, debug=False):
     config.initLogging()
     logging.warning("Processing task %s" % taskDescription)
+    print(taskDescription)
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
     (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, windowRef, shuffleType) = parseTaskDescription(taskDescription)
 
@@ -553,6 +566,8 @@ if __name__=="__main__":
     #testTask = "553190/ADB14057/47037869,62848083,62848084,62848085,62848086,62848087,62848088,62848089,62848090,62848091,62848092,62848093,62848094,62848095,62848096,62848097,62848098,62848099,62848100,62848101,62848102/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/890/10/begin/11"
     #testTask = "553190/ADB13694/47037560,62848103,62848104,62848105,62848106,62848107,62848108,62848109,62848110,62848111,62848112,62848113,62848114,62848115,62848116,62848117,62848118,62848119,62848120,62848121,62848122/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/360/10/begin/11"
     testTask = "9606/ENST00000374610/7890,41638,41639,41640,41641,41642,41643,41644,41645,41646,41647,41648,41649,41650,41651,41652,41653,41654,41655,41656,41657/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/310/10/begin/11"
+
+    #['511145/AAC74177/2293,6206,6207,6208,6209,6210,6211,6212,6213,6214,6215,6216,6217,6218,6219,6220,6221,6222,6223,6224,6225/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74606/1662,6226,6227,6228,6229,6230,6231,6232,6233,6234,6235,6236,6237,6238,6239,6240,6241,6242,6243,6244,6245/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74726/2517,6246,6247,6248,6249,6250,6251,6252,6253,6254,6255,6256,6257,6258,6259,6260,6261,6262,6263,6264,6265/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74763/1403,6266,6267,6268,6269,6270,6271,6272,6273,6274,6275,6276,6277,6278,6279,6280,6281,6282,6283,6284,6285/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74765/2130,6286,6287,6288,6289,6290,6291,6292,6293,6294,6295,6296,6297,6298,6299,6300,6301,6302,6303,6304,6305/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC77329/1495,6306,6307,6308,6309,6310,6311,6312,6313,6314,6315,6316,6317,6318,6319,6320,6321,6322,6323,6324,6325/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74631/327,6326,6327,6328,6329,6330,6331,6332,6333,6334,6335,6336,6337,6338,6339,6340,6341,6342,6343,6344,6345/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74786/3236,6346,6347,6348,6349,6350,6351,6352,6353,6354,6355,6356,6357,6358,6359,6360,6361,6362,6363,6364,6365/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC75485/141,6366,6367,6368,6369,6370,6371,6372,6373,6374,6375,6376,6377,6378,6379,6380,6381,6382,6383,6384,6385/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74590/2172,6386,6387,6388,6389,6390,6391,6392,6393,6394,6395,6396,6397,6398,6399,6400,6401,6402,6403,6404,6405/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74040/2563,6406,6407,6408,6409,6410,6411,6412,6413,6414,6415,6416,6417,6418,6419,6420,6421,6422,6423,6424,6425/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC73189/1145,6426,6427,6428,6429,6430,6431,6432,6433,6434,6435,6436,6437,6438,6439,6440,6441,6442,6443,6444,6445/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20']
     
 
     #calculateMissingWindowsForSequence(801, testTask)
