@@ -83,6 +83,7 @@ def readSeriesResultsForSpecies( seriesSourceNumber, species, minShuffledGroups=
 
             # Decode the results
             results = list([decodeJsonSeriesRecord(decompressSeriesRecord(x)) if not x is None else None for x in results])
+            
             if( returnCDS ):
                 yield {"taxid":taxIdForProcessing, "content":results, "cds":cds}
             else:
@@ -173,7 +174,9 @@ def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, int
             assert(stopCodonPos%3 == 0)
             assert(stopCodonPos>4)
 
-            lastFullCDSwindow = stopCodonPos+2 - 40 # TODO - read from configuration
+            # Determine the profile reference point (in order to correctly align the data for different CDSs)
+            lastFullCDSwindow = stopCodonPos+2 
+            # Sample the existing data according to the profile definition
             values = fullProfile[:, max(0, lastFullCDSwindow-(endPosition//2)):lastFullCDSwindow+(endPosition//2):interval]
 
             
