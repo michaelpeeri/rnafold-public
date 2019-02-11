@@ -18,7 +18,7 @@ vienna_rnafold_path = "~/anaconda2N/bin/RNAfold"
 reMFEScore = re.compile(".*\n.*[(]\s*([\d.-]+)[)]\n")   # parse the score (group 1), ignore the structure
 reMFEScoreWithStructure = re.compile(".*\n([().]+)\s+[(]\s*([\d.-]+)[)]\n")  # return the score (group 2) and structure (group 1)
 
-def RNAfold_direct(seq, explicitCalculationTemperature=None):
+def RNAfold_direct(seq:str, explicitCalculationTemperature:float =None) -> float:
     
     if explicitCalculationTemperature is None:
         cmdline = "echo %s | %s --noPS" % (seq, vienna_rnafold_path)
