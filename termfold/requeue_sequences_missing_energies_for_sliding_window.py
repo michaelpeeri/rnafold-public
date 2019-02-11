@@ -92,11 +92,24 @@ shuffleType=shuffleTypesMapping[args.shuffle_type]
 #queueKey = "queue:tag:awaiting-%s:members" % computationTag
 #nativeCdsSeqIdKey = "CDS:taxid:%d:protid:%s:seq-id"
 #seqLengthKey = "CDS:taxid:%d:protid:%s:length-nt"
-windowWidth = 40
 lastWindowStart = 2000
 seriesSourceNumber = args.series_source
-if seriesSourceNumber not in ( db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
+if seriesSourceNumber not in ( db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow30, db.Sources.StopCodon_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow50, db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.RNAfoldEnergy_SlidingWindow50_v2 ):
     raise Exception("Unsupported value for --series-source: {}".format(seriesSourceNumber))
+
+# determine the window width for this series
+if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
+    windowWidth = 40
+
+elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.StopCodon_content_SlidingWindow30):
+    windowWidth = 30
+
+elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow50_v2, db.Sources.StopCodon_content_SlidingWindow50):
+    windowWidth = 50
+
+else:
+    raise Exception("Got invalid sourceSeries: {}".format(seriesSourceNumber))
+
 
 expectedNumberOfShuffles = 20
 fromShuffle = args.from_shuffle
@@ -323,11 +336,15 @@ for taxIdForProcessing in species:
 
             if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2,
                                       db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp,
+                                      db.Sources.RNAfoldEnergy_SlidingWindow30_v2,
+                                      db.Sources.RNAfoldEnergy_SlidingWindow50_v2,
                                       db.Sources.TEST_StepFunction_BeginReferenced,
                                       db.Sources.TEST_StepFunction_EndReferenced,
                                       db.Sources.GC_content_SlidingWindow40,
                                       db.Sources.Purine_content_SlidingWindow40,
-                                      db.Sources.StopCodon_content_SlidingWindow40 ):
+                                      db.Sources.StopCodon_content_SlidingWindow30,
+                                      db.Sources.StopCodon_content_SlidingWindow40,
+                                      db.Sources.StopCodon_content_SlidingWindow50 ):
                 delayedCall = dask.delayed( calculateTaskForMissingWindowsForSequence )(seriesSourceNumber=seriesSourceNumber, taskDescription=queueItem) # create a delayed call for the calculations needed
             else:
                 assert(False)

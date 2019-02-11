@@ -115,7 +115,7 @@ def prettyPrintProfile(profile):
         
 
 class CalculateSlidingWindowRandomizedComparisonSeries(object):
-    def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sources.RNAfoldEnergy_SlidingWindow40_v2):
+    def __init__(self, windowWidth, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sources.RNAfoldEnergy_SlidingWindow40_v2):
         if logfile is None:
             self._logfile = open('/dev/null', 'w')
         else:
@@ -155,7 +155,7 @@ class CalculateSlidingWindowRandomizedComparisonSeries(object):
         # ----------------
         # Genomic translation table
         genomicTranslationTable = None
-        if( self._seriesSourceNumber == db.Sources.StopCodon_content_SlidingWindow40 ):
+        if( self._seriesSourceNumber in (db.Sources.StopCodon_content_SlidingWindow30, db.Sources.StopCodon_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow50 )):
             genomicTranslationTable = getSpeciesTranslationTable(taxId)
             assert(genomicTranslationTable>0 and genomicTranslationTable<=31)
             
@@ -365,7 +365,7 @@ class CalculateSlidingWindowRandomizedComparisonSeries(object):
                 fragment = seq[start:(start+self._windowWidth)]
                 assert(len(fragment)==self._windowWidth)
 
-                if self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2:
+                if self._seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow50_v2):
                     # Calculate the RNA folding energy. This is the computation-heavy part.
                     #strct, energy = RNA.fold(fragment)
                     result = RNAfold_direct(fragment)
@@ -385,7 +385,7 @@ class CalculateSlidingWindowRandomizedComparisonSeries(object):
                     result = calcWindowPurineContent( fragment )
                     assert( isnan(result) or (result >= 0.0 and result <= 1.0) )
                     
-                elif self._seriesSourceNumber == db.Sources.StopCodon_content_SlidingWindow40:
+                elif self._seriesSourceNumber in (db.Sources.StopCodon_content_SlidingWindow30, db.Sources.StopCodon_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow50):
                     result = calcWindowStopCodonContent( fragment, translationTable=genomicTranslationTable, phase=start%3 )
                     assert( result >= 0.0 and result <= 1.0 )
 
@@ -494,11 +494,21 @@ def calculateTaskForMissingWindowsForSequence(seriesSourceNumber, taskDescriptio
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
     (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, windowRef, shuffleType) = parseTaskDescription(taskDescription)
 
-    windowWidth = 40 # Todo: get this
-    #windowRef = "begin"
+    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
+        windowWidth = 40
+        
+    elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.StopCodon_content_SlidingWindow30):
+        windowWidth = 30
+        
+    elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow50_v2, db.Sources.StopCodon_content_SlidingWindow50):
+        windowWidth = 50
+
+    else:
+        raise Exception("Got invalid sourceSeries: {}".format(seriesSourceNumber))
+        
     firstWindowStart = 0
 
-    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
+    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.RNAfoldEnergy_SlidingWindow50_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow30, db.Sources.StopCodon_content_SlidingWindow50, db.Sources.StopCodon_content_SlidingWindow50 ):
         f = CalculateSlidingWindowRandomizedComparisonSeries(windowWidth, seriesSourceNumber=seriesSourceNumber)
     else:
         raise Exception("Got invalid sourceSeries: {}".format(seriesSourceNumber))

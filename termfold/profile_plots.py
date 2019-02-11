@@ -27,11 +27,6 @@ from codonw import readCodonw, meanCodonwProfile
 
 
 # ------------------------------------------------------------------------------------
-# Configuration
-confWindowWidth = 40
-
-
-# ------------------------------------------------------------------------------------
 # Command-line args
 
 def parseList(conversion=str):
@@ -76,6 +71,18 @@ class ProfilePlot(object):
                     rank = float(row[2])
                     assert(rank >= 0.0 and rank <= 1.0 )
                     pa[row[0]] = rank
+
+        # Determine the window width
+        if args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow40_v2, Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, Sources.TEST_StepFunction_BeginReferenced, Sources.TEST_StepFunction_EndReferenced, Sources.GC_content_SlidingWindow40, Sources.Purine_content_SlidingWindow40, Sources.StopCodon_content_SlidingWindow40 ):
+            self.windowWidth = 40
+
+        elif args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow30_v2, Sources.StopCodon_content_SlidingWindow30):
+            self.windowWidth = 30
+
+        elif args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow50_v2, Sources.StopCodon_content_SlidingWindow50):
+            self.windowWidth = 50
+    
+        
                     
 
     def performPlots(self):
@@ -265,7 +272,7 @@ class ProfilePlot(object):
                 print(geneLevelScatter.corr())
 
                 #args.profile[3], args.profile[0], args.profile[1]
-                CUBmetricsProfile = meanCodonwProfile(fullSeqs, confWindowWidth, 'begin', args.profile[3], args.profile[0], args.profile[1]) # TODO - use real values!
+                CUBmetricsProfile = meanCodonwProfile(fullSeqs, self.windowWidth, 'begin', args.profile[3], args.profile[0], args.profile[1]) # TODO - use real values!
                 print(CUBmetricsProfile)
 
             #else:
@@ -457,7 +464,7 @@ class ProfilePlot(object):
 
             dfProfileCorrs = None
             if( args.codonw ):
-                plotMFEProfileMultiple(taxid, profileId, df, ('GC', 'Nc', 'CAI', 'CBI', 'Fop'), scaleBar=confWindowWidth)
+                plotMFEProfileMultiple(taxid, profileId, df, ('GC', 'Nc', 'CAI', 'CBI', 'Fop'), scaleBar=self.windowWidth)
 
                 smfe = df['native'] - df['shuffled']
                 spearman_gc  = spearmanr( df['GC'],  smfe )

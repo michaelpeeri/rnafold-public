@@ -176,6 +176,8 @@ class Sources(object):
     RNAfoldEnergy_SlidingWindow40_v2 = 102
     RNAfoldEnergy_SlidingWindow40_v2_alt = 103
     RNAfoldEnergy_SlidingWindow40_v2_native_temp = 110
+    RNAfoldEnergy_SlidingWindow30_v2 = 113
+    RNAfoldEnergy_SlidingWindow50_v2 = 115
     CDS_length_nt = 201
     PA_paxdb_single_assay_or_weighted_average = 202
     GC_content_all_CDS = 203
@@ -186,6 +188,8 @@ class Sources(object):
     GC_content_SlidingWindow40 = 208
     Purine_content_SlidingWindow40 = 209
     StopCodon_content_SlidingWindow40 = 210
+    StopCodon_content_SlidingWindow30 = 211
+    StopCodon_content_SlidingWindow50 = 212
     TEST_StepFunction_BeginReferenced = 801
     TEST_StepFunction_EndReferenced   = 802
 
