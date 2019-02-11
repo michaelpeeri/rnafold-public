@@ -26,7 +26,7 @@ from data_helpers import CDSHelper, countSpeciesCDS, getSpeciesName, SpeciesCDSS
 import _distributed
 import dask
 from store_new_shuffles import storeNewShuffles
-from rnafold_sliding_window import calculateMissingWindowsForSequence
+from calculate_sliding_window_series import calculateTaskForMissingWindowsForSequence
 import notify_pushover
 
 scheduler = _distributed.open()
@@ -77,7 +77,8 @@ shuffleTypesMapping = {""                   :db.Sources.ShuffleCDSv2_python,
                        "12"                 :db.Sources.ShuffleCDS_vertical_permutation_1nt,
                        "ShuffleCDS_vertical_permutation_1nt"
                                             :db.Sources.ShuffleCDS_vertical_permutation_1nt,
-                       "20"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation }
+                       "20"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation
+}
 shuffleType=shuffleTypesMapping[args.shuffle_type]
 
 #if not args.log is None:
@@ -94,7 +95,7 @@ shuffleType=shuffleTypesMapping[args.shuffle_type]
 windowWidth = 40
 lastWindowStart = 2000
 seriesSourceNumber = args.series_source
-if seriesSourceNumber not in ( db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced ):
+if seriesSourceNumber not in ( db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
     raise Exception("Unsupported value for --series-source: {}".format(seriesSourceNumber))
 
 expectedNumberOfShuffles = 20
@@ -323,8 +324,11 @@ for taxIdForProcessing in species:
             if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2,
                                       db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp,
                                       db.Sources.TEST_StepFunction_BeginReferenced,
-                                      db.Sources.TEST_StepFunction_EndReferenced):
-                delayedCall = dask.delayed( calculateMissingWindowsForSequence )(seriesSourceNumber=seriesSourceNumber, taskDescription=queueItem) # create a delayed call for the calculations needed
+                                      db.Sources.TEST_StepFunction_EndReferenced,
+                                      db.Sources.GC_content_SlidingWindow40,
+                                      db.Sources.Purine_content_SlidingWindow40,
+                                      db.Sources.StopCodon_content_SlidingWindow40 ):
+                delayedCall = dask.delayed( calculateTaskForMissingWindowsForSequence )(seriesSourceNumber=seriesSourceNumber, taskDescription=queueItem) # create a delayed call for the calculations needed
             else:
                 assert(False)
                 

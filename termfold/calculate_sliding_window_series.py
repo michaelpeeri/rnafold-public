@@ -12,12 +12,14 @@ import gzip
 import json
 import logging
 import profiling
+from numpy import nan, isnan
+from Bio.Seq import Seq
 from itertools import compress
 from time import sleep
 from datetime import datetime, timedelta
 import argparse
 import mysql_rnafold as db
-from data_helpers import CDSHelper, countSpeciesCDS, getCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted, getSpeciesTemperatureInfo
+from data_helpers import CDSHelper, RegionsOfInterset, countSpeciesCDS, getCrc, QueueSource, createWorkerKey, updateJobStatus_ItemCompleted, getSpeciesTemperatureInfo, getSpeciesTranslationTable
 from runningstats import RunningStats
 from rate_limit import RateLimit
 from rnafold_vienna import RNAfold_direct
@@ -52,6 +54,41 @@ def parseOption(possibleValues, name):
     return checkOption
 
 
+translateAllDeterminedNucleotides = str.maketrans("acgtACGT", "&&&&&&&&")
+translateGCNucleotides            = str.maketrans("gcGC",     "&&&&")
+translatePurineNucleotides        = str.maketrans("agAG",     "&&&&")
+def calcWindowGCContent(seq:str) -> float:
+    allCount = seq.translate( translateAllDeterminedNucleotides ).count('&')
+    if allCount==0:
+        return nan
+    
+    gcCount  = seq.translate( translateGCNucleotides            ).count('&')
+
+    return gcCount/allCount
+
+def calcWindowPurineContent(seq:str) -> float:
+    allCount     = seq.translate( translateAllDeterminedNucleotides ).count('&')
+    if allCount==0:
+        return nan
+    
+    purineCount  = seq.translate( translatePurineNucleotides        ).count('&')
+
+    return purineCount/allCount
+
+def calcWindowStopCodonContent(seq:str, translationTable:int =1, phase:int =0) -> float:
+    codonLength = (len(seq)-(3-phase))//3
+    start = 3-phase
+    end = start + codonLength*3
+    assert(end <= len(seq))
+    codonSeq = seq[start:end]
+    assert(len(codonSeq)%3==0)
+    translatedSeq = Seq( codonSeq ).translate( table=translationTable )
+    
+    numStopCodons     = str(translatedSeq).count('*')
+
+    return numStopCodons/codonLength
+
+
 """
 Check if a timer has expired (used to implement running-time limit)
 """
@@ -77,7 +114,7 @@ def prettyPrintProfile(profile):
         print("[{}]\t{}\t[{}]".format(start, ",\t".join(["{}".format(x) for x in elements]), start+len(elements)-1))
         
 
-class RNAFold(object):
+class CalculateSlidingWindowRandomizedComparisonSeries(object):
     def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sources.RNAfoldEnergy_SlidingWindow40_v2):
         if logfile is None:
             self._logfile = open('/dev/null', 'w')
@@ -101,6 +138,10 @@ class RNAFold(object):
         assert(len(seqIds)>0)
         assert(len(seqIds)==len(requestedShuffleIds))
 
+        # ------------------------------------------------------------------------
+        # Obtain species-dependent properties needed for some calculations
+        # ----------------
+        # Optimal Temp
         optimalSpeciesGrowthTemperature = None
         if( self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp ):
             (numericalProp, _) = getSpeciesTemperatureInfo(taxId)
@@ -111,6 +152,13 @@ class RNAFold(object):
             else:
                 optimalSpeciesGrowthTemperature = float(optimalSpeciesGrowthTemperature)
                 assert(optimalSpeciesGrowthTemperature >= -30.0 and optimalSpeciesGrowthTemperature <= 150.0)
+        # ----------------
+        # Genomic translation table
+        genomicTranslationTable = None
+        if( self._seriesSourceNumber == db.Sources.StopCodon_content_SlidingWindow40 ):
+            genomicTranslationTable = getSpeciesTranslationTable(taxId)
+            assert(genomicTranslationTable>0 and genomicTranslationTable<=31)
+            
 
         if( reference != "begin" and reference != "end" and reference != "stop3utr"):
             timerForPreFolding.stop()
@@ -119,7 +167,14 @@ class RNAFold(object):
             raise Exception(e)
 
         # We will process all listed shuffle-ids for the following protein record
-        cds = CDSHelper( taxId, protId )
+        if( reference == "begin" or reference == "end" ):
+            regionOfInterest = RegionsOfInterset.CDSonly
+        elif reference == "stop3utr":
+            regionOfInterest = RegionsOfInterset.CDSand3UTR
+        else:
+            assert(False)
+            
+        cds = CDSHelper( taxId, protId, regionOfInterest=regionOfInterest )
 
         if( cds.length() < self._windowWidth ):
             e = "Refusing to process item %s because the sequence length (%d nt) is less than the window size (%d nt)\n" % (itemToProcess, cds.length(), self._windowWidth)
@@ -137,6 +192,7 @@ class RNAFold(object):
                 logging.error(e)
                 timerForPreFolding.stop()
                 raise Exception(e)
+            
         elif reference == "end":
             lastPossibleWindowStart = cds.length() - self._windowWidth #+ 1  # disregard lastWindowStart when reference=="end"
             #lastWindowCodonStart = (lastPossibleWindowStart-3)-(lastPossibleWindowStart-3)%3
@@ -152,7 +208,6 @@ class RNAFold(object):
             requestedWindowStarts = frozenset( compress( range(seqLength), isRequired ) )
             
 
-            
             #requestedWindowStarts = frozenset(range(lastWindowCodonStart % windowStep, lastWindowCodonStart, windowStep))
             #pass
         else:
@@ -313,28 +368,39 @@ class RNAFold(object):
                 if self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2:
                     # Calculate the RNA folding energy. This is the computation-heavy part.
                     #strct, energy = RNA.fold(fragment)
-                    energy = RNAfold_direct(fragment)
-                    assert(energy <= 0.0)
+                    result = RNAfold_direct(fragment)
+                    assert(result <= 0.0)
 
                 elif self._seriesSourceNumber == db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp:
                     # Calculate the RNA folding energy. This is the computation-heavy part.
                     #strct, energy = RNA.fold(fragment)
-                    energy = RNAfold_direct(fragment, explicitCalculationTemperature = optimalSpeciesGrowthTemperature)
-                    assert(energy <= 0.0)
+                    result = RNAfold_direct(fragment, explicitCalculationTemperature = optimalSpeciesGrowthTemperature)
+                    assert(result <= 0.0)
+
+                elif self._seriesSourceNumber == db.Sources.GC_content_SlidingWindow40:
+                    result = calcWindowGCContent( fragment )
+                    assert( isnan(result) or (result >= 0.0 and result <= 1.0) )
                     
+                elif self._seriesSourceNumber == db.Sources.Purine_content_SlidingWindow40:
+                    result = calcWindowPurineContent( fragment )
+                    assert( isnan(result) or (result >= 0.0 and result <= 1.0) )
                     
+                elif self._seriesSourceNumber == db.Sources.StopCodon_content_SlidingWindow40:
+                    result = calcWindowStopCodonContent( fragment, translationTable=genomicTranslationTable, phase=start%3 )
+                    assert( result >= 0.0 and result <= 1.0 )
+
                     
                 elif self._seriesSourceNumber == db.Sources.TEST_StepFunction_BeginReferenced:
                     if shuffleId < 0:
-                        energy = 0
+                        result = 0
                     else:
-                        energy = start%50 - 20
+                        result = start%50 - 20
                 
                 elif self._seriesSourceNumber == db.Sources.TEST_StepFunction_EndReferenced:
                     if shuffleId < 0:
-                        energy = 0
+                        result = 0
                     else:
-                        energy = (expectedSeqLength - self._windowWidth - start)%50 - 20
+                        result = (expectedSeqLength - self._windowWidth - start)%50 - 20
 
                 else:
                     logging.error("Received unknown seriesSourceNumber {}".format(self._seriesSourceNumber))
@@ -343,8 +409,8 @@ class RNAFold(object):
                 # Store the calculation result
                 #print("%d:%s --> %f" % (taxId, protId, energy))
 
-                stats.push(energy)
-                MFEprofile[start] = energy
+                stats.push(result)
+                MFEprofile[start] = result
 
             print("///////////////////  shuffleId={} (len={}) //////////////////////////".format(shuffleId, expectedSeqLength))
             if debug:
@@ -421,7 +487,7 @@ def parseTaskDescription(taskDescription):
 
 rl = RateLimit(60)
 
-def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription, debug=False):
+def calculateTaskForMissingWindowsForSequence(seriesSourceNumber, taskDescription, debug=False):
     config.initLogging()
     logging.warning("Processing task %s" % taskDescription)
     print(taskDescription)
@@ -432,10 +498,10 @@ def calculateMissingWindowsForSequence(seriesSourceNumber, taskDescription, debu
     #windowRef = "begin"
     firstWindowStart = 0
 
-    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced):
-        f = RNAFold(windowWidth, seriesSourceNumber=seriesSourceNumber)
+    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
+        f = CalculateSlidingWindowRandomizedComparisonSeries(windowWidth, seriesSourceNumber=seriesSourceNumber)
     else:
-        raise Exception("Got invalid sourceSeries: {}".format(sourceSeries))
+        raise Exception("Got invalid sourceSeries: {}".format(seriesSourceNumber))
     
     try:
         #def calculateMissingWindowsForSequence(self, taxId, protId, seqIds, requestedShuffleIds, firstWindow, lastWindowStart, windowStep, reference="begin"):
@@ -495,7 +561,7 @@ def standaloneMainWithRedisQueue():
         print("My worker-key is: %s" % myWorkerKey )
         f.write("My worker-key is: %s\n" % myWorkerKey )
 
-        rnafold = RNAFold(windowWidth, f, False, computationTag, seriesSourceNumber)
+        rnafold = CalculateSlidingWindowRandomizedComparisonSeries(windowWidth, f, False, computationTag, seriesSourceNumber)
 
         for itemToProcess in QueueSource(computationTag):
             parts = []
@@ -568,10 +634,12 @@ if __name__=="__main__":
     testTask = "9606/ENST00000374610/7890,41638,41639,41640,41641,41642,41643,41644,41645,41646,41647,41648,41649,41650,41651,41652,41653,41654,41655,41656,41657/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/310/10/begin/11"
 
     #['511145/AAC74177/2293,6206,6207,6208,6209,6210,6211,6212,6213,6214,6215,6216,6217,6218,6219,6220,6221,6222,6223,6224,6225/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74606/1662,6226,6227,6228,6229,6230,6231,6232,6233,6234,6235,6236,6237,6238,6239,6240,6241,6242,6243,6244,6245/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74726/2517,6246,6247,6248,6249,6250,6251,6252,6253,6254,6255,6256,6257,6258,6259,6260,6261,6262,6263,6264,6265/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74763/1403,6266,6267,6268,6269,6270,6271,6272,6273,6274,6275,6276,6277,6278,6279,6280,6281,6282,6283,6284,6285/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74765/2130,6286,6287,6288,6289,6290,6291,6292,6293,6294,6295,6296,6297,6298,6299,6300,6301,6302,6303,6304,6305/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC77329/1495,6306,6307,6308,6309,6310,6311,6312,6313,6314,6315,6316,6317,6318,6319,6320,6321,6322,6323,6324,6325/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74631/327,6326,6327,6328,6329,6330,6331,6332,6333,6334,6335,6336,6337,6338,6339,6340,6341,6342,6343,6344,6345/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74786/3236,6346,6347,6348,6349,6350,6351,6352,6353,6354,6355,6356,6357,6358,6359,6360,6361,6362,6363,6364,6365/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC75485/141,6366,6367,6368,6369,6370,6371,6372,6373,6374,6375,6376,6377,6378,6379,6380,6381,6382,6383,6384,6385/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74590/2172,6386,6387,6388,6389,6390,6391,6392,6393,6394,6395,6396,6397,6398,6399,6400,6401,6402,6403,6404,6405/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC74040/2563,6406,6407,6408,6409,6410,6411,6412,6413,6414,6415,6416,6417,6418,6419,6420,6421,6422,6423,6424,6425/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20', '511145/AAC73189/1145,6426,6427,6428,6429,6430,6431,6432,6433,6434,6435,6436,6437,6438,6439,6440,6441,6442,6443,6444,6445/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/200/1/stop3utr/20']
-    
+
+    testTask = '511145/AAC77323/1919,64847,64848,64849,64850,64851,64852,64853,64854,64855,64856,64857,64858,64859,64860,64861,64862,64863,64864,64865,64866/-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19/600/1/stop3utr/20'
 
     #calculateMissingWindowsForSequence(801, testTask)
-    calculateMissingWindowsForSequence(102, testTask, debug=True)
+    #calculateTaskForMissingWindowsForSequence(102, testTask, debug=True)
+    calculateTaskForMissingWindowsForSequence(210, testTask, debug=True)
     sys.exit(0)
 else:
     # TODO - define args when used as a module

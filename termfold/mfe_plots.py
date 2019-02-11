@@ -27,7 +27,7 @@ from ncbi_entrez import getTaxonomicGroupForSpecies
 from rate_limit import RateLimit
 
 
-def plotMFEProfileWithGC(taxId, profileId, data):
+def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None):
     fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
     #fig, ax1 = plt.subplots()
 
@@ -58,9 +58,14 @@ def plotMFEProfileWithGC(taxId, profileId, data):
     ax2.grid(True)
 
 
+    if not computationTag is None:
+        baseName = "mfe_v2_40nt_cds_{}_{}_series{}".format(profileId, getSpeciesFileName(taxId), computationTag)
+    else:
+        baseName = "mfe_v2_40nt_cds_{}_{}".format(profileId, getSpeciesFileName(taxId))
+        
     #profileId = "tbd" # str(args.profile.ProfileId).replace(':', '-')
-    plt.savefig("mfe_v2_40nt_cds_%s_%s.pdf" % (profileId, getSpeciesFileName(taxId)) )
-    plt.savefig("mfe_v2_40nt_cds_%s_%s.svg" % (profileId, getSpeciesFileName(taxId)) )
+    plt.savefig("{}.pdf".format( baseName ))
+    plt.savefig("{}.svg".format( baseName ))
     plt.close(fig)
 
 
@@ -240,7 +245,7 @@ def plotMFEProfileMultiple(taxId, profileId, data, additionalVars, scaleBar=None
 
     
 
-def plotXY(taxId, profileId, data, xvar, yvar, title):
+def plotXY(taxId, profileId, data, xvar, yvar, title, computationTag=None):
     fig, ax1 = plt.subplots()
 
     data[[yvar]].plot(ax=ax1)
@@ -256,8 +261,13 @@ def plotXY(taxId, profileId, data, xvar, yvar, title):
     plt.grid(True)
     #plt.legend(loc=(0,1), scatterpoints=1, ncol=3, fontsize='small')
 
-    plt.savefig("mfe_v2_40nt_%s_vs_%s_%s_%s.pdf" % (yvar, xvar, profileId, getSpeciesFileName(taxId)))
-    plt.savefig("mfe_v2_40nt_%s_vs_%s_%s_%s.svg" % (yvar, xvar, profileId, getSpeciesFileName(taxId)))
+    if not computationTag is None:
+        baseName = "mfe_v2_40nt_%s_vs_%s_%s_%s_series%d" % (yvar, xvar, profileId, getSpeciesFileName(taxId), computationTag)
+    else:
+        baseName = "mfe_v2_40nt_%s_vs_%s_%s_%s" % (yvar, xvar, profileId, getSpeciesFileName(taxId))
+    
+    plt.savefig("{}.pdf".format(baseName))
+    plt.savefig("{}.svg".format(baseName))
     plt.close(fig)
     
     

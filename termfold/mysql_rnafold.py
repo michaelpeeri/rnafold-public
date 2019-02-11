@@ -183,7 +183,11 @@ class Sources(object):
     GC_content_codon_pos_2 = 205
     GC_content_codon_pos_3 = 206
     MFE_mean_window_40nt_estimated = 207
+    GC_content_SlidingWindow40 = 208
+    Purine_content_SlidingWindow40 = 209
+    StopCodon_content_SlidingWindow40 = 210
     TEST_StepFunction_BeginReferenced = 801
     TEST_StepFunction_EndReferenced   = 802
+
     
     

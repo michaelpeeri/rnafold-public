@@ -484,7 +484,7 @@ class ProfilePlot(object):
                 })
 
 
-            plotMFEProfileWithGC(taxid, profileId, df)
+            plotMFEProfileWithGC(taxid, profileId, df, computationTag=args.computation_tag)
 
             #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, ProfilesCount=minCount)
             #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, wilcoxon=wilcoxonDf, transitionPeak=guPeakDf, transitionPeakPos=peakPos*10, edgeWilcoxon=edgeWilcoxonDf, ProfilesCount=minCount)
@@ -496,7 +496,8 @@ class ProfilePlot(object):
                 pd.DataFrame( { "num_genes": nativeMeanProfile.counts() }, index=xRange ),
                 "position",
                 "num_genes",
-                "Number of genes included, per starting position"
+                "Number of genes included, per starting position",
+                computationTag=args.computation_tag
                 )
 
             # scatterPlotWithKernel(
