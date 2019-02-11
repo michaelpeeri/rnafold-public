@@ -391,21 +391,21 @@ class CDSHelper(object):
 
     def length(self):
         if self.regionOfInterest == RegionsOfInterset.CDSonly:
-            return self.CDSLength()
+            return self.CDSlength()
         
         elif self.regionOfInterest == RegionsOfInterset.CDSand3UTR:
             return self.totalLength()
         
         else:
             assert(False)
-        
 
     def CDSlength(self):
         return self._getScalarRedisProperty( "cds-length-nt", seqLengthKey_CDSOnly % (self._taxId, self._protId), int)
 
     def totalLength(self):
         return self._getScalarRedisProperty( "length-nt", seqLengthKey_Total % (self._taxId, self._protId), int)
-    
+        
+            
     def crc(self):
         return self._getScalarRedisProperty( "cds-crc", cdsSeqChecksumKey % (self._taxId, self._protId), int)
 
