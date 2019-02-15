@@ -180,27 +180,27 @@ def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, int
             values = fullProfile[:, max(0, lastFullCDSwindow-(endPosition//2)):lastFullCDSwindow+(endPosition//2):interval]
 
             
-            print("uut: {} -> {}".format( fullProfile.shape, values.shape ))
-            print("uut: stop:{} lastFullCDSWindow: {} [:, {}:{}:{}]".format( stopCodonPos, lastFullCDSwindow, max(0, lastFullCDSwindow-(endPosition//2)), lastFullCDSwindow+(endPosition//2), interval ))
+            #print("uut: {} -> {}".format( fullProfile.shape, values.shape ))
+            #print("uut: stop:{} lastFullCDSWindow: {} [:, {}:{}:{}]".format( stopCodonPos, lastFullCDSwindow, max(0, lastFullCDSwindow-(endPosition//2)), lastFullCDSwindow+(endPosition//2), interval ))
             
             #values.shape = (21,real_len)
             if lastFullCDSwindow < endPosition//2:
                 paddingLeft =  endPosition//2 - lastFullCDSwindow
-                print("uut: pad: endCodonPos {}: paddingLeft: {} endPos: {} endPos//2: {}".format(stopCodonPos, paddingLeft, endPosition, endPosition//2))
+                #print("uut: pad: endCodonPos {}: paddingLeft: {} endPos: {} endPos//2: {}".format(stopCodonPos, paddingLeft, endPosition, endPosition//2))
                 values2 = np.hstack( (np.full( (values.shape[0], paddingLeft), np.nan ), values ) )
                 values = values2
-                print("uut: pad: {}".format(values.shape))
+                #print("uut: pad: {}".format(values.shape))
 
             result["profile-data"] = values
 
-            print("============"*5)
-            print(values.shape)
-            print("---nan---")     # 39 empties
-            print(np.sum( np.isnan(values), axis=0))
-            print(np.sum( np.isnan(values), axis=1))
-            print("---0.0---")   # end missing values
-            print(np.sum( values==0, axis=0))
-            print(np.sum( values==0, axis=1))
+            # print("============"*5)
+            # print(values.shape)
+            # print("---nan---")     # 39 empties
+            # print(np.sum( np.isnan(values), axis=0))
+            # print(np.sum( np.isnan(values), axis=1))
+            # print("---0.0---")   # end missing values
+            # print(np.sum( values==0, axis=0))
+            # print(np.sum( values==0, axis=1))
 
             
             
@@ -304,9 +304,9 @@ def testMeanProfile():
         m.add(newvals)
 
     results = m.value()
-    print(results)
+    #print(results)
     counts = m.counts()
-    print(counts)
+    #print(counts)
 
     assert(np.all(np.abs( results - 0.456 ) < 5e-3))
     assert(np.all( counts > 0.75*N1*N2 ) )
