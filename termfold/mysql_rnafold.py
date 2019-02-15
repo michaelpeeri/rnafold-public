@@ -198,7 +198,7 @@ class Sources(object):
 windowWidthsByComputationTag = {Sources.RNAfoldEnergy_SlidingWindow40_v2:40, Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp:40, Sources.TEST_StepFunction_BeginReferenced:40, Sources.TEST_StepFunction_EndReferenced:40, Sources.GC_content_SlidingWindow40:40, Sources.Purine_content_SlidingWindow40:40, Sources.StopCodon_content_SlidingWindow40:40, Sources.RNAfoldEnergy_SlidingWindow30_v2:30, Sources.StopCodon_content_SlidingWindow30:30, Sources.RNAfoldEnergy_SlidingWindow50_v2:50, Sources.StopCodon_content_SlidingWindow50:50 }
 
 def getWindowWidthForComputationTag(computationTag:int) -> int:
-    width = return windowWidthsByComputationTag.get(computationTag, None)
+    width = windowWidthsByComputationTag.get(computationTag, None)
     if width is None:
         raise ValueError("Unsupported computation-tag {}".format(computationTag))
     else:
