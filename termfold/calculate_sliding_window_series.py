@@ -494,17 +494,7 @@ def calculateTaskForMissingWindowsForSequence(seriesSourceNumber, taskDescriptio
     #def __init__(self, windowWidth=40, logfile=None, debugDoneWriteResults=False, computationTag="rna-fold-window-40-0", seriesSourceNumber=db.Sour
     (taxId, protId, seqIds, requestedShuffleIds, lastWindowStart, windowStep, windowRef, shuffleType) = parseTaskDescription(taskDescription)
 
-    if seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow40_v2, db.Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, db.Sources.TEST_StepFunction_BeginReferenced, db.Sources.TEST_StepFunction_EndReferenced, db.Sources.GC_content_SlidingWindow40, db.Sources.Purine_content_SlidingWindow40, db.Sources.StopCodon_content_SlidingWindow40 ):
-        windowWidth = 40
-        
-    elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow30_v2, db.Sources.StopCodon_content_SlidingWindow30):
-        windowWidth = 30
-        
-    elif seriesSourceNumber in (db.Sources.RNAfoldEnergy_SlidingWindow50_v2, db.Sources.StopCodon_content_SlidingWindow50):
-        windowWidth = 50
-
-    else:
-        raise Exception("Got invalid sourceSeries: {}".format(seriesSourceNumber))
+    windowWidth = db.getWindowWidthForComputationTag( seriesSourceNumber )
         
     firstWindowStart = 0
 

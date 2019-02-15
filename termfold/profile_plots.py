@@ -20,7 +20,7 @@ from scipy.stats import wilcoxon, spearmanr
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 from data_helpers import decompressNucleicSequence, checkSpeciesExist, getSpeciesFileName, allSpeciesSource
-from mysql_rnafold import Sources
+from mysql_rnafold import Sources, getWindowWidthForComputationTag
 from process_series_data import readSeriesResultsForSpeciesWithSequence, convertResultsToMFEProfiles, sampleProfilesFixedIntervals, profileLength, profileElements, MeanProfile, calcSampledGCcontent, profileEdgeIndex
 from mfe_plots import plotMFEProfileWithGC, plotMFEProfileV3, plotXY, scatterPlot, scatterPlotWithColor, plotMFEProfileByPA, plotMFEProfileMultiple, scatterPlotWithKernel, plotMFEProfileForMultipleRandomizations
 from codonw import readCodonw, meanCodonwProfile
@@ -73,16 +73,7 @@ class ProfilePlot(object):
                     pa[row[0]] = rank
 
         # Determine the window width
-        if args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow40_v2, Sources.RNAfoldEnergy_SlidingWindow40_v2_native_temp, Sources.TEST_StepFunction_BeginReferenced, Sources.TEST_StepFunction_EndReferenced, Sources.GC_content_SlidingWindow40, Sources.Purine_content_SlidingWindow40, Sources.StopCodon_content_SlidingWindow40 ):
-            self.windowWidth = 40
-
-        elif args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow30_v2, Sources.StopCodon_content_SlidingWindow30):
-            self.windowWidth = 30
-
-        elif args.computation_tag in (Sources.RNAfoldEnergy_SlidingWindow50_v2, Sources.StopCodon_content_SlidingWindow50):
-            self.windowWidth = 50
-    
-        
+        self.windowWidth = getWindowWidthForComputationTag(args.computation_tag)
                     
 
     def performPlots(self):
@@ -180,7 +171,7 @@ class ProfilePlot(object):
                 #print(profileData[:,0].T)
 
                 #print( profileData[:, [0,99,-1]] )
-                print(profileData.shape)
+                #print(profileData.shape)
 
                 # Prepare mean MFE profiles
                 nativeMeanProfile.add( profileData[0,None] )
