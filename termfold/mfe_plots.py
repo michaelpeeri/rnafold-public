@@ -4,6 +4,7 @@ from builtins import str
 from builtins import range
 from builtins import object
 import sys
+from datetime import datetime
 import numpy as np
 import numpy.linalg
 import pandas as pd
@@ -25,17 +26,23 @@ import cairo
 from pyqtree import Index
 from ncbi_entrez import getTaxonomicGroupForSpecies
 from rate_limit import RateLimit
+from mysql_rnafold import getWindowWidthForComputationTag
 
 
-def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None):
-    fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-    #fig, ax1 = plt.subplots()
+def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None, yRange=(-12,0)):
+    #fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+    fig, ax1 = plt.subplots()
 
-    data[['native', 'shuffled']].plot(ax=ax1)
+    data[['native', 'shuffled']].plot(ax=ax1, zorder=10)
     #data['native'].plot(ax=ax1)
     #data['shuffled'].plot(ax=ax1)
-    data[['shuffled75', 'shuffled25']].plot(ax=ax1, style='--')
+    data[['shuffled75', 'shuffled25']].plot(ax=ax1, style='--', zorder=10)
+    minY = min(yRange[0], np.min(np.min(data[['native', 'shuffled','shuffled75', 'shuffled25']])))
+    maxY = max(yRange[1], np.max(np.max(data[['native', 'shuffled','shuffled75', 'shuffled25']])))
 
+    windowWidth = None
+    if not computationTag is None:
+        windowWidth = getWindowWidthForComputationTag( computationTag )
 
     smfe = data['native']-data['shuffled']
     ax1.plot( data.index, smfe, zorder=10, label=u"\u0394LFE" )
@@ -44,18 +51,19 @@ def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None):
 
     plt.title(speciesName)
 
-    plt.xlabel('Position (nt, window start, from cds start)')
+    plt.xlabel('Position (nt, window start, from stop codon)')
 
     ax1.set_title("Mean LFE for %s" % speciesName)
-    ax1.set_ylabel(u"\u0394LFE")
-    ax1.legend(fontsize=8)
+    #ax1.set_ylabel(u"\u0394LFE")
+    ax1.set_ylabel(u"LFE (kcal/mol/window)")
+    ax1.legend(fontsize=8, loc="lower left", bbox_to_anchor=(-0.4,0.0) )
     ax1.grid(True)
 
 
-    data['gc'].plot(ax=ax2)
-    ax2.set_title("GC%")
-    ax2.set_ylabel('GC% (in window)')
-    ax2.grid(True)
+    #data['gc'].plot(ax=ax2)
+    #ax2.set_title("GC%")
+    #ax2.set_ylabel('GC% (in window)')
+    #ax2.grid(True)
 
 
     if not computationTag is None:
@@ -64,7 +72,18 @@ def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None):
         baseName = "mfe_v2_40nt_cds_{}_{}".format(profileId, getSpeciesFileName(taxId))
         
     #profileId = "tbd" # str(args.profile.ProfileId).replace(':', '-')
-    plt.savefig("{}.pdf".format( baseName ))
+
+    ax1.set_aspect(15.0)
+    plt.axvline( x=0.0, color="black", linewidth=0.5, alpha=1.0, zorder=1 )
+
+    if not windowWidth is None:
+        ax1.annotate( "{}nt".format(windowWidth),    xy=(180, minY), xytext=(180+windowWidth, minY), fontSize=10, color="black", zorder=50 )
+        ax1.annotate( "".format(windowWidth),    xy=(180, minY), xytext=(180+windowWidth, minY), fontSize=6, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.0, color="black"), color="black", zorder=50 )
+
+
+    plt.ylim( (minY-0.2, maxY+0.2) )
+    
+    plt.savefig("{}.pdf".format( baseName ), bbox_inches="tight", metadata={"CreationDate":datetime.utcnow().isoformat(' ')})
     plt.savefig("{}.svg".format( baseName ))
     plt.close(fig)
 
