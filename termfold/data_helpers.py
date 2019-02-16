@@ -1169,6 +1169,31 @@ def getGenomicGCContent(taxId):
         return None
     
 
+def getSpeciesGenomeSequenceFile(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "genome-seq-path")
+    
+    if not propVal is None:
+        return propVal
+    else:
+        return None
+
+def getSpeciesGenomeAnnotationsFile(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "genome-annot-path")
+    
+    if not propVal is None:
+        return propVal
+    else:
+        return None
+
+def getSpeciesGenomeAnnotationsVariant(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "genome-annot-variant")
+    
+    if not propVal is None:
+        return propVal
+    else:
+        return None
+    
+    
 def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100, shuffleType=db.Sources.ShuffleCDSv2_python):
     # First, collect all sequence-ids for the given species. This manual filtering by species is much faster than simply fetching all computation results...
     #print("Collecting sequence ids for taxid=%d..." % taxId)

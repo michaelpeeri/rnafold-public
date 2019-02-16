@@ -5,8 +5,10 @@ import re
 import subprocess
 import codecs
 import json
+from datetime import datetime
+from getpass import getuser
 from ensembl_ftp import EnsemblFTP
-from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList
+from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList, setSpeciesProperty
 import mysql_rnafold as db
 from config import ensembl_data_dir
 from genome_model import GenomeModel, CDSWith3PrimeSequencesSource
@@ -124,6 +126,9 @@ def ingestGenome(args):
     #redis-cli -h power5 -a rnafold set "species:taxid:203267:genomic-transl-table"  "11"
     r.set(speciesTranslationTableKey % args.taxid, args.nuclear_genetic_code)
 
+    addSupportingAnnotationsForGenome(args)
+    
+
     gm = GenomeModel(
         sequenceFile = genomefn,
         gffFile=gff3fn,
@@ -145,6 +150,32 @@ def ingestGenome(args):
         return -1
 
     return 0
+
+def addSupportingAnnotationsForGenome( args, overwrite=False ):
+    #def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
+
+    propSource = "Manual entry; {}; {}".format( getuser(), datetime.now().isoformat(' ') )
+
+    assert( os.path.exists( args.genome ))
+    setSpeciesProperty( args.taxid,
+                        "genome-seq-path",
+                        os.path.abspath( args.genome ),
+                        propSource,
+                        overwrite=overwrite )
+                        
+    assert( os.path.exists( args.gff3 ))
+    setSpeciesProperty( args.taxid,
+                        "genome-annot-path",
+                        os.path.abspath( args.gff3 ),
+                        propSource,
+                        overwrite=overwrite )
+    
+    setSpeciesProperty( args.taxid,
+                        "genome-annot-variant",
+                        args.variant,
+                        propSource,
+                        overwrite=overwrite )
+
 
 _knownBoolVals = {"true":True, "false":False}
 def parseBool(val):
@@ -177,12 +208,16 @@ def standaloneRun():
     argsParser.add_argument("--cds-with-3utr", action="store_true", default=False)
     argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
     argsParser.add_argument("--server", type=str, required=False, default=None)
+    argsParser.add_argument("--add-annotations-only", action="store_true", default=False)
     
     args = argsParser.parse_args()
 
     print(args)
 
     print(args.fetch_ftp_files)
+
+    if( args.add_annotations_only ):
+        sys.exit( addSupportingAnnotationsForGenome(args) )
 
     if( args.fetch_ftp_files ):
         if( (not args.local_name) or (not args.remote_name) ):
