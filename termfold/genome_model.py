@@ -4,6 +4,7 @@ from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 import pyfaidx
 from intervaltree import IntervalTree, Interval
+from data_helpers import getSpeciesGenomeSequenceFile, getSpeciesGenomeAnnotationsFile, getSpeciesGenomeAnnotationsVariant
 from gff import createGffDb
 
 
@@ -140,7 +141,6 @@ class GenomeMoleculeModel(object):
         return ret
         
 
-        
 class GenomeModel(object):
 
     _gf_mol_name  = 1
@@ -174,7 +174,42 @@ class GenomeModel(object):
         (chromosome, begin, end) = region
         return self.fasta.get_seq(chromosome, begin, end, rc=rc)
 
+
+class GenomeModelsCache(object):
+    def __init__(self):
+        self._cache = {}
+
+    def __getitem__(self, taxId):
+        val = self._cache.get(taxId, None)
+
+        if not val is None:
+            return val
+        else:
+            return self._init_item(taxId)
         
+    def _init_item(self, taxId):
+        genomeSeqFile      = getSpeciesGenomeSequenceFile( taxId )
+        genomeAnnotFile    = getSpeciesGenomeAnnotationsFile( taxId )
+        genomeAnnotVariant = getSpeciesGenomeAnnotationsVariant( taxId )
+        geneticCode        = getSpeciesTranslationTable( taxId )
+        if genomeSeqFile is None or genomeAnnotFile is None or geneticCode is None:
+            raise ValueError("No supporting annotations for taxId={}".format(taxId))
+
+        gm = GenomeModel(
+            sequenceFile=genomeSeqFile,
+            gffFile=genomeAnnotFile,
+            isLinear=False,
+            variant=genomeAnnotVariant,
+            geneticCode=geneticCode )
+
+        return gm
+
+_genome_models_cache = GenomeModelsCache()
+
+def getGenomeModelFromCache( taxId ):
+    return _genome_models_cache[taxId]
+
+    
 def displayInterval(tree, begin:int, end:int):
     print(tree[begin-10:end+11])
 
