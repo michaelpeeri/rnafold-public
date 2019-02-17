@@ -29,6 +29,7 @@ from sqlalchemy.sql.expression import func
 from sqlalchemy.exc import IntegrityError # expose errors through this namespace
 from contextlib import contextmanager
 import nucleic_compress
+from genome_model import getGenomeModelFromCache
 
 
 # Configuration
@@ -441,6 +442,9 @@ class CDSHelper(object):
     def getTranslationTable(self):
         return getSpeciesTranslationTable(self._taxId)
 
+    def getGenomeModel(self):
+        return getGenomeModelFromCache( self._taxId )
+
     def sequence(self):
         # Get the sequence-id for the CDS sequence
         seqId = self.seqId()
@@ -464,8 +468,7 @@ class CDSHelper(object):
 
 
     def clearCalculationResult(self, calculationId, shuffleId=-1):
-        # TODO - impl this...
-        pass
+        raise Exception("Not Impl")
 
     def saveCalculationResult(self, calculationId, results, shuffleId=-1, shuffleType=db.Sources.ShuffleCDSv2_python):
         seqId = None
@@ -1120,8 +1123,8 @@ def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
     return True
 
 def getSpeciesProperty(taxId, propName):
-    propVal    = r.get(speciesPropertyValueKey % (taxId, propName))
-    propSource = r.get(speciesPropertySourceKey % (taxId, propName))
+    propVal    = str( r.get(speciesPropertyValueKey  % (taxId, propName)), encoding="utf-8" )
+    propSource = str( r.get(speciesPropertySourceKey % (taxId, propName)), encoding="utf-8" )
     return (propVal, propSource)
 
 def getSpeciesTemperatureInfo(taxId):
