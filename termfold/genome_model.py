@@ -4,7 +4,6 @@ from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 import pyfaidx
 from intervaltree import IntervalTree, Interval
-from data_helpers import getSpeciesGenomeSequenceFile, getSpeciesGenomeAnnotationsFile, getSpeciesGenomeAnnotationsVariant
 from gff import createGffDb
 
 
@@ -185,20 +184,24 @@ class GenomeModelsCache(object):
         if not val is None:
             return val
         else:
-            return self._init_item(taxId)
+            val = self._init_item(taxId)
+            self._cache[taxId] = val
+            return val
         
     def _init_item(self, taxId):
+        from data_helpers import getSpeciesGenomeSequenceFile, getSpeciesGenomeAnnotationsFile, getSpeciesGenomeAnnotationsVariant, getSpeciesTranslationTable
+        
         genomeSeqFile      = getSpeciesGenomeSequenceFile( taxId )
         genomeAnnotFile    = getSpeciesGenomeAnnotationsFile( taxId )
         genomeAnnotVariant = getSpeciesGenomeAnnotationsVariant( taxId )
         geneticCode        = getSpeciesTranslationTable( taxId )
         if genomeSeqFile is None or genomeAnnotFile is None or geneticCode is None:
-            raise ValueError("No supporting annotations for taxId={}".format(taxId))
+             raise ValueError("No supporting annotations for taxId={}".format(taxId))
 
         gm = GenomeModel(
             sequenceFile=genomeSeqFile,
             gffFile=genomeAnnotFile,
-            isLinear=False,
+            isLinear=False,   # TODO fix this
             variant=genomeAnnotVariant,
             geneticCode=geneticCode )
 
