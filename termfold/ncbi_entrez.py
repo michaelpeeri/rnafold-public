@@ -11,7 +11,7 @@ from pyparsing import Word, Literal, delimitedList, printables, ParseException, 
 from Bio import Entrez
 import requests
 from time import sleep
-#from ete3 import NCBITaxa
+from ete3 import NCBITaxa
 from data_helpers import getSpeciesName, getSpeciesTaxonomicGroup, allSpeciesSource, setSpeciesProperty
 
 
@@ -390,24 +390,23 @@ def getKingdomForSpecies(taxId):
     
 
 def getTaxonomicGroupForSpecies(taxId):
-    # global ncbiTaxa
+    global ncbiTaxa
 
-    # if ncbiTaxa is None: # lazy initialization (not very pythony?)
-    #     ncbiTaxa = NCBITaxa()
+    if ncbiTaxa is None: # lazy initialization (not very pythony?)
+        ncbiTaxa = NCBITaxa()
 
-    # lineage = ncbiTaxa.get_lineage(taxId)
-    # assert(lineage[0]==1) # root
+    lineage = ncbiTaxa.get_lineage(taxId)
+    assert(lineage[0]==1) # root
 
-    # if lineage[1] == 131567: # cellular organisms
-    #     if lineage[2]==2: # Bacteria
-    #         return "Bacteria"
-    #     elif lineage[2] == 2759: # Eukaryota
-    #         return "Eukaryota"
-    #     elif lineage[2] == 2157: # Archaea
-    #         return "Archaea"
+    if lineage[1] == 131567: # cellular organisms
+        if lineage[2]==2: # Bacteria
+            return "Bacteria"
+        elif lineage[2] == 2759: # Eukaryota
+            return "Eukaryota"
+        elif lineage[2] == 2157: # Archaea
+            return "Archaea"
         
-    # raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
-    raise Exception("NotImpl")
+    raise Exception("Unknown kingdom for lineage %s" % lineage[:3])
 
 
 
