@@ -1,3 +1,8 @@
+from builtins import zip
+from builtins import str
+from builtins import range
+from past.builtins import basestring
+from builtins import object
 import re
 from collections import Counter
 import xml.etree.ElementTree as ET
@@ -543,7 +548,7 @@ def pruneReferenceTree_Nmicrobiol201648(taxa):
     print(ncbiTaxa.get_rank(list(f)))
 
     print("Couldn't find (%d): %s" % (len(notf), notf))
-    print(ncbiTaxa.get_taxid_translator(list(notf)).values())
+    print(list(ncbiTaxa.get_taxid_translator(list(notf)).values()))
     print(len(fnodes))
 
     tree2 = tree.copy()
@@ -830,7 +835,7 @@ def isTaxonParticularCellularSpecies(taxId):
     topLevelTaxons.update([lineage[1]])  # Keep track of encountered top-level taxons
 
     # Reject samples that are not specified at the species level
-    if "species" in ranks.values():
+    if "species" in list(ranks.values()):
         return True
     else:
         return False
@@ -842,7 +847,7 @@ def prepareTranslationMap():
     numProcessed = 0
     numFound = 0
 
-    for treeNodeIdentifier, dbIdentifier in identifiers.items():
+    for treeNodeIdentifier, dbIdentifier in list(identifiers.items()):
         (dbIdentifierValue, dbIdentifierSource) = dbIdentifier
 
         taxId = None

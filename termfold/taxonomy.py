@@ -1,5 +1,11 @@
+from __future__ import division
 # Note: use 'export OPENBLAS_NUM_THREADS=1'
 #       to limit automatica parallelization done by BLAS (during clustering)
+from builtins import map
+from builtins import str
+from builtins import range
+from builtins import object
+from past.utils import old_div
 from data_helpers import allSpeciesSource, getSpeciesTemperatureInfo, getSpeciesProperty
 import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
@@ -187,7 +193,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
         genomicGC = getSpeciesProperty(node.taxId, 'gc-content')[0]
         if not genomicGC is None:
             genomicGC = float(genomicGC)
-            genomicGCFace = faces.RectFace( width= (genomicGC-18.0)/(73.0-18.0)*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%genomicGC, "fontsize":8, "color":"Black"} )
+            genomicGCFace = faces.RectFace( width= old_div((genomicGC-18.0),(73.0-18.0)*50) , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%genomicGC, "fontsize":8, "color":"Black"} )
             genomicGCFace.margin_right = 5
             faces.add_face_to_node(genomicGCFace, node, column=2+numProfileGroups-1, aligned=True)
 
@@ -197,7 +203,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
         ENc_prime = getSpeciesProperty(node.taxId, 'ENc-prime')[0]
         if not ENc_prime is None:
             ENc_prime = float(ENc_prime)
-            ENcPrimeFace = faces.RectFace( width= (ENc_prime-20.0)/(64.0-20.0)*50 , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc_prime, "fontsize":8, "color":"Black"} )
+            ENcPrimeFace = faces.RectFace( width= old_div((ENc_prime-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc_prime, "fontsize":8, "color":"Black"} )
             ENcPrimeFace.margin_right = 5
             faces.add_face_to_node(ENcPrimeFace, node, column=3+numProfileGroups-1, aligned=True)
 
@@ -207,7 +213,7 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
         ENc = getSpeciesProperty(node.taxId, 'ENc')[0]
         if not ENc is None:
             ENc = float(ENc)
-            ENcFace = faces.RectFace( width= (ENc-20.0)/(64.0-20.0)*50 , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc, "fontsize":8, "color":"Black"} )
+            ENcFace = faces.RectFace( width= old_div((ENc-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc, "fontsize":8, "color":"Black"} )
             ENcFace.margin_right = 5
             faces.add_face_to_node(ENcFace, node, column=4+numProfileGroups-1, aligned=True)
             
@@ -518,13 +524,13 @@ class ProfileDataCollection(object):
 
         ret = {}
         include = frozenset(taxIdsToInclude)
-        for k,v in self.biasProfiles[profilesGroup].items():
+        for k,v in list(self.biasProfiles[profilesGroup].items()):
             if k in include:
                 ret[k] = v
         return ret
 
     def getTaxIds(self, profilesGroup=0):
-        return self.biasProfiles[profilesGroup].keys()
+        return list(self.biasProfiles[profilesGroup].keys())
         
 
 """
@@ -839,7 +845,7 @@ def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
             profiles = profileDataCollection.getBiasProfiles( profilesGroup=0 )
 
             # Plot distribution of all pairwise distances (diagnostic)
-            plotDistancesDistribution( makeProfilesArray( profiles.keys(), profiles ), savePlotAs="corrDist.pdf" )
+            plotDistancesDistribution( makeProfilesArray( list(profiles.keys()), profiles ), savePlotAs="corrDist.pdf" )
 
             # Create figure legend
             #if i==max(kingdomPageAssignment.values()):  # only on last page
@@ -847,7 +853,7 @@ def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
 
                 ts.legend_position = 1 #=top left
 
-                lastProfileStart = (profiles[profiles.keys()[0]].shape[0] - 1) * profileStepNt
+                lastProfileStart = (profiles[list(profiles.keys())[0]].shape[0] - 1) * profileStepNt
                 widthFor100nt = profileDrawingWidth * (100. / lastProfileStart)
                 scaleFace = faces.RectFace( width=widthFor100nt, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
                 scaleFace.margin_top     = 10
@@ -979,7 +985,7 @@ def savePrunedTree(tree):
     
 def parseList(conversion=str):
     def convert(values):
-        return map(conversion, values.split(","))
+        return list(map(conversion, values.split(",")))
     return convert
 
 def findDescendentsOfAncestor(taxIds, ancestorOfNodesToKeep):
