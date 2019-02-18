@@ -96,7 +96,7 @@ def allSpeciesSource():
     keysFilter = speciesCDSList.replace("%d", "*")
 
     for key in r.keys(pattern=keysFilter):
-        fields = key.split(":")
+        fields = str(key, encoding="utf-8").split(":")
         yield int(fields[2])
         
 """
