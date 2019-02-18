@@ -15,8 +15,9 @@ class GenomeMoleculeModel(object):
     _gf_end      = 5
     _gf_strand   = 7
     _gf_props    = 9
+    _debug_arrows = {'+':'----->', '-':'<-----'}
     
-    def __init__(self, sequenceFile : str, gff, name : str, isLinear =None, props : dict ={}):
+    def __init__(self, moleculeId:int, sequenceFile:str, gff, name:str, isLinear=None, props:dict ={}, wholeGenomeModel:object =None):
         self.sequenceFile = sequenceFile
         if type(gff)==type(""):
             self.gffFile = gff
@@ -26,6 +27,7 @@ class GenomeMoleculeModel(object):
         
         self.name = name
         self.props = props
+        self.moleculeId = moleculeId
         
         if not isLinear is None: # get isLinear from props; allow isLinear to override
             self.isLinear = isLinear
@@ -33,8 +35,8 @@ class GenomeMoleculeModel(object):
             val = self.props.get('Is_circular', ['false'])
             self.isLinear = val[0] in trueVals
 
-        print(self.props)
         self.features = IntervalTree()
+        self.wholeGenomeModel = wholeGenomeModel
         self._loadFeatures()
 
     def _loadFeatures(self):
@@ -58,8 +60,15 @@ class GenomeMoleculeModel(object):
             start = ft[GenomeMoleculeModel._gf_start]
             end = ft[GenomeMoleculeModel._gf_end]
 
+            print(props)
             assert(end >= start)
-            self.features.addi( start, end+1, data )  # end is inclusive in GFF3 but not inclusive in intervaltree
+            protId = props["protein_id"][0]
+            assert(len(protId)>3)
+            newinterval = Interval( start, end+1, data )  # end is inclusive in GFF3 but not inclusive in intervaltree
+            self.features.add( newinterval )
+
+            if not self.wholeGenomeModel is None:
+                self.wholeGenomeModel.addFeatureIds( self.moleculeId, newinterval, (protId,) )
 
     def findFeatureByStart( self, start:int ):
         val = self.features[start:start+1]
@@ -104,29 +113,71 @@ class GenomeMoleculeModel(object):
             if width > 2000000:
                 return None
 
+    def findFeatureById( self, featureId ):
+        return self.featureIds.get(featureId, None)
+
     def find3PrimeFlankingRegion( self, feature, debug:bool =False ):
+
+        arrow=GenomeMoleculeModel._debug_arrows
         
         if feature.data['strand']=='+':
             next = self.findNextFeature( feature.end, debug=debug )
             if next is None:
                 return None
 
+            # This must hold, but, because of overalapping ORFs,  only approximately: ( feature.begin < feature.end <= next.begin < next.end )
+            assert( feature.begin < feature.end )
+            assert( next.begin < next.end )
+            #print( next.begin  - feature.end )
+            #assert( feature.end - 500 <= next.begin )
+            if not ( feature.end - 10 <= next.begin ):
+                print("uig+")
+
+            
             if debug:
                 print("+")
-                print("[[{}----->{}]]    [{}--->{}]".format( feature.begin, feature.end, next.begin, next.end ))
+                print("[[{}{}{}]]    [{}{}{}]".format( feature.begin, arrow[feature.data['strand']], feature.end, next.begin, arrow[next.data['strand']], next.end ))
+
                 
-            ret = (self.name, feature.end, next.begin)
+            #ret = (self.name,                        feature.end, next.begin)
+            ret = { "molecule":self.name,
+                    "curr-feature-start": feature.begin,
+                    "curr-feature": feature,
+                    "curr-feature-end": feature.end,
+                    "dowstream-feature-start": next.begin,
+                    "downstream-feature": next,
+                    "downstream-feature-end": next.end,
+                    "last-nucleotide": feature.end,
+                    "flanking-region-start": feature.end,
+                    "flanking-region-end": next.begin }
             
         elif feature.data['strand']=='-':
             prev = self.findPrevFeature( feature.begin-1, debug=debug )
             if prev is None:
                 return None
 
+            # This must hold, but, because of overalapping ORFs,  only approximately: ( prev.begin < prev.end <= feature.begin < feature.end )
+            assert( prev.begin < prev.end )
+            assert( feature.begin < feature.end )
+            #print( feature.begin - prev.end )
+            #assert( prev.end - 500 <= feature.begin )
+            if not ( prev.end - 10 <= feature.begin ):
+                print("uig-")
+            
             if debug:
                 print("-")
-                print("[{}<---{}]    [[{}<------{}]]".format( prev.begin, prev.end, feature.begin, feature.end ))
+                print("[{}{}{}]    [[{}{}{}]]".format( prev.begin, arrow[prev.data['strand']], prev.end, feature.begin, arrow[feature.data['strand']], feature.end ))
                 
-            ret = (self.name, prev.end, feature.begin)
+            #ret = (self.name, prev.end, feature.begin)
+            ret = { "molecule":self.name,
+                    "curr-feature-start": feature.begin,
+                    "curr-feature": feature,
+                    "curr-feature-end": feature.end,
+                    "downstream-feature-start": prev.begin,
+                    "downstream-feature": prev,
+                    "downstream-feature-end": prev.end,
+                    "flanking-region-start": prev.end,
+                    "flanking-region-end": feature.begin }
             
         else:
             raise ValueError("Unknown strand '{}".format(feature.data['strand']))
@@ -134,8 +185,8 @@ class GenomeMoleculeModel(object):
         if debug:
             print(ret)
             
-        if ( ret[2] <= ret[1] ):
-            return None
+        #if ( ret[2] <= ret[1] ):
+        #    return None
         
         return ret
         
@@ -162,7 +213,15 @@ class GenomeModel(object):
         #assert(self.molecules)
         #print( [json.loads(c.astuple()[9]) for c in self.gff.features_of_type( "chromosome" )] )
 
-        self.moleculeModels = [GenomeMoleculeModel(sequenceFile, self.gff, name, isLinear=isLinear, props=props) for (name,props) in zip(moleculeNames, moleculeProps)]
+        self.featureIds = {}
+
+        self.moleculeModels = [GenomeMoleculeModel(moleculeId=molId,
+                                                   sequenceFile=sequenceFile,
+                                                   gff=self.gff,
+                                                   name=name,
+                                                   isLinear=isLinear,
+                                                   props=props,
+                                                   wholeGenomeModel=self) for (molId,name,props) in zip(range(len(moleculeNames)), moleculeNames, moleculeProps)]
 
         print([x.name for x in self.moleculeModels])
         print([len(x.features) for x in self.moleculeModels])
@@ -172,6 +231,24 @@ class GenomeModel(object):
     def getRegion(self, region:tuple, rc=False):
         (chromosome, begin, end) = region
         return self.fasta.get_seq(chromosome, begin, end, rc=rc)
+
+    """
+    Maintain a dictionary holding identifiers to all features, to allow lookup by id
+    """
+    def addFeatureIds( self, moleculeId, feature, featureIds ) -> None:
+        for identifier in featureIds:
+            self.featureIds[identifier] = (moleculeId, feature) # (<index in molecules array>, <feature obj>)
+
+    def findFeatureById( self, featureId ) -> (int, Interval):
+        return self.featureIds.get(featureId, None)
+
+    def allCDSSource(self):
+        for mol in self.moleculeModels:
+            for interval in mol.features:
+                sprops = interval.data["props"]
+                props = json.loads( sprops )
+
+                yield props["protein_id"][0]
 
 
 class GenomeModelsCache(object):
@@ -342,7 +419,7 @@ def CDS3PrimeFlankingRegionSource( mol, minLength:int=10, debug=False ):
     for feat in mol.features.items():
         region = mol.find3PrimeFlankingRegion( feat, debug=debug )
         if not region is None:
-            length = region[2]-region[1]
+            length = region["flanking-region-end"]-region["flanking-region-start"]
             if length >= minLength:
                 yield( feat, region )
     
@@ -360,14 +437,14 @@ def CDSWith3PrimeSequencesSource( genomeModel, minLength:int=10, debug=False ):
             if feat.data['strand']=='+':
                 #begin = region[1]-30
                 begin = feat.begin
-                end = region[2]
-                seq = genomeModel.getRegion( (region[0], begin, end) )
+                end = region["flanking-region-end"]
+                seq = genomeModel.getRegion( (region["molecule"], begin, end) )
             
             elif feat.data['strand']=='-':
-                begin = region[1]  -1
+                begin = region["flanking-region-start"]  -1
                 #end = region[2]+30 -1
                 end = feat.end -1
-                seq = genomeModel.getRegion( (region[0], begin, end), rc=True )
+                seq = genomeModel.getRegion( (region["molecule"], begin, end), rc=True )
 
             else:
                 raise ValueError("Unknown strand '{}".format(feature.data['strand']))
