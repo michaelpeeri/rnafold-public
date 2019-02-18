@@ -13,10 +13,10 @@ from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, At
 #from PyQt4 import QtCore, QtGui
 import numpy as np
 from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange, getNodeDiversityPlot
-from reference_trees import pruneReferenceTree_Nmicrobiol201648, pruneTreeByTaxonomy, extendTreeWithSpecies, getTaxidsFromTree
+#from reference_trees import pruneReferenceTree_Nmicrobiol201648, pruneTreeByTaxonomy, extendTreeWithSpecies, getTaxidsFromTree
 from ncbi_taxa import ncbiTaxa
-from cluster_profiles import analyzeProfileClusters, calcDiversityMetrics, correlationMetric, plotDistancesDistribution
-from endosymbionts import isEndosymbiont
+#from cluster_profiles import analyzeProfileClusters, calcDiversityMetrics, correlationMetric, plotDistancesDistribution
+#from endosymbionts import isEndosymbiont
 
 
 # ---------------------------------------------------------
@@ -190,117 +190,117 @@ def nodeLayoutWithTaxonomicNames(node, tileFunc=None, hideEnvironmentalVars=Fals
         #-------------------------------
         # genomicGC
         #
-        genomicGC = getSpeciesProperty(node.taxId, 'gc-content')[0]
-        if not genomicGC is None:
-            genomicGC = float(genomicGC)
-            genomicGCFace = faces.RectFace( width= old_div((genomicGC-18.0),(73.0-18.0)*50) , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%genomicGC, "fontsize":8, "color":"Black"} )
-            genomicGCFace.margin_right = 5
-            faces.add_face_to_node(genomicGCFace, node, column=2+numProfileGroups-1, aligned=True)
+        # genomicGC = getSpeciesProperty(node.taxId, 'gc-content')[0]
+        # if not genomicGC is None:
+        #     genomicGC = float(genomicGC)
+        #     genomicGCFace = faces.RectFace( width= old_div((genomicGC-18.0),(73.0-18.0)*50) , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%genomicGC, "fontsize":8, "color":"Black"} )
+        #     genomicGCFace.margin_right = 5
+        #     faces.add_face_to_node(genomicGCFace, node, column=2+numProfileGroups-1, aligned=True)
 
         #-------------------------------
         # ENC'
         #
-        ENc_prime = getSpeciesProperty(node.taxId, 'ENc-prime')[0]
-        if not ENc_prime is None:
-            ENc_prime = float(ENc_prime)
-            ENcPrimeFace = faces.RectFace( width= old_div((ENc_prime-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc_prime, "fontsize":8, "color":"Black"} )
-            ENcPrimeFace.margin_right = 5
-            faces.add_face_to_node(ENcPrimeFace, node, column=3+numProfileGroups-1, aligned=True)
+        # ENc_prime = getSpeciesProperty(node.taxId, 'ENc-prime')[0]
+        # if not ENc_prime is None:
+        #     ENc_prime = float(ENc_prime)
+        #     ENcPrimeFace = faces.RectFace( width= old_div((ENc_prime-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc_prime, "fontsize":8, "color":"Black"} )
+        #     ENcPrimeFace.margin_right = 5
+        #     faces.add_face_to_node(ENcPrimeFace, node, column=3+numProfileGroups-1, aligned=True)
 
         #-------------------------------
         # ENC
         #
-        ENc = getSpeciesProperty(node.taxId, 'ENc')[0]
-        if not ENc is None:
-            ENc = float(ENc)
-            ENcFace = faces.RectFace( width= old_div((ENc-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc, "fontsize":8, "color":"Black"} )
-            ENcFace.margin_right = 5
-            faces.add_face_to_node(ENcFace, node, column=4+numProfileGroups-1, aligned=True)
+        # ENc = getSpeciesProperty(node.taxId, 'ENc')[0]
+        # if not ENc is None:
+        #     ENc = float(ENc)
+        #     ENcFace = faces.RectFace( width= old_div((ENc-20.0),(64.0-20.0)*50) , height=5, fgcolor="Grey", bgcolor="Grey", label={"text":"%.2g"%ENc, "fontsize":8, "color":"Black"} )
+        #     ENcFace.margin_right = 5
+        #     faces.add_face_to_node(ENcFace, node, column=4+numProfileGroups-1, aligned=True)
             
 
-        if( not hideEnvironmentalVars):
-            #-------------------------------
-            # Temperature
-            #
-            (numericalProp, categoricalProp) = getSpeciesTemperatureInfo(node.taxId)
-            if categoricalProp[0] != "Unknown":
-                temperatureColor = temperatureRangeToColor[categoricalProp[0]]
-                temperatureFace = faces.RectFace( width=25, height=10, fgcolor=temperatureColor, bgcolor=temperatureColor )
-                temperatureFace.margin_right = 5
-                faces.add_face_to_node(temperatureFace, node, column=5+numProfileGroups-1, aligned=True)
+        # if( not hideEnvironmentalVars):
+        #     #-------------------------------
+        #     # Temperature
+        #     #
+        #     (numericalProp, categoricalProp) = getSpeciesTemperatureInfo(node.taxId)
+        #     if categoricalProp[0] != "Unknown":
+        #         temperatureColor = temperatureRangeToColor[categoricalProp[0]]
+        #         temperatureFace = faces.RectFace( width=25, height=10, fgcolor=temperatureColor, bgcolor=temperatureColor )
+        #         temperatureFace.margin_right = 5
+        #         faces.add_face_to_node(temperatureFace, node, column=5+numProfileGroups-1, aligned=True)
 
-            #-------------------------------
-            # Salinity
-            #
-            salinity = getSpeciesProperty(node.taxId, 'salinity')[0]
-            if salinity is None:
-                salinity = "Unknown"
+        #     #-------------------------------
+        #     # Salinity
+        #     #
+        #     salinity = getSpeciesProperty(node.taxId, 'salinity')[0]
+        #     if salinity is None:
+        #         salinity = "Unknown"
 
-            if salinity != "Unknown":
-                salinityColor = salinityToColor[salinity]
-                salinityFace = faces.RectFace( width=25, height=10, fgcolor=salinityColor, bgcolor=salinityColor )
-                salinityFace.margin_right = 5
-                faces.add_face_to_node(salinityFace, node, column=6+numProfileGroups-1, aligned=True)
+        #     if salinity != "Unknown":
+        #         salinityColor = salinityToColor[salinity]
+        #         salinityFace = faces.RectFace( width=25, height=10, fgcolor=salinityColor, bgcolor=salinityColor )
+        #         salinityFace.margin_right = 5
+        #         faces.add_face_to_node(salinityFace, node, column=6+numProfileGroups-1, aligned=True)
 
 
-            #-------------------------------
-            # Oxygen-req
-            #
-            oxygenReq = getSpeciesProperty(node.taxId, 'oxygen-req')[0]
-            if oxygenReq is None:
-                oxygenReq = "Unknown"
+        #     #-------------------------------
+        #     # Oxygen-req
+        #     #
+        #     oxygenReq = getSpeciesProperty(node.taxId, 'oxygen-req')[0]
+        #     if oxygenReq is None:
+        #         oxygenReq = "Unknown"
 
-            if oxygenReq != "Unknown":
-                oxygenReqColor = oxygenReqToColor[oxygenReq]
-                oxygenReqFace = faces.RectFace( width=25, height=10, fgcolor=oxygenReqColor, bgcolor=oxygenReqColor )
-                oxygenReqFace.margin_right = 5
-                faces.add_face_to_node(oxygenReqFace, node, column=7+numProfileGroups-1, aligned=True)
+        #     if oxygenReq != "Unknown":
+        #         oxygenReqColor = oxygenReqToColor[oxygenReq]
+        #         oxygenReqFace = faces.RectFace( width=25, height=10, fgcolor=oxygenReqColor, bgcolor=oxygenReqColor )
+        #         oxygenReqFace.margin_right = 5
+        #         faces.add_face_to_node(oxygenReqFace, node, column=7+numProfileGroups-1, aligned=True)
 
-            #-------------------------------
-            # Habitat
-            #
-            habitat = getSpeciesProperty(node.taxId, 'habitat')[0]
-            if habitat is None:
-                habitat = "Unknown"
+        #     #-------------------------------
+        #     # Habitat
+        #     #
+        #     habitat = getSpeciesProperty(node.taxId, 'habitat')[0]
+        #     if habitat is None:
+        #         habitat = "Unknown"
 
-            if habitat != "Unknown":
-                habitatColor = habitatToColor[habitat]
-                habitatFace = faces.RectFace( width=25, height=10, fgcolor=habitatColor, bgcolor=habitatColor )
-                habitatFace.margin_right = 5
-                faces.add_face_to_node(habitatFace, node, column=8+numProfileGroups-1, aligned=True)
+        #     if habitat != "Unknown":
+        #         habitatColor = habitatToColor[habitat]
+        #         habitatFace = faces.RectFace( width=25, height=10, fgcolor=habitatColor, bgcolor=habitatColor )
+        #         habitatFace.margin_right = 5
+        #         faces.add_face_to_node(habitatFace, node, column=8+numProfileGroups-1, aligned=True)
 
-            #-------------------------------
-            # Algae
-            #
-            algae = getSpeciesProperty(node.taxId, 'algae')[0]
-            if algae is None:
-                algae = "Unknown"
+        #     #-------------------------------
+        #     # Algae
+        #     #
+        #     algae = getSpeciesProperty(node.taxId, 'algae')[0]
+        #     if algae is None:
+        #         algae = "Unknown"
 
-            if algae != "Unknown":
-                algaeColor = algaeToColor[algae]
-                algaeFace = faces.RectFace( width=25, height=10, fgcolor=algaeColor, bgcolor=algaeColor )
-                algaeFace.margin_right = 5
-                faces.add_face_to_node(algaeFace, node, column=9+numProfileGroups-1, aligned=True)
+        #     if algae != "Unknown":
+        #         algaeColor = algaeToColor[algae]
+        #         algaeFace = faces.RectFace( width=25, height=10, fgcolor=algaeColor, bgcolor=algaeColor )
+        #         algaeFace.margin_right = 5
+        #         faces.add_face_to_node(algaeFace, node, column=9+numProfileGroups-1, aligned=True)
 
-            #-------------------------------
-            # Endosymbionts
-            #
-            endsymbiont = isEndosymbiont( node.taxId )
-            print("|{}|".format(endsymbiont))
-            endsymbiontColor = endosymbiontToColor[endsymbiont]
-            endsymbiontFace = faces.RectFace( width=25, height=10, fgcolor=endsymbiontColor, bgcolor=endsymbiontColor )
-            endsymbiontFace.margin_right = 5
-            faces.add_face_to_node(endsymbiontFace, node, column=10+numProfileGroups-1, aligned=True)
+        #     #-------------------------------
+        #     # Endosymbionts
+        #     #
+        #     # endsymbiont = isEndosymbiont( node.taxId )
+        #     # print("|{}|".format(endsymbiont))
+        #     # endsymbiontColor = endosymbiontToColor[endsymbiont]
+        #     # endsymbiontFace = faces.RectFace( width=25, height=10, fgcolor=endsymbiontColor, bgcolor=endsymbiontColor )
+        #     # endsymbiontFace.margin_right = 5
+        #     # faces.add_face_to_node(endsymbiontFace, node, column=10+numProfileGroups-1, aligned=True)
             
-            #-------------------------------
-            # paired fraction
-            #
-            pairedFraction = getSpeciesProperty(node.taxId, 'paired-mRNA-fraction')[0]
-            if not pairedFraction is None:
-                pairedFraction = float(pairedFraction)
-                pairedFractionFace = faces.RectFace( width= pairedFraction*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%(pairedFraction*100), "fontsize":8, "color":"Black"} )
-                pairedFractionFace.margin_right = 5
-                faces.add_face_to_node(pairedFractionFace, node, column=11+numProfileGroups-1, aligned=True)
+        #     #-------------------------------
+        #     # paired fraction
+        #     #
+        #     pairedFraction = getSpeciesProperty(node.taxId, 'paired-mRNA-fraction')[0]
+        #     if not pairedFraction is None:
+        #         pairedFraction = float(pairedFraction)
+        #         pairedFractionFace = faces.RectFace( width= pairedFraction*50 , height=5, fgcolor="SteelBlue", bgcolor="SteelBlue", label={"text":"%.2g"%(pairedFraction*100), "fontsize":8, "color":"Black"} )
+        #         pairedFractionFace.margin_right = 5
+        #         faces.add_face_to_node(pairedFractionFace, node, column=11+numProfileGroups-1, aligned=True)
 
         # Hide the lines of dummyTopology nodes (i.e., nodes for which the tree topology is unknown and were added under the top node)
         if "dummyTopology" in node.features and node.dummyTopology:
@@ -669,262 +669,262 @@ def makeProfilesArray(keys, biasProfiles):
 
     return out
 
-def nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection): #biasProfiles, tileFunc=None):
-    level = len(node.get_ancestors())
-    taxId = int(node.name)
-    nodeName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
-    members = groupMembers[taxId]
+# def nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection): #biasProfiles, tileFunc=None):
+#     level = len(node.get_ancestors())
+#     taxId = int(node.name)
+#     nodeName = ncbiTaxa.get_taxid_translator([taxId])[taxId]  # There has to be an easier way to look up names...
+#     members = groupMembers[taxId]
 
-    nstyle = NodeStyle()
-    nstyle["size"] = 0     # hide node symbols
-    node.set_style(nstyle)
+#     nstyle = NodeStyle()
+#     nstyle["size"] = 0     # hide node symbols
+#     node.set_style(nstyle)
         
-    if level > 0:
-        name = TextFace(nodeName, fsize=fontScale*levelFontSizes[level])
-        faces.add_face_to_node(name, node, column=0)
+#     if level > 0:
+#         name = TextFace(nodeName, fsize=fontScale*levelFontSizes[level])
+#         faces.add_face_to_node(name, node, column=0)
 
         
-    if( level >= collapedTaxonomicTreeLevel - 2 ):
-        assert(node.name)
+#     if( level >= collapedTaxonomicTreeLevel - 2 ):
+#         assert(node.name)
 
-        tile = None
+#         tile = None
 
-        profilesArray = makeProfilesArray( members, profileDataCollection.getBiasProfiles( profilesGroup=0 ) )  # TODO add groups
-        if profilesArray is None:
-            pass
+#         profilesArray = makeProfilesArray( members, profileDataCollection.getBiasProfiles( profilesGroup=0 ) )  # TODO add groups
+#         if profilesArray is None:
+#             pass
 
-        #print("//// %d %s" % (level, profilesArray.shape))
+#         #print("//// %d %s" % (level, profilesArray.shape))
 
-        elif( profilesArray.shape[0] == 1 ):
-            #if not taxId in biasProfiles:
-            #    print("TaxId %d not found" % taxId)
+#         elif( profilesArray.shape[0] == 1 ):
+#             #if not taxId in biasProfiles:
+#             #    print("TaxId %d not found" % taxId)
                 
-            tileDummyId = 1900000000+taxId*10
+#             tileDummyId = 1900000000+taxId*10
 
-            tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, yScale )
+#             tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:profilesArray[0]}, yScale )
 
-            if not tile is None:
-                profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
-                profileFace.margin_top = 4   # separate this taxon's profiles from the next
-                faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
+#             if not tile is None:
+#                 profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
+#                 profileFace.margin_top = 4   # separate this taxon's profiles from the next
+#                 faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
 
-                countFace = faces.TextFace( "1", fsize=fontScale )
-                countFace.background.color = "#dfdfdf"
-                countFace.margin_right = 3
-                faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
+#                 countFace = faces.TextFace( "1", fsize=fontScale )
+#                 countFace.background.color = "#dfdfdf"
+#                 countFace.margin_right = 3
+#                 faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
 
-            else:
-                print("No node <- Level: %d profilesArray: %s" % (level, profilesArray.shape))
+#             else:
+#                 print("No node <- Level: %d profilesArray: %s" % (level, profilesArray.shape))
                 
-        else:
-            # Perform clustering
-            # centers, labels, dist, distThreshold = analyzeProfileClusters( profilesArray,
-            #                                                                method="KMeans",
-            #                                                                n_init=n_init,
-            #                                                                max_permissible_distance_centroid=max_distance_to_split_clusters,
-            #                                                                max_clusters=max_clusters )  # use default metric
-            centers, labels, dist, distThreshold = analyzeProfileClusters( profilesArray,
-                                                                           method="AggClus",
-                                                                           distThreshold=max_distance_to_split_clusters )
-            print("===> {}  d={}".format( nodeName, dist ) )
-            groupCounts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each group
+#         else:
+#             # Perform clustering
+#             # centers, labels, dist, distThreshold = analyzeProfileClusters( profilesArray,
+#             #                                                                method="KMeans",
+#             #                                                                n_init=n_init,
+#             #                                                                max_permissible_distance_centroid=max_distance_to_split_clusters,
+#             #                                                                max_clusters=max_clusters )  # use default metric
+#             centers, labels, dist, distThreshold = analyzeProfileClusters( profilesArray,
+#                                                                            method="AggClus",
+#                                                                            distThreshold=max_distance_to_split_clusters )
+#             print("===> {}  d={}".format( nodeName, dist ) )
+#             groupCounts = [sum([1 for x in labels if x==i]) for i in range(len(centers))]  # count how many profiles belong to each group
 
-            #diversityTile = getNodeDiversityPlot(distThreshold, dist, taxId)
+#             #diversityTile = getNodeDiversityPlot(distThreshold, dist, taxId)
 
-            #diversityFace = faces.ImgFace( diversityTile, width=diversityIconDrawingWidth, height=diversityIconDrawingWidth, is_url=False )
-            #faces.add_face_to_node( diversityFace, node, 0, position="float" )
+#             #diversityFace = faces.ImgFace( diversityTile, width=diversityIconDrawingWidth, height=diversityIconDrawingWidth, is_url=False )
+#             #faces.add_face_to_node( diversityFace, node, 0, position="float" )
 
-            diversityMetric = calcDiversityMetrics( profilesArray, metric=correlationMetric, saveHistogramAs="diversity_{}_taxid{}.pdf".format(nodeName.replace("/","").replace(":",""), taxId) )
-            #diversityMetric = calcDiversityMetrics( profilesArray )
-            print("Diversity(taxId={}) -> {}".format(taxId, diversityMetric) )
-            df1 = faces.CircleFace( radius=diversityMetric*diverScale, color="RoyalBlue" )
-            faces.add_face_to_node( df1, node, 0, aligned=False, position="float-behind" )
-            df1.opacity=0.3
+#             diversityMetric = calcDiversityMetrics( profilesArray, metric=correlationMetric, saveHistogramAs="diversity_{}_taxid{}.pdf".format(nodeName.replace("/","").replace(":",""), taxId) )
+#             #diversityMetric = calcDiversityMetrics( profilesArray )
+#             print("Diversity(taxId={}) -> {}".format(taxId, diversityMetric) )
+#             df1 = faces.CircleFace( radius=diversityMetric*diverScale, color="RoyalBlue" )
+#             faces.add_face_to_node( df1, node, 0, aligned=False, position="float-behind" )
+#             df1.opacity=0.3
 
             
-            for i in range(centers.shape[0]):
-                tileDummyId = 1900000000+taxId*10+i
+#             for i in range(centers.shape[0]):
+#                 tileDummyId = 1900000000+taxId*10+i
 
-                tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, yScale )
+#                 tile = getProfileHeatmapTile(tileDummyId, {tileDummyId:centers[i]}, yScale )
 
-                if not tile is None:
-                    profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
-                    profileFace.margin_bottom  = 2   # separate this taxon's profiles from the next
-                    if i==0:
-                        profileFace.margin_top = 8   # separate this taxon's profiles from the next
-                    faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
+#                 if not tile is None:
+#                     profileFace = faces.ImgFace(tile, width=profileDrawingWidth, height=profileDrawingHeight, is_url=False)
+#                     profileFace.margin_bottom  = 2   # separate this taxon's profiles from the next
+#                     if i==0:
+#                         profileFace.margin_top = 8   # separate this taxon's profiles from the next
+#                     faces.add_face_to_node(profileFace, node, column=1 )#, aligned=True)
 
-                    countFace = faces.TextFace( groupCounts[i], fsize=fontScale*0.95 )
-                    countFace.background.color = "#dfdfdf"
-                    countFace.margin_right = 3
-                    countFace.margin_top = 0
-                    countFace.margin_bottom = 0
-                    faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
+#                     countFace = faces.TextFace( groupCounts[i], fsize=fontScale*0.95 )
+#                     countFace.background.color = "#dfdfdf"
+#                     countFace.margin_right = 3
+#                     countFace.margin_top = 0
+#                     countFace.margin_bottom = 0
+#                     faces.add_face_to_node(countFace, node, column=2 )#, aligned=True)
 
-                    if showInterCentroidDistances:
-                        distFace = faces.TextFace( "%.4g" % dist, fsize=fontScale )
-                        #distFace.background.color = "#dfdfdf"
-                        distFace.margin_left = 7
-                        distFace.margin_right = 3
-                        faces.add_face_to_node(distFace, node, column=3 )#, aligned=True)
+#                     if showInterCentroidDistances:
+#                         distFace = faces.TextFace( "%.4g" % dist, fsize=fontScale )
+#                         #distFace.background.color = "#dfdfdf"
+#                         distFace.margin_left = 7
+#                         distFace.margin_right = 3
+#                         faces.add_face_to_node(distFace, node, column=3 )#, aligned=True)
 
-                else:
-                    print("No node <- Level: %d  Id: %d profilesArray: %s" % (level, i, profilesArray.shape))
+#                 else:
+#                     print("No node <- Level: %d  Id: %d profilesArray: %s" % (level, i, profilesArray.shape))
 
-    else:
-        pass
-        #countFace = faces.TextFace( len(members), fsize=fontScale*1.5 )
-        #countFace.background.color = "#dfdfdf"
-        #countFace.margin_right = 3
-        #faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
+#     else:
+#         pass
+#         #countFace = faces.TextFace( len(members), fsize=fontScale*1.5 )
+#         #countFace.background.color = "#dfdfdf"
+#         #countFace.margin_right = 3
+#         #faces.add_face_to_node(countFace, node, column=1 )#, aligned=True)
         
         
 
 
-def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
-    allTaxa = getSpeciesToInclude()
+# def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
+#     allTaxa = getSpeciesToInclude()
 
-    # ---------------------------------------------------------
-    collapsedTaxa = set()
-    groupMembers = {}
+#     # ---------------------------------------------------------
+#     collapsedTaxa = set()
+#     groupMembers = {}
     
-    for taxid in allTaxa:
-        lineage = ncbiTaxa.get_lineage(taxid)
+#     for taxid in allTaxa:
+#         lineage = ncbiTaxa.get_lineage(taxid)
 
-        group = lineage[collapedTaxonomicTreeLevel]
+#         group = lineage[collapedTaxonomicTreeLevel]
 
-        # Create a mapping containing all leaves found under a grouping taxon
-        for ancestor in lineage[:collapedTaxonomicTreeLevel+1]:
-            if ancestor in groupMembers:
-                groupMembers[ancestor].append( taxid )
-            else:
-                groupMembers[ancestor] = [taxid]
+#         # Create a mapping containing all leaves found under a grouping taxon
+#         for ancestor in lineage[:collapedTaxonomicTreeLevel+1]:
+#             if ancestor in groupMembers:
+#                 groupMembers[ancestor].append( taxid )
+#             else:
+#                 groupMembers[ancestor] = [taxid]
 
-        collapsedTaxa.add(group)
+#         collapsedTaxa.add(group)
 
 
-    def filterTaxaByPage(taxa, pageToInclude):
-        out = set()
-        for taxid in taxa:
-            lineage = ncbiTaxa.get_lineage(taxid)
-            taxonPage = kingdomPageAssignment[lineage[2]]
-            if taxonPage == pageToInclude:
-                out.add(taxid)
-        return out
+#     def filterTaxaByPage(taxa, pageToInclude):
+#         out = set()
+#         for taxid in taxa:
+#             lineage = ncbiTaxa.get_lineage(taxid)
+#             taxonPage = kingdomPageAssignment[lineage[2]]
+#             if taxonPage == pageToInclude:
+#                 out.add(taxid)
+#         return out
 
-    global yScale
-    if yScale is None:
-        yScale = profileDataCollection.getYRange()
+#     global yScale
+#     if yScale is None:
+#         yScale = profileDataCollection.getYRange()
 
-    if ownXserver:
-        _disp = Display
-    else:
-        _disp = DummyResourceManager
+#     if ownXserver:
+#         _disp = Display
+#     else:
+#         _disp = DummyResourceManager
     
-    with _disp(backend='xvnc') as disp:  # Plotting requires an X session
+#     with _disp(backend='xvnc') as disp:  # Plotting requires an X session
         
-        def plotCollapsedTree(taxa, i):
-            print("Page %d (%d taxons)" % (i, len(taxa)))
+#         def plotCollapsedTree(taxa, i):
+#             print("Page %d (%d taxons)" % (i, len(taxa)))
             
-            # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
-            # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
-            # In this case, we provide mid-level taxons to get the "collapsed" tree
-            tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
+#             # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
+#             # See: http://etetoolkit.org/docs/3.0/tutorial/tutorial_ncbitaxonomy.html
+#             # In this case, we provide mid-level taxons to get the "collapsed" tree
+#             tree = ncbiTaxa.get_topology(taxa, intermediate_nodes=True)
 
 
-            # Configure tree plotting settings
-            ts = TreeStyle()
-            ts.show_leaf_name = False
-            ts.branch_vertical_margin = 6  # Y-axis spacing
-            ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection)
-            ts.show_scale = False
-            ts.margin_top = 25
-            ts.margin_bottom = 50
+#             # Configure tree plotting settings
+#             ts = TreeStyle()
+#             ts.show_leaf_name = False
+#             ts.branch_vertical_margin = 6  # Y-axis spacing
+#             ts.layout_fn = lambda node: nodeLayoutForCollapsedTree(node, groupMembers, profileDataCollection)
+#             ts.show_scale = False
+#             ts.margin_top = 25
+#             ts.margin_bottom = 50
 
-            # Get all the profiles from group 0 (i.e., those matching the first glob expression)
-            profiles = profileDataCollection.getBiasProfiles( profilesGroup=0 )
+#             # Get all the profiles from group 0 (i.e., those matching the first glob expression)
+#             profiles = profileDataCollection.getBiasProfiles( profilesGroup=0 )
 
-            # Plot distribution of all pairwise distances (diagnostic)
-            plotDistancesDistribution( makeProfilesArray( list(profiles.keys()), profiles ), savePlotAs="corrDist.pdf" )
+#             # Plot distribution of all pairwise distances (diagnostic)
+#             plotDistancesDistribution( makeProfilesArray( list(profiles.keys()), profiles ), savePlotAs="corrDist.pdf" )
 
-            # Create figure legend
-            #if i==max(kingdomPageAssignment.values()):  # only on last page
-            if i==0:                                     # only on first page
+#             # Create figure legend
+#             #if i==max(kingdomPageAssignment.values()):  # only on last page
+#             if i==0:                                     # only on first page
 
-                ts.legend_position = 1 #=top left
+#                 ts.legend_position = 1 #=top left
 
-                lastProfileStart = (profiles[list(profiles.keys())[0]].shape[0] - 1) * profileStepNt
-                widthFor100nt = profileDrawingWidth * (100. / lastProfileStart)
-                scaleFace = faces.RectFace( width=widthFor100nt, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
-                scaleFace.margin_top     = 10
-                scaleFace.margin_bottom  = 5
-                scaleFace.margin_left    = 20
-                scaleFace.margin_right   = 50
-                ts.legend.add_face( scaleFace, column=0 )
-                scaleFaceText = TextFace("100 bp", fsize=fontScale*1.5 )
-                scaleFaceText.margin_top = 0
-                ts.legend.add_face( scaleFaceText, column=0 )
+#                 lastProfileStart = (profiles[list(profiles.keys())[0]].shape[0] - 1) * profileStepNt
+#                 widthFor100nt = profileDrawingWidth * (100. / lastProfileStart)
+#                 scaleFace = faces.RectFace( width=widthFor100nt, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
+#                 scaleFace.margin_top     = 10
+#                 scaleFace.margin_bottom  = 5
+#                 scaleFace.margin_left    = 20
+#                 scaleFace.margin_right   = 50
+#                 ts.legend.add_face( scaleFace, column=0 )
+#                 scaleFaceText = TextFace("100 bp", fsize=fontScale*1.5 )
+#                 scaleFaceText.margin_top = 0
+#                 ts.legend.add_face( scaleFaceText, column=0 )
                 
-                widthForWindow = profileDrawingWidth * (float(profileWidthNt) / lastProfileStart)
-                windowWidthFace = faces.RectFace( width=widthForWindow, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
-                windowWidthFace.margin_top    = 10
-                windowWidthFace.margin_bottom = 5
-                windowWidthFace.margin_left   = 20
-                windowWidthFace.margin_right  = 50
-                ts.legend.add_face( windowWidthFace, column=1 )
-                windowWidthFace = TextFace("40 bp", fsize=fontScale*1.5 )
-                windowWidthFace.margin_top    = 0
-                ts.legend.add_face( windowWidthFace, column=1 )
+#                 widthForWindow = profileDrawingWidth * (float(profileWidthNt) / lastProfileStart)
+#                 windowWidthFace = faces.RectFace( width=widthForWindow, height=profileDrawingHeight, fgcolor="black", bgcolor="black" )
+#                 windowWidthFace.margin_top    = 10
+#                 windowWidthFace.margin_bottom = 5
+#                 windowWidthFace.margin_left   = 20
+#                 windowWidthFace.margin_right  = 50
+#                 ts.legend.add_face( windowWidthFace, column=1 )
+#                 windowWidthFace = TextFace("40 bp", fsize=fontScale*1.5 )
+#                 windowWidthFace.margin_top    = 0
+#                 ts.legend.add_face( windowWidthFace, column=1 )
                 
-                # Draw color scale
+#                 # Draw color scale
                 
-                #ts.legend.add_face( TextFace(unichr(0x1d6ab)+"LFE", fsize=12    ), column=0 )
-                #ts.legend.add_face( TextFace("\xf0\x9d\x9a\xab"+"LFE", fsize=12    ), column=0 )
-                dLFEFace = TextFace("dLFE", fsize=fontScale*2.0    )
-                dLFEFace.margin_bottom = 0
-                ts.legend.add_face( dLFEFace, column=2 )
+#                 #ts.legend.add_face( TextFace(unichr(0x1d6ab)+"LFE", fsize=12    ), column=0 )
+#                 #ts.legend.add_face( TextFace("\xf0\x9d\x9a\xab"+"LFE", fsize=12    ), column=0 )
+#                 dLFEFace = TextFace("dLFE", fsize=fontScale*2.0    )
+#                 dLFEFace.margin_bottom = 0
+#                 ts.legend.add_face( dLFEFace, column=2 )
 
-                unitsFace = TextFace("kcal/mol/window", fsize=fontScale*1.5 )
-                unitsFace.margin_top = 0
-                ts.legend.add_face( unitsFace, column=2 )
+#                 unitsFace = TextFace("kcal/mol/window", fsize=fontScale*1.5 )
+#                 unitsFace.margin_top = 0
+#                 ts.legend.add_face( unitsFace, column=2 )
 
-                legendColorScaleTile = getLegendHeatmapTile(yScale)
-                legendColorScaleFace = faces.ImgFace(legendColorScaleTile, width=480, height=80, is_url=False) # no support for margin_right?
-                ts.legend.add_face( legendColorScaleFace, column=3 )
+#                 legendColorScaleTile = getLegendHeatmapTile(yScale)
+#                 legendColorScaleFace = faces.ImgFace(legendColorScaleTile, width=480, height=80, is_url=False) # no support for margin_right?
+#                 ts.legend.add_face( legendColorScaleFace, column=3 )
 
-                df2 = faces.CircleFace( radius=max_distance_to_split_clusters*diverScale, color="RoyalBlue" )
-                #df2 = faces.CircleFace( radius=10, color="RoyalBlue" )
-                ts.legend.add_face( df2, column=4 )
-                df2.opacity=0.3
+#                 df2 = faces.CircleFace( radius=max_distance_to_split_clusters*diverScale, color="RoyalBlue" )
+#                 #df2 = faces.CircleFace( radius=10, color="RoyalBlue" )
+#                 ts.legend.add_face( df2, column=4 )
+#                 df2.opacity=0.3
                 
 
-                # Test rich text plotting, using Qt (this didn't work...)
-                #txtItem = QtGui.QGraphicsTextItem( "Hello, World! " + unichr(0x1d6ab)+ "LFE" )
-                #txtItem = QtGui.QGraphicsSimpleTextItem()
-                #txtItem.setPlainText( QtCore.QString( "Hello, World! " ) )   # <-- This step crashes the interpreter silently
+#                 # Test rich text plotting, using Qt (this didn't work...)
+#                 #txtItem = QtGui.QGraphicsTextItem( "Hello, World! " + unichr(0x1d6ab)+ "LFE" )
+#                 #txtItem = QtGui.QGraphicsSimpleTextItem()
+#                 #txtItem.setPlainText( QtCore.QString( "Hello, World! " ) )   # <-- This step crashes the interpreter silently
                 
-                #siFace = StaticItemFace(txtItem)
-                #siFace.width = 100
-                #siFace.height = 20
-                #ts.legend.add_face( siFace, column=5 )
+#                 #siFace = StaticItemFace(txtItem)
+#                 #siFace.width = 100
+#                 #siFace.height = 20
+#                 #ts.legend.add_face( siFace, column=5 )
 
-            # Render and save the tree
-            if collapedTaxonomicTreeLevel==4:
-                h = int( round(  (len(tree)             *4.5), 0) )
-            else:
-                h = int( round( ((len(tree) + (i==0)*3 )*6.5), 0) )
+#             # Render and save the tree
+#             if collapedTaxonomicTreeLevel==4:
+#                 h = int( round(  (len(tree)             *4.5), 0) )
+#             else:
+#                 h = int( round( ((len(tree) + (i==0)*3 )*6.5), 0) )
                 
-            tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=100, h=h, units="mm")
-            tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=100, h=h, units="mm")
+#             tree.render('alltaxa.collapsed.%d.pdf' % i, tree_style=ts, w=100, h=h, units="mm")
+#             tree.render('alltaxa.collapsed.%d.svg' % i, tree_style=ts, w=100, h=h, units="mm")
 
-        # Plot each page (with a different subset of the tree)
-        for pageNum in sorted(set(kingdomPageAssignment.values())):
-            plotCollapsedTree(filterTaxaByPage(collapsedTaxa, pageNum), pageNum)
+#         # Plot each page (with a different subset of the tree)
+#         for pageNum in sorted(set(kingdomPageAssignment.values())):
+#             plotCollapsedTree(filterTaxaByPage(collapsedTaxa, pageNum), pageNum)
     
-    print("------------------ Ignore error message ------------------")
-    # Display is about to close; how can we disconnect cleanly? (to prevent "Client Killed" message...)
+#     print("------------------ Ignore error message ------------------")
+#     # Display is about to close; how can we disconnect cleanly? (to prevent "Client Killed" message...)
 
-    return 0
+#     return 0
 
 
 def createTraitMapping(trait):
@@ -932,19 +932,20 @@ def createTraitMapping(trait):
     for taxId in allSpeciesSource():
 
         if trait=="GC":
-            genomicGC = getSpeciesProperty(taxId, 'gc-content')[0]
-            if not genomicGC is None:
-                ret[taxId] = float(genomicGC)
+            raise Exception("NotImpl")
+            #genomicGC = getSpeciesProperty(taxId, 'gc-content')[0]
+            #if not genomicGC is None:
+            #    ret[taxId] = float(genomicGC)
                 
         elif trait=="Temp":
             optimumTemp = getSpeciesProperty(taxId, 'optimum-temperature')[0]
             if not optimumTemp is None:
                 ret[taxId] = float(optimumTemp)
                 
-        elif trait=="Endosymbiont":
-            endsymbiont = isEndosymbiont( taxId )
-            if not endsymbiont is None:
-                ret[taxId] = endsymbiont
+        # elif trait=="Endosymbiont":
+        #     endsymbiont = isEndosymbiont( taxId )
+        #     if not endsymbiont is None:
+        #         ret[taxId] = endsymbiont
                 
         else:
             raise Exception("Unknown trait {}".format(trait))
@@ -1037,63 +1038,68 @@ def standalone():
         phylosignalProfiles = loadPhylosignalProfiles( args.use_phylosignal_data )
 
     if( args.use_tree=="hug" ):
-        taxa = getSpeciesToInclude()
+        raise Exception("Not Impl")
+    #     taxa = getSpeciesToInclude()
         
-        (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa) # prune complete reference phylogenetic tree to include only dataset species 
-        if( not args.limit_taxonomy is None ):  # limit taxonomy to specified taxon
-            prunedTree = pruneTreeByTaxonomy( prunedTree, args.limit_taxonomy  )
+    #     (completeTree, prunedTree) = pruneReferenceTree_Nmicrobiol201648(taxa) # prune complete reference phylogenetic tree to include only dataset species 
+    #     if( not args.limit_taxonomy is None ):  # limit taxonomy to specified taxon
+    #         prunedTree = pruneTreeByTaxonomy( prunedTree, args.limit_taxonomy  )
 
-        if args.include_all_species:
-            print("{} =ext=> ".format(len(prunedTree)))
-            prunedTree = extendTreeWithSpecies( tree=prunedTree, additionalSpecies=taxa, limitTaxonomy=args.limit_taxonomy )
-            print(" =ext=> {}".format(len(prunedTree)))
+    #     if args.include_all_species:
+    #         print("{} =ext=> ".format(len(prunedTree)))
+    #         prunedTree = extendTreeWithSpecies( tree=prunedTree, additionalSpecies=taxa, limitTaxonomy=args.limit_taxonomy )
+    #         print(" =ext=> {}".format(len(prunedTree)))
         
-        drawTrees( completeTree, prunedTree, args=args )
+    #     drawTrees( completeTree, prunedTree, args=args )
 
-        savePrunedTree( prunedTree )
+    #     savePrunedTree( prunedTree )
 
-        return 0
+    #     return 0
     
     elif( args.use_tree=="taxonomic-collapsed" ):
-
-        if( not args.use_profile_data ):
-            raise Exception()
+        raise Exception("Not Impl")
         
-        files = []
 
-        if args.use_profile_data:
-            files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
-
-        #print(files)
+    #     if( not args.use_profile_data ):
+    #         raise Exception()
         
-        #print("Loading profile data for %d files..." % len(files))
-        #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+    #     files = []
 
-        tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
+    #     if args.use_profile_data:
+    #         files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
+
+    #     #print(files)
         
-        return plotCollapsedTaxonomicTree(tileGenerator, ownXserver=args.X_server)
+    #     #print("Loading profile data for %d files..." % len(files))
+    #     #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+
+    #     tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
+        
+    #     return plotCollapsedTaxonomicTree(tileGenerator, ownXserver=args.X_server)
 
     elif( args.use_tree=="PCA" ):
-        files = []
+        raise Exception("Not Impl")
 
-        if args.use_profile_data:
-            files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
+    #     files = []
 
-        #print("Loading profile data for %d files..." % len(files))
-        #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
+    #     if args.use_profile_data:
+    #         files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
 
-        tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
+    #     #print("Loading profile data for %d files..." % len(files))
+    #     #(xdata, ydata, ydata_nativeonly, ydata_shuffledonly, labels, groups, filesUsed, biasProfiles, dfProfileCorrs, summaryStatistics) = loadProfileData(files)
 
-        print("Fetching trait values for plotting...")
-        traitValues = createTraitMapping( args.trait_to_plot )
+    #     tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
 
-        if not args.limit_taxonomy is None:
-            filtered = findDescendentsOfAncestor(tileGenerator.getTaxIds(), args.limit_taxonomy)
-            biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0, taxIdsToInclude = filtered)
-        else:
-            biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0)
+    #     print("Fetching trait values for plotting...")
+    #     traitValues = createTraitMapping( args.trait_to_plot )
 
-        return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale )
+    #     if not args.limit_taxonomy is None:
+    #         filtered = findDescendentsOfAncestor(tileGenerator.getTaxIds(), args.limit_taxonomy)
+    #         biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0, taxIdsToInclude = filtered)
+    #     else:
+    #         biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0)
+
+    #     return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale )
 
     elif( args.use_tree=="taxonomic" ):
         files = []
