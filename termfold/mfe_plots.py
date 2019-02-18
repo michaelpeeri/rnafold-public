@@ -854,18 +854,18 @@ def loadProfileData(files):
                                      "spearman_smfe_Fop_pval": pd.Series(dtype='float') } )
 
     summaryStatistics = pd.DataFrame({
-        'tax_name':pd.Series(dtype='string'),
-        'short_tax_name':pd.Series(dtype='string'),
+        'tax_name':pd.Series(dtype='str'),
+        'short_tax_name':pd.Series(dtype='str'),
         'tax_id':pd.Series(dtype='int'),
-        'genomic_gc':pd.Series(dtype='float'),
-        'tax_group':pd.Series(dtype='string'), # TODO: change to categorical data; Categorical([], categories=('Bacteria', 'Archaea', 'Fungi', 'Plants'), ordered=False)
+#        'genomic_gc':pd.Series(dtype='float'),
+        'tax_group':pd.Series(dtype='str'), # TODO: change to categorical data; Categorical([], categories=('Bacteria', 'Archaea', 'Fungi', 'Plants'), ordered=False)
         'CDSs_included':pd.Series(dtype='int'),
-        'profileElements':pd.Series(dtype='int'),
-        'optimal_temperature':pd.Series(dtype='float'),
-        'temperature_range':pd.Categorical([]),
-        'mean_delta_lfe':pd.Series(dtype='float'),
-        'paired_fraction':pd.Series(dtype='float'),
-        'gene_density':pd.Series(dtype='float')
+        'profileElements':pd.Series(dtype='int')
+#        'optimal_temperature':pd.Series(dtype='float'),
+#        'temperature_range':pd.Categorical([]),
+#        'mean_delta_lfe':pd.Series(dtype='float'),
+#        'paired_fraction':pd.Series(dtype='float'),
+#        'gene_density':pd.Series(dtype='float')
     })
 
     rl = RateLimit(10)
@@ -919,40 +919,40 @@ def loadProfileData(files):
                     #continue  # Skip sequences with very limited data available
                 
                 #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
-                meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
+                #meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
 
                 # Fetch temperature data for this species (if available)
-                optimalTemperatureData = getSpeciesProperty( taxId, 'optimum-temperature')
-                optimalTemperature = None
-                if not optimalTemperatureData[0] is None:
-                    optimalTemperature = float(optimalTemperatureData[0])
+                # optimalTemperatureData = getSpeciesProperty( taxId, 'optimum-temperature')
+                # optimalTemperature = None
+                # if not optimalTemperatureData[0] is None:
+                #     optimalTemperature = float(optimalTemperatureData[0])
 
-                temperatureRangeData = getSpeciesProperty( taxId, 'temperature-range')
-                temperatureRange = None
-                if not temperatureRangeData[0] is None:
-                    temperatureRange = temperatureRangeData[0]
-                else:
-                    temperatureRange = "Unknown"
+                # temperatureRangeData = getSpeciesProperty( taxId, 'temperature-range')
+                # temperatureRange = None
+                # if not temperatureRangeData[0] is None:
+                #     temperatureRange = temperatureRangeData[0]
+                # else:
+                #     temperatureRange = "Unknown"
 
-                pairedFractionData = getSpeciesProperty( taxId, 'paired-mRNA-fraction')
-                pairedFraction = None
-                if not pairedFractionData[0] is None:
-                    pairedFraction = float(pairedFractionData[0])
+                # pairedFractionData = getSpeciesProperty( taxId, 'paired-mRNA-fraction')
+                # pairedFraction = None
+                # if not pairedFractionData[0] is None:
+                #     pairedFraction = float(pairedFractionData[0])
 
                     
-                genomeSizeData = getSpeciesProperty( taxId, 'genome-size-mb')
-                genomeSize = None
-                if not genomeSizeData[0] is None:
-                    genomeSize = float(genomeSizeData[0])
+                # genomeSizeData = getSpeciesProperty( taxId, 'genome-size-mb')
+                # genomeSize = None
+                # if not genomeSizeData[0] is None:
+                #     genomeSize = float(genomeSizeData[0])
 
-                proteinCountData = getSpeciesProperty( taxId, 'protein-count')
-                proteinCount = None
-                if not proteinCountData[0] is None:
-                    proteinCount = int(proteinCountData[0])
+                # proteinCountData = getSpeciesProperty( taxId, 'protein-count')
+                # proteinCount = None
+                # if not proteinCountData[0] is None:
+                #     proteinCount = int(proteinCountData[0])
 
-                geneDensity = None
-                if( (not genomeSize is None) and (not proteinCount is None)  ):
-                    geneDensity = float(proteinCount)/genomeSize
+                # geneDensity = None
+                # if( (not genomeSize is None) and (not proteinCount is None)  ):
+                #     geneDensity = float(proteinCount)/genomeSize
 
                     
                 summaryStatistics = summaryStatistics.append(pd.DataFrame({
@@ -960,14 +960,14 @@ def loadProfileData(files):
                     'short_tax_name':pd.Series([shortTaxName]),
                     'long_tax_name':pd.Series([longTaxName]),
                     'tax_id':pd.Series([taxId], dtype='int'),
-                    'genomic_gc':pd.Series([meanGC]),
+#                    'genomic_gc':pd.Series([meanGC]),
                     'tax_group':pd.Series([taxGroup]),
-                    'CDSs_included':pd.Series([cdsCount], dtype='int'),
-                    'optimal_temperature':pd.Series([optimalTemperature], dtype='float'),
-                    'temperature_range':pd.Categorical([temperatureRange]),
-                    'mean_delta_lfe':pd.Series([meanDeltaLFE], dtype='float'),
-                    'paired_fraction':pd.Series([pairedFraction], dtype='float'),
-                    'gene_density':pd.Series([geneDensity], dtype='float')
+                    'CDSs_included':pd.Series([cdsCount], dtype='int')
+#                    'optimal_temperature':pd.Series([optimalTemperature], dtype='float'),
+#                    'temperature_range':pd.Categorical([temperatureRange]),
+#                    'mean_delta_lfe':pd.Series([meanDeltaLFE], dtype='float'),
+#                    'paired_fraction':pd.Series([pairedFraction], dtype='float'),
+#                    'gene_density':pd.Series([geneDensity], dtype='float')
                 }))
 
                 dfProfileCorrs = dfProfileCorrs.append( profileCorrelations_df )
