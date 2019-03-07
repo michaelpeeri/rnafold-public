@@ -274,10 +274,10 @@ class ProfilePlot(object):
 
                                     
 
-                stopCodonPos = result['content'][0]['stop-codon-pos']
-                assert(stopCodonPos%3==0)
-                stopCodon = fullCDS[stopCodonPos:stopCodonPos+3]
-                stopCodonFreq.update( (stopCodon, ) )
+                #stopCodonPos = result['content'][0]['stop-codon-pos']
+                #assert(stopCodonPos%3==0)
+                #stopCodon = fullCDS[stopCodonPos:stopCodonPos+3]
+                #stopCodonFreq.update( (stopCodon, ) )
                 
                 protId = result["cds"].getProtId()
                 #print("Length: {}nt".format(result["cds"].length()))
