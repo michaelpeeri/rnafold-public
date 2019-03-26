@@ -11,7 +11,7 @@ from ensembl_ftp import EnsemblFTP
 from data_helpers import r, getSpeciesName, speciesNameKey, speciesTaxIdKey, speciesTranslationTableKey, speciesCDSList, setSpeciesProperty
 import mysql_rnafold as db
 from config import ensembl_data_dir
-from genome_model import GenomeModel, CDSWith3PrimeSequencesSource
+from genome_model import GenomeModel, CDSWith3PrimeSequencesWithDownstreamFeatureSource, isValidCodingSequence
 from store_seqs_from_fasta import storeSeqInDB
 
 
@@ -36,17 +36,36 @@ def processGff3(gff3Filename, genesListFilename, args):
         print("--" * 20)
         print(e)
 
-
-def loadCDSwith3UTRSequences(genomeModel, genesListFilename, args, dryRun:bool =True) -> int:
+def loadCDSwith3UTRSequences(genomeModel, args, dryRun:bool =True) -> int:
 
     count = 0
-    for (feat,region,ntSeq,stopCodonPos) in CDSWith3PrimeSequencesSource( genomeModel, minLength=1, debug=False ):
+    for (feat,region,cdsSeq,utr3Seq,gap,nextCdsSeq,nextCdsStrand) in CDSWith3PrimeSequencesWithDownstreamFeatureSource( genomeModel, debug=False ):
 
         #Interval(2598882, 2599761, {'strand': '-', 'props': '{"ID":["CDS:AAC75531"],"Parent":["transcript:AAC75531"],"protein_id":["AAC75531"]}'})
         props = json.loads( feat.data['props'] )
         proteinId = props['protein_id'][0]
         assert(len(proteinId)>3)
         print(proteinId)
+
+
+        assert( isValidCodingSequence( cdsSeq, geneticCode=genomeModel.getGeneticCode() ))
+        assert( isValidCodingSequence( nextCdsSeq, geneticCode=genomeModel.getGeneticCode() ))
+        #cdsAASeq     = cdsSeq.translate(    table=genomeModel.getGeneticCode())
+        #nextCdsAASeq = nextCdsSeq.translate(table=genomeModel.getGeneticCode())
+        #assert(str(cdsAASeq)[:-1].find('*')==-1)
+        #assert(str(nextCdsAASeq)[:-1].find('*')==-1)
+
+        nextCDSonOppositeStrand = feat.data['strand'] != nextCdsStrand
+        if nextCDSonOppositeStrand:
+            nextCdsSeq = nextCdsSeq.reverse_complement()
+
+        if gap>=0:
+            ntSeq = str(cdsSeq) + str(utr3Seq) + str(nextCdsSeq)
+        else:
+            assert(len(utr3Seq)==0)
+            ntSeq = str(cdsSeq) + str(nextCdsSeq)[-gap:]
+            
+        print(ntSeq)
 
         count += 1
 
@@ -55,42 +74,43 @@ def loadCDSwith3UTRSequences(genomeModel, genesListFilename, args, dryRun:bool =
                          taxId = args.taxid,
                          proteinId = proteinId,
                          seqSourceTag = db.Sources.CDSwith3primeFlankingRegion,
-                         stopCodonPos = stopCodonPos )
-                         #genomeCoords = (feat.begin, feat.end)  )
+                         cdsLengthNt = len(cdsSeq),
+                         flankingLength = nextStartCodonPos,
+                         nextCDSonOppositeStrand=nextCDSonOppositeStrand )
+            #genomeCoords = (feat.begin, feat.end)  )
             
     return count
 
         
 
     
-def ingestGenome(args):
+def ingestGenome(taxid, args):
 
-    # Sanity test 1 -- genes list file doesn't already exists (if it does, short name may have been reused...)
-    genesListFilename = "%s/coding_genes_list.%s.list" % (ensembl_data_dir, args.short_name)
-    print(genesListFilename)
+    if not args.dont_add_annotations:
+        # Sanity test 1 -- this species doesn't already exist in the DB
+        if r.exists(speciesNameKey % args.taxid):
+            if r.exists(speciesCDSList % args.taxid):
+                raise Exception("Species with taxid=%d already exists as '%s'" % (args.taxid, getSpeciesName(args.taxid)))
+            else:
+                pass # Name defined but no CDS list; maybe an earlier run of this script was interrupted?
+
+    # Sanity test 2 -- genes list file doesn't already exists (if it does, short name may have been reused...)
+    #genesListFilename = "%s/coding_genes_list.%s.list" % (ensembl_data_dir, args.short_name)
+    #print(genesListFilename)
     if args.fetch_ftp_files:
-        assert(not os.path.exists(genesListFilename))
-
-    # Sanity test 2 -- this species doesn't already exist in the DB
-    if r.exists(speciesNameKey % args.taxid):
-        if r.exists(speciesCDSList % args.taxid):
-            raise Exception("Species with taxid=%d already exists as '%s'" % (args.taxid, getSpeciesName(args.taxid)))
-        else:
-            pass # Name defined but no CDS list; maybe an earlier run of this script was interrupted?
-    
+        ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection, server=args.server)
+        assert(not os.path.exists(ftp.getLocalDir))
 
     # Sanity tests passed
 
     genomefn = None
-    cdsfn = None
-    cdnafn = None
-    gff3fn = None
+    cdsfn    = None
+    cdnafn   = None
+    gff3fn   = None
     
     # Step 1 - get files from Ensembl FTP
-
     if( args.variant == "Ensembl" and args.fetch_ftp_files ):
     
-        ftp = EnsemblFTP(args.local_name, args.remote_name, release=args.release, section=args.section, subsection=args.subsection, server=args.server)
         (genomefn, cdsfn, cdnafn, gff3fn) = ftp.fetchAll()
         ftp.close()
 
@@ -103,30 +123,30 @@ def ingestGenome(args):
         genomefn = args.genome
 
     # Step 2 - parse GFF3 file to yield list of acceptable CDS genes
-    
-    processGff3(gff3fn, genesListFilename, args)
+    #
+    #processGff3(gff3fn, genesListFilename, args)
 
-    numGenesReturnedFromGff3 = None
-    with open(genesListFilename, "r") as f:
-        numGenesReturnedFromGff3 = len(f.readlines())
-    if numGenesReturnedFromGff3 < 400:
-        raise Exception("Processing gff3 file only yielded %d results; aborting" % numGenesReturnedFromGff3)
-    print("%d protein-coding genes found in gff3" % numGenesReturnedFromGff3)
+    #numGenesReturnedFromGff3 = None
+    #with open(genesListFilename, "r") as f:
+    #    numGenesReturnedFromGff3 = len(f.readlines())
+    #if numGenesReturnedFromGff3 < 400:
+    #    raise Exception("Processing gff3 file only yielded %d results; aborting" % numGenesReturnedFromGff3)
+    #print("%d protein-coding genes found in gff3" % numGenesReturnedFromGff3)
 
     
     # Step 3 - Add required annotations for this species to redis DB
-    
-    # TODO - add redis items here
-    #redis-cli -h power5 -a rnafold set "species:taxid:203267:name" "Tropheryma whipplei str. Twist"
-    r.set(speciesNameKey % args.taxid, args.full_name)
+    if not args.dont_add_annotations:
+        # TODO - add redis items here
+        #redis-cli -h power5 -a rnafold set "species:taxid:203267:name" "Tropheryma whipplei str. Twist"
+        r.set(speciesNameKey % args.taxid, args.full_name)
 
-    #redis-cli -h power5 -a rnafold set "species:name:Tropheryma whipplei str. Twist:taxid" "203267"
-    r.set(speciesTaxIdKey % args.full_name, args.taxid)
+        #redis-cli -h power5 -a rnafold set "species:name:Tropheryma whipplei str. Twist:taxid" "203267"
+        r.set(speciesTaxIdKey % args.full_name, args.taxid)
 
-    #redis-cli -h power5 -a rnafold set "species:taxid:203267:genomic-transl-table"  "11"
-    r.set(speciesTranslationTableKey % args.taxid, args.nuclear_genetic_code)
+        #redis-cli -h power5 -a rnafold set "species:taxid:203267:genomic-transl-table"  "11"
+        r.set(speciesTranslationTableKey % args.taxid, args.nuclear_genetic_code)
 
-    addSupportingAnnotationsForGenome(args)
+        addSupportingAnnotationsForGenome(args)
     
 
     gm = GenomeModel(
@@ -135,14 +155,18 @@ def ingestGenome(args):
         isLinear=False,
         variant=args.variant,
         geneticCode=args.nuclear_genetic_code )
-    
+
+    print( "Found {} genes".format( gm.numGenes() ))
+
+    if args.dont_load_sequences:  return 0
 
     # Step 4 - Load CDS sequences to DB
     print("Doing trial run for gene loading...")
-    if loadCDSwith3UTRSequences(gm, genesListFilename, args, dryRun=True) > 400:
+    cdsLoadedCount = loadCDSwith3UTRSequences(gm, args, dryRun=True)
+    if cdsLoadedCount > 400:
         print("Trial run succeeded.")
         print("Performing actual gene loading...")
-        cdsLoadedCount = loadCDSwith3UTRSequences(gm, genesListFilename, args, dryRun=False)
+        cdsLoadedCount = loadCDSwith3UTRSequences(gm, args, dryRun=False)
         print("Loaded %d CDS genes..." % cdsLoadedCount)
         
     else:
@@ -176,6 +200,33 @@ def addSupportingAnnotationsForGenome( args, overwrite=False ):
                         propSource,
                         overwrite=overwrite )
 
+def ingestMultipleGenome(args):
+
+    failCount = 0
+    successCount = 0
+
+    allTaxids = (args.taxid,)  # processing multiple genomes is not supported yet...
+    
+    for taxid in allTaxids:
+        #try:
+        ingestGenome(taxid, args)
+        successCount += 1
+            
+        #except Exception as e:
+        #    print(e)
+        #    failCount += 1
+
+    if not failCount:
+        print("Processed {} genomes.".format(successCount))
+        return 0
+    
+    else:
+        print("{} genomes failed, {} genomes succeeded.".format(failCount, successCount))
+        return -1
+
+    
+        
+            
 
 _knownBoolVals = {"true":True, "false":False}
 def parseBool(val):
@@ -208,8 +259,10 @@ def standaloneRun():
     argsParser.add_argument("--cds-with-3utr", action="store_true", default=False)
     argsParser.add_argument("--ignore-id-check", action="store_true", default=False)
     argsParser.add_argument("--server", type=str, required=False, default=None)
-    argsParser.add_argument("--add-annotations-only", action="store_true", default=False)
-    
+    argsParser.add_argument("--add-annotations-only", action="store_true", default=False) 
+    argsParser.add_argument("--dont-load-sequences", action="store_true", default=False)
+    argsParser.add_argument("--dont-add-annotations", action="store_true", default=False)
+   
     args = argsParser.parse_args()
 
     print(args)
@@ -236,7 +289,7 @@ def standaloneRun():
             raise Exception("--gff3 and --genome are required when --fetch-ftp-files=False")
         
 
-    sys.exit(ingestGenome(args))
+    sys.exit(ingestMultipleGenome(args))
     
     
 if __name__=="__main__":

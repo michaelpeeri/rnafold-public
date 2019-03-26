@@ -7,6 +7,53 @@ from intervaltree import IntervalTree, Interval
 from gff import createGffDb
 
 
+
+_pyfaidxCache = {}
+def pyfaidxCache(fastafn:str) -> object:
+    ret = _pyfaidxCache.get(fastafn, None)
+    
+    if ret is None:
+        newfaidx = pyfaidx.Fasta(fastafn)
+        _pyfaidxCache[fastafn] = newfaidx
+        ret = newfaidx
+        
+    return ret
+
+
+def allStopCodonsPositionsSource(aaseq:str):
+    start = 0
+    pos = aaseq.find('*')
+    while pos >= 0:
+        yield pos
+        start = pos+1
+        pos = aaseq.find('*', start)
+    
+def isValidCodingSequence(cdsNtSeq:str, geneticCode:int) -> bool:
+    if not isinstance(cdsNtSeq, str):
+        cdsNtSeq = str(cdsNtSeq).lower()
+        
+    cdsAASeq     = str(Seq(cdsNtSeq, generic_dna).translate(table=geneticCode)).lower()
+    
+    if (cdsNtSeq[-3:].find("n") == -1) and (cdsAASeq[-1] != "*"):  # the CDS must end with a stop-codon (or unknown nucleotides)
+        return False # Invalid CDS
+    
+    if cdsAASeq[:-1].find('*')!=-1: # mid-CDS stop codon(s) found
+
+        for internalStopCodonPos in allStopCodonsPositionsSource(cdsAASeq[:-1]):
+            ntpos = internalStopCodonPos*3
+            internalStopCodon = cdsNtSeq[ntpos:ntpos+3]
+            if internalStopCodon == 'tga':
+                print("Found '*' at pos {}, {}nt, {}".format(internalStopCodonPos, ntpos, internalStopCodon))
+                # Internal UGA codon found; assume this is a selenocisteine site (we have no way of knowing)
+            else:
+                return False # non-UGA internal stop-codon found - this is not valid
+
+        return True # if all internal stop-codons are UGAs, we will assume this CDS is ok
+
+    return True # valid CDS
+        
+    
+
 trueVals = frozenset(('true', 'True', 'TRUE', '1'))
 class GenomeMoleculeModel(object):
 
@@ -19,6 +66,7 @@ class GenomeMoleculeModel(object):
     
     def __init__(self, moleculeId:int, sequenceFile:str, gff, name:str, isLinear=None, props:dict ={}, wholeGenomeModel:object =None):
         self.sequenceFile = sequenceFile
+        self.fastaidx = pyfaidxCache(sequenceFile)
         if type(gff)==type(""):
             self.gffFile = gff
             # TODO load file
@@ -39,13 +87,28 @@ class GenomeMoleculeModel(object):
         self.wholeGenomeModel = wholeGenomeModel
         self._loadFeatures()
 
+    """
+    Select features from the gff3 file to be represnted internally, either directly as intervals in the interval tree or as properties of those intervals
+    """
     def _loadFeatures(self):
         #print("mRNAs: {}".format( sum( 1 for _ in self.gff.region( seqid=self.name, featuretype='mRNA' ))))
 
-        for feature in self.gff.region( seqid=self.name, featuretype='CDS' ):
+        for geneft in self.gff.region( seqid=self.name, featuretype='gene' ):
+
+            gene = geneft.astuple()
+            geneprops = json.loads( gene[GenomeMoleculeModel._gf_props] )
+            if "protein_coding" not in geneprops["biotype"]: continue
+            
+            # Get the 1st CDS
+            fts = list( self.gff.children( geneft, featuretype="CDS" ) )
+            if not fts: continue # gene features does not have CDS children
+            feature = fts[0]
             ft = feature.astuple()
-            #print(ft)
             assert( ft[GenomeMoleculeModel._gf_molecule]==self.name )
+
+            # Get all exons
+            exons = [x.astuple() for x in self.gff.children( geneft, featuretype="exon" )]
+            assert( len(exons) >= 1)
             
             # ('transcript:ENST00000641515', '1', 'havana', 'mRNA', 65419, 71585, '.', '+', '.', '{"ID":["transcript:ENST00000641515"],"Parent":["gene:ENSG00000186092"],"Name":["OR4F5-202"],"biotype":["protein_coding"],"tag":["basic"],"transcript_id":["ENST00000641515"],"version":["2"]}', '[]', 4681)
             # ('transcript:ENST00000335137', '1', 'ensembl', 'mRNA', 69055, 70108, '.', '+', '.', '{"ID":["transcript:ENST00000335137"],"Parent":["gene:ENSG00000186092"],"Name":["OR4F5-201"],"biotype":["protein_coding"],"ccdsid":["CCDS30547.1"],"tag":["basic"],"transcript_id":["ENST00000335137"],"transcript_support_level":["NA (assigned to previous version 3)"],"version":["4"]}', '[]', 4681)
@@ -56,11 +119,12 @@ class GenomeMoleculeModel(object):
             props = json.loads( sprops )
             strand = ft[GenomeMoleculeModel._gf_strand]
             assert( strand=='+' or strand=='-' )
-            data = {'strand':ft[GenomeMoleculeModel._gf_strand], 'props':sprops}
-            start = ft[GenomeMoleculeModel._gf_start]
-            end = ft[GenomeMoleculeModel._gf_end]
+            data = {'strand':ft[GenomeMoleculeModel._gf_strand], 'props':sprops, 'gene-name':geneprops.get("Name", None), 'exons':exons }
+            # Use the gene boundaries (spanning all exons) for the interval
+            start = gene[GenomeMoleculeModel._gf_start]
+            end = gene[GenomeMoleculeModel._gf_end]
 
-            print(props)
+            #print(props)
             assert(end >= start)
             protId = props["protein_id"][0]
             assert(len(protId)>3)
@@ -144,7 +208,7 @@ class GenomeMoleculeModel(object):
                     "curr-feature-start": feature.begin,
                     "curr-feature": feature,
                     "curr-feature-end": feature.end,
-                    "dowstream-feature-start": next.begin,
+                    "downstream-feature-start": next.begin,
                     "downstream-feature": next,
                     "downstream-feature-end": next.end,
                     "last-nucleotide": feature.end,
@@ -189,6 +253,29 @@ class GenomeMoleculeModel(object):
         #    return None
         
         return ret
+
+    def numGenes(self) -> int:
+        return len(self.features)
+
+    # Get a nucleotide range
+    def getSequence(self, begin, end, rc=False):
+        return self.fastaidx.get_seq(self.name, begin, end, rc=rc)
+
+    def getFeatureSplicedmRNA(self, feature):
+
+        if isinstance(feature, str):
+            feature = self.findFeatureById(feature)
+
+        exonSeqs = []
+        for exon in feature.data['exons']:
+            exonStart = exon[GenomeMoleculeModel._gf_start]
+            exonEnd   = exon[GenomeMoleculeModel._gf_end]
+
+            exonSeqs.append( self.getSequence( exonStart, exonEnd, rc=(True if feature.data['strand']=='-' else False) ).seq )
+        cdsSeq = Seq( "".join( exonSeqs ), generic_dna )
+        
+        return cdsSeq
+        
         
 
 class GenomeModel(object):
@@ -206,7 +293,7 @@ class GenomeModel(object):
         self.gff = createGffDb(gffFile, variant)
         print("Done.")
 
-        chromosomeFeatures = list(self.gff.features_of_type( "chromosome" ))
+        chromosomeFeatures = list(self.gff.features_of_type(("chromosome", "supercontig" )) )
         moleculeNames = [c.astuple()[GenomeModel._gf_mol_name] for c in chromosomeFeatures]
         moleculeProps = [json.loads(c.astuple()[GenomeModel._gf_mol_props]) for c in chromosomeFeatures]
         #self.molecules = [Genome(name,props) for (name,props) in zip(moleculeNames, moleculeProps)]
@@ -226,7 +313,7 @@ class GenomeModel(object):
         print([x.name for x in self.moleculeModels])
         print([len(x.features) for x in self.moleculeModels])
 
-        self.fasta = pyfaidx.Fasta(sequenceFile)
+        self.fasta = pyfaidxCache(sequenceFile)
 
     def getRegion(self, region:tuple, rc=False):
         (chromosome, begin, end) = region
@@ -250,6 +337,13 @@ class GenomeModel(object):
 
                 yield props["protein_id"][0]
 
+    def numGenes(self) -> int:
+        return sum( [mol.numGenes() for mol in self.moleculeModels] )
+
+    def getGeneticCode(self) -> int:
+        return self.geneticCode
+
+        
 
 class GenomeModelsCache(object):
     def __init__(self):
@@ -415,16 +509,41 @@ def test3primeFlankingRegions(mol):
     assert( f59687 in over100set )
     #assert( f59687 not in over500set )  - fails because some CDSs in the middle of this UTR are missing
 
-def CDS3PrimeFlankingRegionSource( mol, minLength:int=10, debug=False ):
+# minLength==-1 -> no minimum length
+def CDS3PrimeFlankingRegionSource( mol:object, minLength:int=-1, debug:bool=False ):
     for feat in mol.features.items():
         region = mol.find3PrimeFlankingRegion( feat, debug=debug )
+        
         if not region is None:
+            assert feat==region["curr-feature"]
+            
             length = region["flanking-region-end"]-region["flanking-region-start"]
-            if length >= minLength:
+            if minLength < 0 or length >= minLength:
                 yield( feat, region )
+
+def CDS3PrimeFlankingRegionWithDownstreamFeatureSource( mol:object, debug:bool=False ):
+
+    alreadyDone = set()
+    
+    for feat in mol.features.items():
+        region = mol.find3PrimeFlankingRegion( feat, debug=debug )
+        
+        if not region is None:
+            assert feat==region["curr-feature"]
+            downstream = region["downstream-feature"]
+
+            rprops = json.loads( feat.data['props'] )
+            parentId = rprops['Parent'][0]
+            if parentId in alreadyDone:
+                raise Exception("Selected features with identical parent-ids from gff3 {}".format(parentId))
+            else:
+                alreadyDone.add( parentId )
+            
+            #length = region["flanking-region-end"]-region["flanking-region-start"]
+            yield( feat, region )
     
 
-def CDSWith3PrimeSequencesSource( genomeModel, minLength:int=10, debug=False ):
+def CDSWith3PrimeSequencesSource( genomeModel:object, minLength:int=10, debug:bool=False ):
     numRegions = 0
     
     for mol in genomeModel.moleculeModels:
@@ -477,6 +596,131 @@ def CDSWith3PrimeSequencesSource( genomeModel, minLength:int=10, debug=False ):
 
 
     print("Found {} regions".format(numRegions))
+
+
+
+def CDSWith3PrimeSequencesWithDownstreamFeatureSource( genomeModel:object, debug:bool=False ): # polycistronic mRNA
+    numRegions = 0
+        #
+    for mol in genomeModel.moleculeModels:
+        for feat, region in CDS3PrimeFlankingRegionWithDownstreamFeatureSource( mol, debug=debug ):
+            if debug:
+                print("-----------"*3)
+                print(feat)
+                print(region)
+
+            flanking = region['downstream-feature']
+            
+            if feat.data['strand']=='+':
+
+                downstreamFeatureEnd = region["downstream-feature-end"]
+                
+                #begin = feat.begin
+                #end = downstreamFeatureEnd
+
+                gap = region["downstream-feature-start"] - feat.end
+                utr3Start = feat.end
+                utr3End = region["downstream-feature-start"]
+                
+                #seq = genomeModel.getRegion( (region["molecule"], begin, end) )
+                if gap > 0:
+                    utr3Seq = genomeModel.getRegion( (region["molecule"], utr3Start, utr3End-1) )
+                else:
+                    utr3Seq = Seq("", generic_dna)
+                # TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #
+                #utr3Seq = Seq("N" * len(utr3Seq), generic_dna )
+                # TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #
+            
+            elif feat.data['strand']=='-':
+
+                downstreamFeatureStart = region["downstream-feature-start"]
+                
+                #begin = downstreamFeatureStart
+                #end = feat.end-1
+
+                gap = feat.begin - region["downstream-feature-end"]
+                utr3Start = region["downstream-feature-end"]
+                utr3End = feat.begin
+                
+                #seq = genomeModel.getRegion( (region["molecule"], begin, end), rc=True )
+                if gap > 0:
+                    utr3Seq = genomeModel.getRegion( (region["molecule"], utr3Start, utr3End-1), rc=True )
+                else:
+                    utr3Seq = Seq("", generic_dna)
+                    
+                # TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #
+                #utr3Seq = Seq("N" * len(utr3Seq), generic_dna )
+                # TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #### TEST ONLY #
+
+            else:
+                raise ValueError("Unknown strand '{}".format(feature.data['strand']))
+
+            # exonSeqs = []
+            # for exon in feat.data['exons']:
+            #     exonStart = exon[GenomeMoleculeModel._gf_start]
+            #     exonEnd   = exon[GenomeMoleculeModel._gf_end]
+                
+            #     exonSeqs.append( genomeModel.getRegion( (region["molecule"], exonStart, exonEnd ), rc=(True if feat.data['strand']=='-' else False) ).seq )
+            # cdsSeq = Seq( "".join( exonSeqs ), generic_dna )
+
+            cdsSeq = mol.getFeatureSplicedmRNA( feat )
+            nextCdsSeq = mol.getFeatureSplicedmRNA( region["downstream-feature"] )
+            nextCdsStrand = region['downstream-feature'].data['strand']
+            
+            
+            #print(seq[:42])
+            #ntSeq = Seq( seq.seq, generic_dna )
+            if debug:
+                print(cdsSeq)
+                print(len(seq.seq))
+            
+            #if feat.data['strand']=='-':
+            #    ntSeq = ntSeq.reverse_complement()
+
+            if( len(cdsSeq) % 3 != 0 ):
+                #raise Exception("Coding sequence has partial codon (length={})".format( len(ntSeq) ))
+                print("-------"*8)
+                print("Warning: Coding sequence has partial codon (length={})".format( len(cdsSeq) ))
+                print(feat)
+                print("-------"*8)
+                continue
+            
+            aaSeq = cdsSeq.translate(table=genomeModel.geneticCode)
+            numRegions += 1
+
+            #stopCodonPos = feat.end - feat.begin - 3
+            stopCodonPos = len(cdsSeq)-3
+
+            if debug:
+                print(aaSeq)
+                print(aaSeq[((stopCodonPos-6)//3):((stopCodonPos+9)//3):])
+
+            if not ( gap>0 or len(utr3Seq)==0 ):
+                print(gap)
+            #assert( gap>0 or len(utr3Seq)==0 )  # if gap<=0, there is no UTR seq
+            if not ( gap<0 or len(utr3Seq)==gap ):
+                print(gap)
+            #assert( gap<0 or len(utr3Seq)==gap )  # if gap>=0, the UTR seq has length==gap
+
+            aaAtStopCodonPosition = aaSeq[stopCodonPos//3]
+            if not (aaAtStopCodonPosition=="*" or aaAtStopCodonPosition=="X"):
+                #print("Warning: stop codon not found...")
+                #raise Exception("Stop codon not found...")
+                print("-------"*8)
+                print("Warning: Stop codon not found")
+                print(feat)
+                print("-------"*8)
+                continue
+
+
+            #nextStartCodonPos = 
+                
+            yield (feat, region, cdsSeq, utr3Seq, gap, nextCdsSeq, nextCdsStrand )
+            
+
+
+    print("Found {} regions".format(numRegions))
+
 
 def writeFlankingSeqToFasta( genomeModel, minLength:int=10, debug=False ):
     #from Bio import SeqIO
