@@ -11,10 +11,11 @@ from copy import copy
 from math import factorial
 import random
 from Bio.Seq import Seq
+from Bio.Alphabet import generic_dna
 import Bio.Data
 from local_cache import LocalStringsCache
 from nucleic_compress import randseq, allseq
-from data_helpers import getCrc
+from data_helpers import getCrc, CDSHelper
 
 def splitCodons(seq):
     assert(len(seq)%3==0)
@@ -321,7 +322,7 @@ class NucleotidePermutationRandomization(object):
         ## TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY ####
         #nucleotideSeq = Seq(nucleotideSeq.lower() + 'c')
         ## TESTING ONLY #### TESTING ONLY #### TESTING ONLY #### TESTING ONLY ####
-        nucleotideSeq = Seq(nucleotideSeq.lower() )
+        nucleotideSeq = Seq(nucleotideSeq.lower(), generic_dna )
         
         # Calculate the total number of permutations
         permutationsCountDenom = 1
@@ -394,6 +395,69 @@ class CDSand3UTRRandomization(object):
         return (UTRpermCount, totalIdentity, randomizedCDS+randomizedUTR)
         
 
+class CDSand3UTRRandomizationIncludingNextCDS(object):
+    """
+    """
+    def __init__(self, cdsRand, utrRand, taxId):
+        self.cdsRand = cdsRand
+        self.utrRand = utrRand
+        self.taxId = taxId
+
+    def randomize(self, nucleotideSeq:str, protId:str ) -> (int, float, str):
+
+        print("-----------"*5)
+        cds = CDSHelper(self.taxId, protId)
+        gm = cds.getGenomeModel()
+
+        found = gm.findFeatureById( protId )
+        if found is None:
+            raise Exception("Failed to find feature matching protein-id={} in genome model".format(protId))
+        (moleculeId, currFeature)  = found
+
+        #if gm.moleculeModels[moleculeId].find3PrimeFlankingRegion( currFeature, debug=True ) is None:
+        #    pass
+        #print((moleculeId, feature))
+
+        cdsLengthNt            = cds.CDSlength();         assert(cdsLengthNt%3 == 0)
+        flankingRegionLengthNt = cds.flankingRegion3UtrLength()
+        nextCDSOppositeStrand  = cds.nextCDSOnOppositeStrand()
+
+        # Randomize the "main" CDS
+        CDSseq = nucleotideSeq[:cdsLengthNt]
+        assert( len(CDSseq) == cdsLengthNt )
+        (CDSpermCount, CDSidentity, randomizedCDS) = self.cdsRand.randomize( CDSseq )
+
+        # Randomize the 3'UTR
+        if flankingRegionLengthNt > 0:
+            _3UTRseq = nucleotideSeq[cdsLengthNt:cdsLengthNt+flankingRegionLengthNt]
+            assert( len(_3UTRseq) == flankingRegionLengthNt )
+            (UTRpermCount, UTRidentity, randomizedUTR) = self.utrRand.randomize( _3UTRseq )
+        else:
+            _3UTRseq = ""
+            UTRpermCount = 1
+            UTRidentity = 1.0
+            randomizedUTR = ""
+
+        # Randomize the downstream CDS
+        nextCDSseq = nucleotideSeq[cdsLengthNt+flankingRegionLengthNt:] # Should work for positive and negative length UTRs
+        nextCDSseq = nextCDSseq[(len(nextCDSseq)%3):]  # remove partial codons from the start (caused due to the overlap; we can only randomize each codon as part of one CDS, although in the overlap region codons belong to two CDSs...)
+        if nextCDSOppositeStrand:
+            nextCDSseq = str( Seq( nextCDSseq, generic_dna ).reverse_complement() )
+        assert( len(nextCDSseq)%3 == 0)
+        (nextCDSpermCount, nextCDSidentity, randomizedNextCDS) = self.cdsRand.randomize( nextCDSseq )
+        if nextCDSOppositeStrand: # if the next CDS is on the opposite strand, revcomp it back to its original frame
+            randomizedNextCDS = str( Seq( randomizedNextCDS, generic_dna ).reverse_complement() )
+        
+        
+        
+
+        totalPerms = CDSpermCount * UTRpermCount * nextCDSpermCount
+        
+        totalIdentity = ( (CDSidentity * len(CDSseq)) + (UTRidentity * len(_3UTRseq)) + (nextCDSidentity * len(nextCDSseq)) ) / (len(CDSseq) + len( _3UTRseq ) + len(nextCDSseq) )
+        
+        return (UTRpermCount, totalIdentity, randomizedCDS+randomizedUTR+randomizedNextCDS)
+    
+    
     
 #map( lambda x: x[1] if x[0] else x[2], zip( [0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1], [8]*20, [1]*20 ) )
 
@@ -623,6 +687,42 @@ def testNucleotidePermutationRandomizationWithMask(N:int =20000, seqLength:int=1
     print(minFoundFractionSeq)
 
 
+def testCDSand3UTRRandomizationIncludingNextCDS(taxId:int = 511145) -> int:
+    from data_helpers import SpeciesCDSSource
+    from genome_model import getGenomeModelFromCache
+
+    rand = CDSand3UTRRandomizationIncludingNextCDS( SynonymousCodonPermutingRandomization(geneticCode=11),
+                                                    NucleotidePermutationRandomization(),
+                                                    taxId )
+
+    #for protId in SpeciesCDSSource(taxId):
+    countOK = 0
+    countNotOK = 0
+    
+    for protId in getGenomeModelFromCache( taxId ).allCDSSource():
+        try:
+            cds = CDSHelper( taxId, protId )
+            seq = cds.sequence()
+            countOK += 1
+            
+        except Exception as e:
+            countNotOK += 1
+            continue
+
+        for i in range(20):
+            ret = rand.randomize( seq, protId )
+            if not ( len(ret[2])==len(seq) ):
+                print(ret)
+                rand.randomize( seq, protId )
+            assert( len(ret[2])==len(seq) )
+        #print("{} -> {}".format( protId, ret ))
+
+    print("OK: {}, NotOK: {}, Total: {}".format( countOK, countNotOK, countOK+countNotOK))
+
+
+    return 0
+    
+
 
 def testAll():
     #ret = testCountRandomizations(N=1000)
@@ -634,11 +734,14 @@ def testAll():
     #ret = testNucleotidePermutationRandomization(N=50000, seqLength=10)
     #if ret: return ret
 
-    ret = testNucleotidePermutationRandomizationWithMask( N=20000, seqLength=14 )
-    if ret: return ret
+    #ret = testNucleotidePermutationRandomizationWithMask( N=20000, seqLength=14 )
+    #if ret: return ret
 
     #ret = testVerticalShuffling()
     #if ret: return ret
+
+    ret = testCDSand3UTRRandomizationIncludingNextCDS()
+    if ret: return ret
     
     return 0
 
