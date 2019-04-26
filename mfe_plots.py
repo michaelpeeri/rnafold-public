@@ -11,17 +11,22 @@ from matplotlib.patches import Rectangle
 matplotlib.use("cairo")
 import matplotlib.pyplot as plt
 plt.style.use('ggplot') # Use the ggplot style
+from matplotlib import rcParams
 from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty, getSpeciesShortestUniqueNamesMapping
 from sklearn import decomposition
 from sklearn.neighbors import KernelDensity
-from sklearn.grid_search import GridSearchCV
-from sklearn.cross_validation import KFold
+from sklearn.model_selection import GridSearchCV, KFold
 import seaborn as sns
 import cairo
 from pyqtree import Index
 from ncbi_entrez import getTaxonomicGroupForSpecies
 from rate_limit import RateLimit
 
+#>>> import matplotlib.font_manager as fm
+#>>> for font in fm.findSystemFonts():
+#...     print font
+rcParams['font.family'] = ['sans-serif']
+#rcParams['font.sans_serif'] = ['DejaVu Sans Mono']
 
 def plotMFEProfileWithGC(taxId, profileId, data):
     fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
@@ -873,10 +878,10 @@ def loadProfileData(files):
                                                    pd.isnull(deltas_df[deltas_df['pos']==lastPos ]['delta']).sum() )
 
                 #print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
-                if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
-                    print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
-                    print("Skipping {} (taxId={}): not enough data is available".format(longTaxName, taxId))
-                    #continue  # Skip sequences with very limited data available
+                #if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
+                #    #print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                #    #print("Skipping {} (taxId={}): not enough data is available".format(longTaxName, taxId))
+                #    #continue  # Skip sequences with very limited data available
                 
                 #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
                 meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
@@ -1051,22 +1056,23 @@ def estimateModeUsingKDE(xs):
     assert(xs.ndim==2)
 
     bandwidths = 10 ** np.linspace(-2.0, 1, 500)
-    
-    cv = KFold(len(xs), n_folds=10)
+
+    cv = KFold(n_splits=10)
     #cv = LeaveOneOut(len(x1))
-    
+
     grid = GridSearchCV(KernelDensity(kernel='gaussian'),
                         {'bandwidth': bandwidths},
-                        cv=cv )
+                        cv=cv,
+                        iid=False)
     grid.fit(xs)
     bw = grid.best_params_['bandwidth']
     
     kde = KernelDensity(bandwidth=bw, kernel='gaussian')
     kde.fit(xs)  # calculate the KDE
-    print(xs.shape)
+    #print(xs.shape)
 
-    x_d = np.linspace( min(xs), max(xs), 500 )  # This must cover the range of values.. TODO - fix this...
-    print( np.expand_dims(x_d, 1).shape)
+    x_d = np.linspace( min(xs), max(xs), 500 )  # This must cover the range of values...
+    #print( np.expand_dims(x_d, 1).shape)
     
     logprob = kde.score_samples( np.expand_dims(x_d, 1) )  # score the KDE over a range of values
 
@@ -1189,7 +1195,7 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     #X = X[~np.any(np.isnan(X), axis=1)]  # remove points containig NaN
 
 
-    testPCArobustness(X) # create diagnostic plots for the robustness of the PCA solution (that is not generally robust to outliers)
+    testPCArobustness(X, sampleSize=X.shape[0] ) # create diagnostic plots for the robustness of the PCA solution (that is not generally robust to outliers)
     
     print("Creating PCA plot...")
     
@@ -1214,11 +1220,12 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
 
     D0_peak = estimateModeUsingKDE( X_reduced[:,D0] )
     D1_peak = estimateModeUsingKDE( X_reduced[:,D1] )
-    distPlotsScales = (exp(D1_peak[1])*1.12, exp(D0_peak[1])*1.12)
+    distPlotsScales = (exp(D1_peak[1])*1.45, exp(D0_peak[1])*1.45)
     print("Peaks: {} {}".format(exp(D1_peak[1]), exp(D0_peak[1])))
     
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
+    lvColors = ((0.082, 0.784, 0.4078), (0.1137, 0.1176,0.5569 ))
 
     
     
@@ -1315,16 +1322,39 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
             cmapNormalizerForPCAvars = CenterPreservingNormlizer(-1, 1)
             ax4.imshow( pca.components_[0,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly-imh*2, tly-imh*4 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
             ax4.imshow( pca.components_[1,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly      , tly-imh*2 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
-            ax4.imshow( pca.components_[2,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly+imh*2, tly-imh*0 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
-            ax4.annotate( "V1",                                                (tlx - imw*2.5, bry+imh*2),       fontsize=fontSize*0.9 )
-            ax4.annotate( "V2",                                                (tlx - imw*2.5, bry+imh*0),       fontsize=fontSize*0.9 )
-            ax4.annotate( "V3",                                                (tlx - imw*2.5, bry-imh*2),       fontsize=fontSize*0.9 )
-            ax4.annotate( "V1+V2",                                             (tlx - imw*2.5, bry-imh*4),       fontsize=fontSize*0.9 )
+            #ax4.imshow( pca.components_[2,:].reshape(1,-1), extent=(tlx-2*imw, tlx+0,  tly+imh*2, tly-imh*0 ), norm=cmapNormalizerForPCAvars, cmap='coolwarm', interpolation='bilinear', zorder=300 )
+            ax4.annotate( "PC1",                                                (tlx - imw*2.5, bry+imh*2),       fontsize=fontSize*0.9 )
+            ax4.annotate( "PC2",                                                (tlx - imw*2.5, bry+imh*0),       fontsize=fontSize*0.9 )
+            ax4.annotate( "N = {}".format(X.shape[0]),                                    (tlx - imw*2.5, bry-imh*2),       fontsize=fontSize*0.9 )
+            #ax4.annotate( "PC3",                                                (tlx - imw*2.5, bry-imh*2),       fontsize=fontSize*0.9 )
+            #ax4.annotate( "V1+V2",                                             (tlx - imw*2.5, bry-imh*4),       fontsize=fontSize*0.9 )
             ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0] ), (tlx - imw*1.0, bry+imh*2), fontsize=fontSize*0.9 )
             ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[1] ), (tlx - imw*1.0, bry+imh*0), fontsize=fontSize*0.9 )
-            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[2] ), (tlx - imw*1.0, bry-imh*2), fontsize=fontSize*0.9 )
-            ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0]+
-                                           pca.explained_variance_ratio_[1] ), (tlx - imw*1.0, bry-imh*4), fontsize=fontSize*0.9 )
+            #ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[2] ), (tlx - imw*1.0, bry-imh*2), fontsize=fontSize*0.9 )
+            #ax4.annotate( "{:.3g}".format( pca.explained_variance_ratio_[0]+
+            #                               pca.explained_variance_ratio_[1] ), (tlx - imw*1.0, bry-imh*4), fontsize=fontSize*0.9 )
+            #xposlv1 = tlx + imw*(addLoadingVectors[0]/30.0 - 0.5)
+            # left:  tlx - imw*(1.0+1.0)
+            # right: tlx - imw*(1.0-0.9)
+            
+            # Indicate loading vectors
+            isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
+
+            for i, c in enumerate(addLoadingVectors):
+                print("c = {}".format(c))
+                if isEndReferenced:
+                    assert(c <= 0)
+                    cIdx = X.shape[1] + c - 1
+                    #print("--> {} (N={})".format(cIdx, X.shape))
+                else:
+                    cIdx = c
+                    
+                xposlv1 = tlx - imw*(2.0 - (float(cIdx)/X.shape[1]*2.0) )
+                #xposlv2 = tlx - imw*(2.0-addLoadingVectors[1]/X.shape[1]*1.9)
+                ax4.annotate( "", xy=(xposlv1, bry+imh*8), xytext=(xposlv1, bry+imh*3.5),
+                              arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=lvColors[i]), color=lvColors[i], zorder=50 )
+                #ax4.annotate( "", xy=(xposlv2, bry+imh*8), xytext=(xposlv2, bry+imh*3),
+                #              arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=lvColors[1]), color=lvColors[1], zorder=50 )
 
         if layerConfig.showLoadingVectors:
             isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
@@ -1340,9 +1370,10 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
 
                 #ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingScale, pca.components_[D0,cIdx]*loadingScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=0.6, linewidth=2.0, color='red'), color='red', zorder=200 )
 
-                ax4.annotate( "",   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingVectorsScale, pca.components_[D0,cIdx]*loadingVectorsScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), color=colors[i], zorder=50 )
+                ax4.annotate( "",   xy=(0,0), xytext=(pca.components_[D1,cIdx]*loadingVectorsScale, pca.components_[D0,cIdx]*loadingVectorsScale), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=lvColors[i]), color=lvColors[i], zorder=50 )
 
-                ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   xy=(tlx-imw*1.9, bry-imh*2.2*(i+4)), xytext=(tlx-imw*0.4, bry-imh*2.2*(i+4)),  fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=colors[i]), zorder=200 )
+                ax4.annotate( "",   xy=(tlx-imw*1.9, bry-imh*2.2*(i+4)), xytext=(tlx-imw*0.4, bry-imh*2.2*(i+4)),  fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=lvColors[i]), zorder=200 )
+                ax4.annotate( u"\u0394LFE[{}nt]".format(abs(c)*10),   (tlx-imw*0.4, bry-imh*2.2*(i+4)),  fontsize=fontSize, zorder=200 )
 
                 
 
@@ -1366,6 +1397,14 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
             # ax4.scatter(X_reduced[:,1], X_reduced[:,0], s=1.5, alpha=0.5 )
 
 
+        if layerConfig.showAxes:
+            smallLabelGap = scaleX*0.05
+            gap = 0.05 # 0.20
+            ax4.annotate( "", xy=(min(X_reduced[:,D1]) - scaleY*gap, 0), xytext=(max(X_reduced[:,D1])+scaleY*gap, 0), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=0.9, color="black"), color="black", zorder=10 )
+            ax4.annotate( "PC2\n{:.3g}%".format( pca.explained_variance_ratio_[1]*100 ),   (min(X_reduced[:,D1])-scaleY*gap, smallLabelGap), fontsize=fontSize, color="black", zorder=10 )
+            
+            ax4.annotate( "", xy=(0, min(X_reduced[:,D0]) - scaleY*gap), xytext=(0, max(X_reduced[:,D1])+scaleY*gap), fontsize=fontSize, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=0.9, color="black"), color="black", zorder=10 )
+            ax4.annotate( "PC1\n{:.3g}%".format( pca.explained_variance_ratio_[0]*100 ),   (smallLabelGap, min(X_reduced[:,D0])-scaleY*gap), fontsize=fontSize, color="black", zorder=10 )
             
         if layerConfig.showTrait:
             xs = []
@@ -1377,7 +1416,8 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 ys.append( X_reduced[i,D0] )
                 cs.append( traitValues.get(taxId, None) )
                 
-            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale, alpha=1.0, edgecolors='none', cmap="viridis", label="Trait"  )
+            #traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale*3, alpha=0.3, edgecolors='none', cmap="plasma_r",                zorder=19  )
+            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale,   alpha=1.0, edgecolors='none', cmap="plasma_r", label="Trait", zorder=20  )
             fig.colorbar(traitPlot, shrink=0.5)
             
 
@@ -1385,8 +1425,8 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
             ax4.scatter(debugSymbols[0], debugSymbols[1], s=50, alpha=0.8, c="green", marker="+", zorder=300 )
             ax4.annotate( "*", xy=(D1_peak[0], D0_peak[0]), alpha=0.5, color='red', zorder=250 )
 
-        ax4.set_ylabel('PCV1')
-        ax4.set_xlabel('PCV2')
+        ax4.set_ylabel('')
+        ax4.set_xlabel('')
 
 
         #-----------------------------------------------------------------------------------
@@ -1445,17 +1485,19 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
 
 
     #_defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False )
-    plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
-    plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=False,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True, showAxes=True ) )
     overlayImages( ["pca_profiles_density.png", "pca_profiles.png"], "pca_profiles_combined.png" )
 
+    plotPCALayer(LayerConfig(output="pca_profiles_x",         showAxes=True,  showDensity=True, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
+    
 
     plotPCALayer(LayerConfig(output="pca_profiles_d",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True, debug=True ) )
     plotPCALayer(LayerConfig(output="pca_profiles_density_d", showDensity=True, debug=True ) )
     overlayImages( ["pca_profiles_density_d.png", "pca_profiles_d.png"], "pca_profiles_combined_d.png" )
     
 
-    plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showLoadingVectors=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showAxes=True, showLoadingVectors=True ) )
     overlayImages( ["pca_profiles_trait.png"], "pca_profiles_trait_combined.png" )
 
     

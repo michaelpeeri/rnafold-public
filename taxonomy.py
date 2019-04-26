@@ -939,7 +939,11 @@ def createTraitMapping(trait):
             endsymbiont = isEndosymbiont( taxId )
             if not endsymbiont is None:
                 ret[taxId] = endsymbiont
-                
+
+        #if trait=="ENc":
+        #if trait=="dLFEScale-g0":
+        #if trait=="WeakProfileComposite":
+
         else:
             raise Exception("Unknown trait {}".format(trait))
                             
