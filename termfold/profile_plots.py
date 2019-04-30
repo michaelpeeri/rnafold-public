@@ -19,10 +19,10 @@ from Bio.Alphabet import NucleotideAlphabet
 from scipy.stats import wilcoxon, spearmanr
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
-from data_helpers import decompressNucleicSequence, checkSpeciesExist, getSpeciesFileName, allSpeciesSource
+from data_helpers import decompressNucleicSequence, checkSpeciesExist, getSpeciesFileName, allSpeciesSource, getCDSProperty, CDSHelper
 from mysql_rnafold import Sources, getWindowWidthForComputationTag
 from process_series_data import readSeriesResultsForSpeciesWithSequence, convertResultsToMFEProfiles, sampleProfilesFixedIntervals, profileLength, profileElements, MeanProfile, calcSampledGCcontent, profileEdgeIndex
-from mfe_plots import plotMFEProfileWithGC, plotMFEProfileV3, plotXY, scatterPlot, scatterPlotWithColor, plotMFEProfileByPA, plotMFEProfileMultiple, scatterPlotWithKernel, plotMFEProfileForMultipleRandomizations
+from mfe_plots import plotMFEProfileWithGC, plotMFEProfileV3, plotXY, scatterPlot, scatterPlotWithColor, plotMFEProfileByPA, plotMFEProfileMultiple, scatterPlotWithKernel, plotMFEProfileForMultipleRandomizations, plot2WayMFEComparison
 from codonw import readCodonw, meanCodonwProfile
 
 
@@ -56,7 +56,121 @@ def parseProfileSpec():
     return convert
 
 
+class PlottingDestination(object):
+    def __init__(self, args, shuffleType, taxid, subclass="all"):
+        self.args = args
+        self.taxid = taxid
+        self.shuffleType = shuffleType
+        self.subclass = subclass
 
+        self.reset()
+
+    def accumulate(self, profileData, seq, fullCDS):
+        args = self.args
+
+        self.nativeMeanProfile.add( profileData[0,None] )
+        self.shuffledMeanProfile.add( profileData[1:] )
+        #self.deltaLFEMeanProfile.add( profileData[0,None] - profileData[1:] )
+
+
+        # Prepare GC profile
+        gc = calcSampledGCcontent( seq, args.profile[1] )
+        if( gc.size > profileLength(args.profile) ):  # truncate the profile if necessary
+            gc = np.resize( gc, (profileLength(args.profile),))
+        self.GCProfile.add( np.expand_dims(gc,0) )
+
+        # Prepare percentile mean profiles
+        self.shuffled25Profile.add( np.expand_dims( np.percentile(profileData[1:], 25, axis=0), 0) )
+        self.shuffled75Profile.add( np.expand_dims( np.percentile(profileData[1:], 75, axis=0), 0) )
+
+        cds_length_nt = len(fullCDS)
+        self.cdsLengths.append(cds_length_nt)
+        
+
+
+    def reset(self):
+        args = self.args
+        profileLen = profileLength(args.profile)
+        
+        self.nativeMeanProfile   = MeanProfile( profileLen )
+        self.shuffledMeanProfile = MeanProfile( profileLen )
+        #self.deltaLFEMeanProfile = MeanProfile( profileLen )
+        self.shuffled25Profile   = MeanProfile( profileLen )
+        self.shuffled75Profile   = MeanProfile( profileLen )
+        self.GCProfile           = MeanProfile( profileLen )
+
+        self.cdsLengths = []
+
+
+    def printDebugInfo(self):
+        print("subclass = {}".format(self.subclass))
+        print(self.nativeMeanProfile.counts())
+        print(self.shuffledMeanProfile.counts())
+
+    def finalize(self):
+        # -----------------------------------------------------------------------------
+        # Save mean profiles as H5
+
+        # Format (for compatible with plot_xy.py and old convert_data_for_plotting.py:
+        #         gc  native  position  shuffled
+        # 1    0.451  -4.944         1    -5.886
+        # 2    0.459  -5.137         2    -6.069
+        # 3    0.473  -5.349         3    -6.262
+
+        args = self.args
+        taxid = self.taxid
+        shuffleType = self.shuffleType
+
+        xRange = profileElements(args.profile)
+        
+        df = pd.DataFrame( {
+            "native": self.nativeMeanProfile.value(),
+            "shuffled": self.shuffledMeanProfile.value(),
+            "gc":self.GCProfile.value(),
+            "position": xRange,
+            "shuffled25":self.shuffled25Profile.value(),
+            "shuffled75":self.shuffled75Profile.value()},
+            index=xRange )
+
+        statisticsDF = pd.DataFrame({
+            'mean_mean_gc': pd.Series([np.mean(self.GCProfile.value())]),
+            'taxid': pd.Series([taxid], dtype='int'),
+            'cds_count': pd.Series([len(self.cdsLengths)], dtype='int'),
+            'media_cds_length_nt': pd.Series([np.median(self.cdsLengths)])
+        })
+        
+        
+        if( args.computation_tag == Sources.RNAfoldEnergy_SlidingWindow40_v2 ):
+            h5fn = "gcdata_v3_taxid_{}_profile_{}_{}_{}_{}_t{}_{}.h5".format(taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3], shuffleType, self.subclass)
+        else:
+            h5fn = "gcdata_v3_taxid_{}_profile_{}_{}_{}_{}_t{}_{}_series{}.h5".format(taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3], shuffleType, self.subclass, args.computation_tag)
+
+        # Compression parameters are described here:  http://www.pytables.org/usersguide/libref/helper_classes.html#filtersclassdescr
+        # ...and discussed thoroughly in the performance FAQs
+        with pd.io.pytables.HDFStore(h5fn, complib="zlib", complevel=1) as store:
+            store["df_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = df
+            #store["deltas_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = deltasForWilcoxon
+            #store["spearman_rho_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = spearman_rho
+            store["statistics_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = statisticsDF
+            #if( args.codonw ):
+            #    store["profiles_spearman_rho_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = dfProfileCorrs
+            #store["wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = wilcoxonDf
+            #store["transition_peak_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = guPeakDf
+            #store["edge_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = edgeWilcoxonDf
+
+            store.flush()
+
+        return df
+
+    def getNativeProfile(self):
+        return self.nativeMeanProfile.value()
+    
+    def getShuffledProfile(self):
+        return self.shuffledMeanProfile.value()
+
+    #def getDeltaLFEProfile(self):
+    #    return self.deltaLFEMeanProfile.value()
+    
 class ProfilePlot(object):
     def __init__(self, taxId, args):
 
@@ -91,6 +205,8 @@ class ProfilePlot(object):
 
         stopCodonFreq = Counter()
 
+        frout = open("out.csv", "wt")
+
         for shuffleType in shuffleTypes:
             n = 0
 
@@ -106,6 +222,24 @@ class ProfilePlot(object):
             shuffled25Profile = MeanProfile( profileLength(args.profile) )
             shuffled75Profile = MeanProfile( profileLength(args.profile) )
 
+            h5destination     = PlottingDestination(args, shuffleType, taxid)
+            h5destination_tag = PlottingDestination(args, shuffleType, taxid, subclass="endcodon_tag")
+            h5destination_taa = PlottingDestination(args, shuffleType, taxid, subclass="endcodon_taa")
+            h5destination_tga = PlottingDestination(args, shuffleType, taxid, subclass="endcodon_tga")
+            
+            h5destination_readthrough_pos = PlottingDestination(args, shuffleType, taxid, subclass="readthrough_pos")
+            h5destination_readthrough_neg = PlottingDestination(args, shuffleType, taxid, subclass="readthrough_neg")
+
+            h5destination_next_cds_same     = PlottingDestination(args, shuffleType, taxid, subclass="next_cds_same")
+            h5destination_next_cds_opposite = PlottingDestination(args, shuffleType, taxid, subclass="next_cds_opposite")
+
+            h5destination_integenic_short    = PlottingDestination(args, shuffleType, taxid, subclass="intergenic_positive_short")
+            h5destination_integenic_long     = PlottingDestination(args, shuffleType, taxid, subclass="intergenic_positive_long")
+            h5destination_integenic_overlap  = PlottingDestination(args, shuffleType, taxid, subclass="intergenic_positive_overlap")
+
+            dLFEvsFlankingLength = pd.DataFrame({'flanking_length':pd.Series(dtype='int'), 'dLFE':pd.Series(dtype='float'), 'nextCDSOppositeStrand':pd.Series(dtype='int')})
+
+           
             xRange = profileElements(args.profile)
 
             nativeMeanProfile_HighPAOnly = None
@@ -154,7 +288,8 @@ class ProfilePlot(object):
 
                 stopCodonPos = result['content'][0]['stop-codon-pos']
                 assert(stopCodonPos%3==0)
-                stopCodonFreq.update( (fullCDS[stopCodonPos:stopCodonPos+3], ) )
+                stopCodon = fullCDS[stopCodonPos:stopCodonPos+3]
+                stopCodonFreq.update( (stopCodon, ) )
                 
                 protId = result["cds"].getProtId()
                 #print("Length: {}nt".format(result["cds"].length()))
@@ -174,18 +309,55 @@ class ProfilePlot(object):
                 #print(profileData.shape)
 
                 # Prepare mean MFE profiles
-                nativeMeanProfile.add( profileData[0,None] )
-                shuffledMeanProfile.add( profileData[1:] )
 
-                # Prepare GC profile
-                gc = calcSampledGCcontent( seq, args.profile[1] )
-                if( gc.size > profileLength(args.profile) ):  # truncate the profile if necessary
-                    gc = np.resize( gc, (profileLength(args.profile),))
-                GCProfile.add( np.expand_dims(gc,0) )
+                h5destination.accumulate( profileData, seq, fullCDS )
+                
+                if stopCodon=="tag":
+                    h5destination_tag.accumulate( profileData, seq, fullCDS )
+                    
+                elif stopCodon=="taa":
+                    h5destination_taa.accumulate( profileData, seq, fullCDS )
+                    
+                elif stopCodon=="tga":
+                    h5destination_tga.accumulate( profileData, seq, fullCDS )
 
-                # Prepare percentile mean profiles
-                shuffled25Profile.add( np.expand_dims( np.percentile(profileData[1:], 25, axis=0), 0) )
-                shuffled75Profile.add( np.expand_dims( np.percentile(profileData[1:], 75, axis=0), 0) )
+
+                #
+                nextCDSOnOppositeStrand = CDSHelper( taxid, protId ).nextCDSOnOppositeStrand()
+                assert(isinstance(nextCDSOnOppositeStrand, bool))
+                if nextCDSOnOppositeStrand:
+                    h5destination_next_cds_opposite.accumulate( profileData, seq, fullCDS )
+                else:
+                    h5destination_next_cds_same.accumulate( profileData, seq, fullCDS )
+
+                flanking3UTRRegionLengthNt = result['cds'].flankingRegion3UtrLength()
+
+                if profileData.shape[1] > 105:
+                    dLFE_105 = profileData[0,105] - np.mean(profileData[1:,105]) 
+                    dLFEvsFlankingLength = dLFEvsFlankingLength.append(
+                        pd.DataFrame({'flanking_length':pd.Series([flanking3UTRRegionLengthNt]),
+                                      'dLFE':pd.Series([dLFE_105]),
+                                      'nextCDSOppositeStrand':pd.Series([int(nextCDSOnOppositeStrand)])}) )
+                else:
+                    print("Warning: skipping {}...".format( result['cds'].getProtId() ))
+
+                if flanking3UTRRegionLengthNt > 0     and flanking3UTRRegionLengthNt <= 100:
+                    h5destination_integenic_short.accumulate( profileData, seq, fullCDS )
+                elif flanking3UTRRegionLengthNt > 100 and flanking3UTRRegionLengthNt <= 400:
+                    h5destination_integenic_long.accumulate( profileData, seq, fullCDS )
+                elif flanking3UTRRegionLengthNt <= 0:
+                    h5destination_integenic_overlap.accumulate( profileData, seq, fullCDS )
+                    
+                
+                exid = 0
+                experiment_name = ("ribo_MG1655_MOPS_rep1", "ribo_MG1655_MOPS_rep2", "ribo_rich", "WT_rep1", "WT_rep2", "WT_rep3")[exid]
+                readthroughVal = getCDSProperty( taxid, protId, "readthrough-v2.ex{}".format(exid) )
+                #print("readthrough-v2.ex0:{}".format(readthroughVal))
+                if readthroughVal=="1":
+                    h5destination_readthrough_pos.accumulate( profileData, seq, fullCDS )
+                    
+                elif readthroughVal=="0":
+                    h5destination_readthrough_neg.accumulate( profileData, seq, fullCDS )
 
                 # Prepare data for genome-wide wilcoxon test
                 #newDeltas = profileData[0,0::4] - np.mean(profileData[1:,0::4], axis=0)
@@ -229,6 +401,11 @@ class ProfilePlot(object):
                 cdsLengths.append(cds_length_nt)
 
 
+
+                frline = "{}\t{}\t{}".format(protId, stopCodon, deltas)
+                frout.write(frline)
+                print(frline)
+                
                 geneLevelScatter = geneLevelScatter.append(pd.DataFrame({'gc':pd.Series([meanGC]), 'logpval': pd.Series([directedLogPval]), 'abslogpval': pd.Series([pvalue]), 'protid':pd.Series([protId]), 'pa':pd.Series([paval]), 'cds_length_nt':pd.Series([cds_length_nt])}))
 
 
@@ -441,15 +618,24 @@ class ProfilePlot(object):
             profileId = "%d_%d_%s_t%d" % (args.profile[0], args.profile[1], args.profile[2], shuffleType)
 
 
-            print(nativeMeanProfile.value())
-            print(xRange)
+            #print(nativeMeanProfile.value())
+            #print(xRange)
             
-            df = pd.DataFrame( { "native": nativeMeanProfile.value(), "shuffled": shuffledMeanProfile.value(), "gc":GCProfile.value(), "position": xRange, "shuffled25":shuffled25Profile.value(), "shuffled75":shuffled75Profile.value()}, index=xRange )
-            print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-            if( not CUBmetricsProfile is None ):
-                df = pd.merge( df, CUBmetricsProfile, how='left', left_on='position', right_on='windowStart')
-                df = df.set_index('position')
+            #df = pd.DataFrame( { "native": nativeMeanProfile.value(), "shuffled": shuffledMeanProfile.value(), "gc":GCProfile.value(), "position": xRange, "shuffled25":shuffled25Profile.value(), "shuffled75":shuffled75Profile.value()}, index=xRange )
+            #print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+            #if( not CUBmetricsProfile is None ):
+            #    df = pd.merge( df, CUBmetricsProfile, how='left', left_on='position', right_on='windowStart')
+            #    df = df.set_index('position')
 
+
+            df = None
+            for dest in (h5destination, h5destination_tag, h5destination_taa, h5destination_tga, h5destination_readthrough_pos, h5destination_readthrough_neg):
+                dest.printDebugInfo()
+                newDf = dest.finalize()
+                if df is None:
+                    df = newDf # only save the first df...
+                
+            
             combinedData[shuffleType] = df
             #print(df)
 
@@ -484,6 +670,63 @@ class ProfilePlot(object):
 
             plotMFEProfileWithGC(taxid, profileId, df, computationTag=args.computation_tag)
 
+            # plot2WayMFEComparison( taxid,
+            #                        profileId,
+            #                        pd.DataFrame({'native':   h5destination_readthrough_neg.getNativeProfile(),
+            #                                      'shuffled': h5destination_readthrough_neg.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        pd.DataFrame({'native':   h5destination_readthrough_pos.getNativeProfile(),
+            #                                      'shuffled': h5destination_readthrough_pos.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        computationTag=args.computation_tag,
+            #                        comment=experiment_name)
+            
+            # plot2WayMFEComparison( taxid,
+            #                        profileId,
+            #                        pd.DataFrame({'native':   h5destination_next_cds_same.getNativeProfile(),
+            #                                      'shuffled': h5destination_next_cds_same.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        pd.DataFrame({'native':   h5destination_next_cds_opposite.getNativeProfile(),
+            #                                      'shuffled': h5destination_next_cds_opposite.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        computationTag=args.computation_tag,
+            #                        yRange=(-13,1),
+            #                        comment="Next CDS on same strand")
+
+            # numGenesWithShortIntergenicRegions = np.min(h5destination_integenic_short.nativeMeanProfile.counts())
+            # numGenesWithLongIntergenicRegions  = np.min(h5destination_integenic_long.nativeMeanProfile.counts())
+            
+            # plot2WayMFEComparison( taxid,
+            #                        profileId,
+            #                        pd.DataFrame({'native':   h5destination_integenic_short.getNativeProfile(),
+            #                                      'shuffled': h5destination_integenic_short.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        pd.DataFrame({'native':   h5destination_integenic_long.getNativeProfile(),
+            #                                      'shuffled': h5destination_integenic_long.getShuffledProfile()},
+            #                                     index=xRange),
+            #                        computationTag=args.computation_tag,
+            #                        yRange=(-13,1),
+            #                        comment="Intergenic region lengths\nShort (N>={}) Long (N>={}) Total (N>={}) ".format( numGenesWithShortIntergenicRegions, numGenesWithLongIntergenicRegions, numGenesWithShortIntergenicRegions + numGenesWithLongIntergenicRegions ) )
+
+            numGenesWithShortIntergenicRegions = np.min(h5destination_integenic_short.nativeMeanProfile.counts())
+            numGenesWithOverlaps               = np.min(h5destination_integenic_overlap.nativeMeanProfile.counts())
+            
+            plot2WayMFEComparison( taxid,
+                                   profileId,
+                                   pd.DataFrame({'native':   h5destination_integenic_short.getNativeProfile(),
+                                                 'shuffled': h5destination_integenic_short.getShuffledProfile()},
+                                                index=xRange),
+                                   pd.DataFrame({'native':   h5destination_integenic_overlap.getNativeProfile(),
+                                                 'shuffled': h5destination_integenic_overlap.getShuffledProfile()},
+                                                index=xRange),
+                                   computationTag=args.computation_tag,
+                                   yRange=(-13,1),
+                                   comment="Intergenic region lengths\nShort (N>={}) Overlapping (N>={}) Total (N>={}) ".format( numGenesWithShortIntergenicRegions, numGenesWithOverlaps, numGenesWithShortIntergenicRegions + numGenesWithOverlaps ) )
+
+
+
+            scatterPlot( taxid, profileId, dLFEvsFlankingLength, xvar='flanking_length', yvar='dLFE', colorvar='nextCDSOppositeStrand', title="flanking_length - %s")
+
             #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, ProfilesCount=minCount)
             #plotMFEProfileV3(taxid, profileId, df, dLFEData=meanDeltaLFE, wilcoxon=wilcoxonDf, transitionPeak=guPeakDf, transitionPeakPos=peakPos*10, edgeWilcoxon=edgeWilcoxonDf, ProfilesCount=minCount)
 
@@ -491,13 +734,22 @@ class ProfilePlot(object):
             plotXY(
                 taxid,
                 profileId,
-                pd.DataFrame( { "num_genes": nativeMeanProfile.counts() }, index=xRange ),
+                pd.DataFrame( { "num_genes": h5destination.nativeMeanProfile.counts() }, index=xRange ),
                 "position",
                 "num_genes",
-                "Number of genes included, per starting position",
+                "Number of genes included, per starting position (all)",
                 computationTag=args.computation_tag
                 )
-
+            plotXY(
+                taxid,
+                profileId,
+                pd.DataFrame( { "num_genes_opposite": h5destination_next_cds_opposite.nativeMeanProfile.counts() }, index=xRange ),
+                "position",
+                "num_genes_opposite",
+                "Number of genes included, per starting position (opposite)",
+                computationTag=args.computation_tag
+                )
+            
             # scatterPlotWithKernel(
             #     taxid,
             #     profileId,
@@ -622,37 +874,6 @@ class ProfilePlot(object):
 
 
             print(statisticsDF)
-
-
-            # -----------------------------------------------------------------------------
-            # Save mean profiles as H5
-
-            # Format (for compatible with plot_xy.py and old convert_data_for_plotting.py:
-            #         gc  native  position  shuffled
-            # 1    0.451  -4.944         1    -5.886
-            # 2    0.459  -5.137         2    -6.069
-            # 3    0.473  -5.349         3    -6.262
-
-
-            if( args.computation_tag == Sources.RNAfoldEnergy_SlidingWindow40_v2 ):
-                h5fn = "gcdata_v2_taxid_{}_profile_{}_{}_{}_{}_t{}.h5".format(taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3], shuffleType)
-            else:
-                h5fn = "gcdata_v2_taxid_{}_profile_{}_{}_{}_{}_t{}_series{}.h5".format(taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3], shuffleType, args.computation_tag)
-            
-            # Compression parameters are described here:  http://www.pytables.org/usersguide/libref/helper_classes.html#filtersclassdescr
-            # ...and discussed thoroughly in the performance FAQs
-            with pd.io.pytables.HDFStore(h5fn, complib="zlib", complevel=1) as store:
-                store["df_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = df
-                store["deltas_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = deltasForWilcoxon
-                store["spearman_rho_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = spearman_rho
-                store["statistics_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = statisticsDF
-                if( args.codonw ):
-                    store["profiles_spearman_rho_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = dfProfileCorrs
-                #store["wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = wilcoxonDf
-                #store["transition_peak_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = guPeakDf
-                #store["edge_wilcoxon_%d_%d_%d_%s_%d" % (taxid, args.profile[0], args.profile[1], args.profile[2], args.profile[3])] = edgeWilcoxonDf
-                
-                store.flush()
 
 
             # ------------------------------------------------------------------------------------
