@@ -28,14 +28,14 @@ class Bytestream(object):
     bitStringToInt = {'0':0b0, '1':0b1}
 
     def __init__(self, initialData = None):
-        if( initialData != None):
+        if( not initialData is None):
             self._b = bytearray(initialData)
         else:
             self._b = bytearray()
 
         self._bytePos = 0
         self._bitPos = 0
-        if( initialData == None ):
+        if( initialData is None ):
             self._b.insert(0, 0) # insert the first bytes
 
     def push(self, bits):
