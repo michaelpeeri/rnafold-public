@@ -28,7 +28,7 @@ Note: the returned table does not include include entries for start/stop codons
 """
 def make_full_back_table(forward_table):
     ret = {}
-    for codon,aa in list(forward_table.items()):
+    for codon,aa in list(forward_table.forward_table.items()):
         codon = codon.lower()
         if aa is None:
             continue
@@ -52,7 +52,7 @@ class SynonymousCodonPermutingRandomization(object):
     """
     def __init__(self, geneticCode=1, skipIdenticalSequences=False):
         self._geneticCode = geneticCode
-        self._code = Bio.Data.CodonTable.unambiguous_dna_by_id[geneticCode]
+        self._code = Bio.Data.CodonTable.ambiguous_dna_by_id[geneticCode]
         self._back_table = make_full_back_table(self._code.forward_table)
         self._skipIdenticalSequences = skipIdenticalSequences
 
@@ -111,6 +111,13 @@ class SynonymousCodonPermutingRandomization(object):
         assert(Seq(resultingSeq).translate(table=self._code) == origSeqTranslation)  # translation was not maintained by randomization!
         return (permutationsCount, identity, resultingSeq)
 
+    def randomizeAmbiguousSequence(self, nucleotideSeq):
+        codonMask = [ bool(c.find('n')==-1) for c in splitCodons(nucleotideSeq.lower()) ]
+        if not all(codonMask):
+            a = 1 # DEBUG ONLY
+        return self.randomizeWithMask( nucleotideSeq, codonMask )
+
+    
     """
     Permute a sequence, allowing substitutions only in positions specified by a mask. Positions can include an arbitrary list of codons, specified by positions
 
@@ -346,7 +353,12 @@ class NucleotidePermutationRandomization(object):
         assert(identity <= 1.0)
 
         return (permutationsCount, identity, ''.join(newSeq))
-        
+
+    def randomizeAmbiguousSequence(self, nucleotideSeq):
+        nucleotideMask = [ n != 'n' for n in nucleotideSeq.lower() ]
+        return self.randomizeWithMask( nucleotideSeq, nucleotideMask )
+
+    
     """
     Permute a sequence, allowing substitutions only in positions specified by a mask. Positions can include an arbitrary list of codons, specified by positions
 
@@ -405,7 +417,7 @@ class CDSand3UTRRandomizationIncludingNextCDS(object):
 
     def randomize(self, nucleotideSeq:str, protId:str ) -> (int, float, str):
 
-        print("-----------"*5)
+        #print("-----------"*5)
         cds = CDSHelper(self.taxId, protId)
         gm = cds.getGenomeModel()
 
@@ -422,16 +434,20 @@ class CDSand3UTRRandomizationIncludingNextCDS(object):
         flankingRegionLengthNt = cds.flankingRegion3UtrLength()
         nextCDSOppositeStrand  = cds.nextCDSOnOppositeStrand()
 
+        if flankingRegionLengthNt<0 and -flankingRegionLengthNt > cdsLengthNt:
+            #flankingRegionLengthNt = -cdsLengthNt
+            raise Exception("Next CDS is fully overlapping...")
+
         # Randomize the "main" CDS
         CDSseq = nucleotideSeq[:cdsLengthNt]
         assert( len(CDSseq) == cdsLengthNt )
-        (CDSpermCount, CDSidentity, randomizedCDS) = self.cdsRand.randomize( CDSseq )
+        (CDSpermCount, CDSidentity, randomizedCDS) = self.cdsRand.randomizeAmbiguousSequence( CDSseq )
 
         # Randomize the 3'UTR
         if flankingRegionLengthNt > 0:
             _3UTRseq = nucleotideSeq[cdsLengthNt:cdsLengthNt+flankingRegionLengthNt]
             assert( len(_3UTRseq) == flankingRegionLengthNt )
-            (UTRpermCount, UTRidentity, randomizedUTR) = self.utrRand.randomize( _3UTRseq )
+            (UTRpermCount, UTRidentity, randomizedUTR) = self.utrRand.randomizeAmbiguousSequence( _3UTRseq )
         else:
             _3UTRseq = ""
             UTRpermCount = 1
@@ -440,15 +456,16 @@ class CDSand3UTRRandomizationIncludingNextCDS(object):
 
         # Randomize the downstream CDS
         nextCDSseq = nucleotideSeq[cdsLengthNt+flankingRegionLengthNt:] # Should work for positive and negative length UTRs
-        nextCDSseq = nextCDSseq[(len(nextCDSseq)%3):]  # remove partial codons from the start (caused due to the overlap; we can only randomize each codon as part of one CDS, although in the overlap region codons belong to two CDSs...)
+        assert( len(nextCDSseq)%3 == 0 )
+        #nextCDSseq = nextCDSseq[(len(nextCDSseq)%3):]  # remove partial codons from the start (caused due to the overlap; we can only randomize each codon as part of one CDS, although in the overlap region codons belong to two CDSs...)
         if nextCDSOppositeStrand:
             nextCDSseq = str( Seq( nextCDSseq, generic_dna ).reverse_complement() )
         assert( len(nextCDSseq)%3 == 0)
-        (nextCDSpermCount, nextCDSidentity, randomizedNextCDS) = self.cdsRand.randomize( nextCDSseq )
+        (nextCDSpermCount, nextCDSidentity, randomizedNextCDS) = self.cdsRand.randomizeAmbiguousSequence( nextCDSseq )
         if nextCDSOppositeStrand: # if the next CDS is on the opposite strand, revcomp it back to its original frame
             randomizedNextCDS = str( Seq( randomizedNextCDS, generic_dna ).reverse_complement() )
-        
-        
+        if flankingRegionLengthNt < 0:
+            randomizedNextCDS = randomizedNextCDS[-flankingRegionLengthNt:]
         
 
         totalPerms = CDSpermCount * UTRpermCount * nextCDSpermCount
@@ -687,37 +704,54 @@ def testNucleotidePermutationRandomizationWithMask(N:int =20000, seqLength:int=1
     print(minFoundFractionSeq)
 
 
-def testCDSand3UTRRandomizationIncludingNextCDS(taxId:int = 511145) -> int:
+def testCDSand3UTRRandomizationIncludingNextCDS(taxId:int = 511145, geneticCode:int = 11) -> int:
     from data_helpers import SpeciesCDSSource
     from genome_model import getGenomeModelFromCache
 
-    rand = CDSand3UTRRandomizationIncludingNextCDS( SynonymousCodonPermutingRandomization(geneticCode=11),
+    rand = CDSand3UTRRandomizationIncludingNextCDS( SynonymousCodonPermutingRandomization(geneticCode=geneticCode),
                                                     NucleotidePermutationRandomization(),
                                                     taxId )
 
     #for protId in SpeciesCDSSource(taxId):
     countOK = 0
     countNotOK = 0
+    countNotOK2 = 0
+    countSkipped = 0
     
     for protId in getGenomeModelFromCache( taxId ).allCDSSource():
         try:
             cds = CDSHelper( taxId, protId )
             seq = cds.sequence()
-            countOK += 1
-            
+
+            #if str(seq).find("n") != -1:
+            #    countSkipped += 1
+            #    continue
+
         except Exception as e:
             countNotOK += 1
             continue
 
         for i in range(20):
-            ret = rand.randomize( seq, protId )
+            try:
+                ret = rand.randomize( seq, protId )
+                
+            except Exception as e:
+                print(e)
+                countNotOK += 1
+                countNotOK2 += 1
+                continue
+            
             if not ( len(ret[2])==len(seq) ):
                 print(ret)
                 rand.randomize( seq, protId )
             assert( len(ret[2])==len(seq) )
+
+        countOK += 1
+            
         #print("{} -> {}".format( protId, ret ))
 
-    print("OK: {}, NotOK: {}, Total: {}".format( countOK, countNotOK, countOK+countNotOK))
+    print("OK: {}, NotOK: {}, Skipped: {}, Total: {}".format( countOK, countNotOK, countSkipped, countOK+countNotOK+countSkipped))
+    print("randomize exception: {}".format(countNotOK2))
 
 
     return 0
@@ -740,7 +774,8 @@ def testAll():
     #ret = testVerticalShuffling()
     #if ret: return ret
 
-    ret = testCDSand3UTRRandomizationIncludingNextCDS()
+    ret = testCDSand3UTRRandomizationIncludingNextCDS(taxId = 511145, geneticCode = 11)
+    #ret = testCDSand3UTRRandomizationIncludingNextCDS(taxId = 559292, geneticCode = 1)
     if ret: return ret
     
     return 0
