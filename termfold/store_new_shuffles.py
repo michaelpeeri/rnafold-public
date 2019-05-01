@@ -1,9 +1,10 @@
 from builtins import zip
 from builtins import range
+import logging
 import mysql_rnafold as db
 from data_helpers import CDSHelper, AddShuffledSequences, SpeciesCDSSource, getSpeciesTranslationTable
-from codon_randomization import SynonymousCodonPermutingRandomization, VerticalRandomizationCache, NucleotidePermutationRandomization, CDSand3UTRRandomization
-import logging
+from codon_randomization import SynonymousCodonPermutingRandomization, VerticalRandomizationCache, NucleotidePermutationRandomization, CDSand3UTRRandomization, CDSand3UTRRandomizationIncludingNextCDS
+from genome_model import getGenomeModelFromCache
 
 def storeRandomizedSequences(cds, seqs, shuffleIds, shuffleType):
     assert( len(seqs)==len(shuffleIds) )
@@ -55,8 +56,10 @@ def createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType=db.Source
 
     shuffler = CDSand3UTRRandomization( cdsRand, utrRand )
 
+    genomeModel = getGenomeModelFromCache( cds.getTaxId() )
+
     nativeSeq = cds.sequence()
-    stopCodonPos = cds.stopCodonPos()
+    stopCodonPos = cds.CDSlength()
     #print(nativeSeq[:10])
 
     newShuffles = []
@@ -157,6 +160,17 @@ def storeNewShuffles(taxId, protId, newShuffleIds, shuffleType=db.Sources.Shuffl
                                         shuffleType
         )
 
+    elif shuffleType == db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation_Including_Next_CDS:
+        print("store: before")
+        a = createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType)
+        print("store: {}".format(a))
+
+        return storeRandomizedSequences(cds,
+                                        createRandomizedSeqs_CDS_with_3UTR(cds, newShuffleIds, shuffleType),
+                                        newShuffleIds,
+                                        shuffleType
+        )
+    
     else:
         raise Exception("Unsupported shuffleType={}".format(shuffleType))
     

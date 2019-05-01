@@ -39,6 +39,7 @@ def processGff3(gff3Filename, genesListFilename, args):
 def loadCDSwith3UTRSequences(genomeModel, args, dryRun:bool =True) -> int:
 
     count = 0
+    skippedCount = 0
     for (feat,region,cdsSeq,utr3Seq,gap,nextCdsSeq,nextCdsStrand) in CDSWith3PrimeSequencesWithDownstreamFeatureSource( genomeModel, debug=False ):
 
         #Interval(2598882, 2599761, {'strand': '-', 'props': '{"ID":["CDS:AAC75531"],"Parent":["transcript:AAC75531"],"protein_id":["AAC75531"]}'})
@@ -47,14 +48,21 @@ def loadCDSwith3UTRSequences(genomeModel, args, dryRun:bool =True) -> int:
         assert(len(proteinId)>3)
         print(proteinId)
 
-
-        assert( isValidCodingSequence( cdsSeq, geneticCode=genomeModel.getGeneticCode() ))
-        assert( isValidCodingSequence( nextCdsSeq, geneticCode=genomeModel.getGeneticCode() ))
+        if not isValidCodingSequence( cdsSeq, geneticCode=genomeModel.getGeneticCode() ):
+            skippedCount += 1
+            continue
+        #assert( isValidCodingSequence( cdsSeq, geneticCode=genomeModel.getGeneticCode() ))
+        if not isValidCodingSequence( nextCdsSeq, geneticCode=genomeModel.getGeneticCode() ):
+            skippedCount += 1
+            continue
+        #assert( isValidCodingSequence( nextCdsSeq, geneticCode=genomeModel.getGeneticCode() ))
         #cdsAASeq     = cdsSeq.translate(    table=genomeModel.getGeneticCode())
         #nextCdsAASeq = nextCdsSeq.translate(table=genomeModel.getGeneticCode())
         #assert(str(cdsAASeq)[:-1].find('*')==-1)
         #assert(str(nextCdsAASeq)[:-1].find('*')==-1)
 
+        assert( feat.data['strand'] in ('+', '-') )
+        assert( nextCdsStrand in ('+', '-') )
         nextCDSonOppositeStrand = feat.data['strand'] != nextCdsStrand
         if nextCDSonOppositeStrand:
             nextCdsSeq = nextCdsSeq.reverse_complement()
@@ -65,20 +73,20 @@ def loadCDSwith3UTRSequences(genomeModel, args, dryRun:bool =True) -> int:
             assert(len(utr3Seq)==0)
             ntSeq = str(cdsSeq) + str(nextCdsSeq)[-gap:]
             
-        print(ntSeq)
-
         count += 1
 
+        cdsBoundaries = (region['curr-feature-start'],region['curr-feature-end'],region['downstream-feature-end'],region['downstream-feature-start'])
         if dryRun == False:
             storeSeqInDB(nucSeq = ntSeq,
                          taxId = args.taxid,
                          proteinId = proteinId,
-                         seqSourceTag = db.Sources.CDSwith3primeFlankingRegion,
+                         nextCDSonOppositeStrand = nextCDSonOppositeStrand,
                          cdsLengthNt = len(cdsSeq),
-                         flankingLength = nextStartCodonPos,
-                         nextCDSonOppositeStrand=nextCDSonOppositeStrand )
-            #genomeCoords = (feat.begin, feat.end)  )
-            
+                         flankingRegionLengthNt = gap,
+                         genomeCoords = (min(cdsBoundaries), max(cdsBoundaries)),
+                         seqSourceTag = db.Sources.CDSwith3primeFlankingRegion_DontExcludeNextORF)
+
+    print("{} Ok, {} skipped".format(count, skippedCount))
     return count
 
         

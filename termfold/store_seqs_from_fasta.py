@@ -1,3 +1,6 @@
+# Import native sequences into DB, creating the related metadata in redis.
+#
+# Can also be used from command-line to import seqs directly from fasta:
 # Command-line args: <taxId> <fastaFile> <type_cds|type_shuffle>
 # Read a fasta file containing the sequences for a given species;
 # Store the sequences in MySql, and add the sequence-ids to the metadata in redis.
@@ -31,16 +34,19 @@ def parseOption(possibleValues, name):
 
 # configuration
 # redis keys
-cdsSeqWith3UTRIdKey  = "CDS:taxid:%d:protid:%s:cds-3utr-seq-id"
-seqLengthKey         = "CDS:taxid:%d:protid:%s:length-nt"
-proteinIdKey         = "CDS:taxid:%d:protid:%s:protein-id"  # Used to store the protein-id for species in which a different main identifier is used
-shuffledSeqIdsKey    = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-v2"
-cdsSeqChecksumKey    = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
-stopCodonPositionKey = "CDS:taxid:%d:protid:%s:stop-codon-pos"
-genomicCoordStartKey = "CDS:taxid:%d:protid:%s:genomic-start"
-genomicCoordEndKey   = "CDS:taxid:%d:protid:%s:genomic-end"
-#partialCDSKey       = "CDS:taxid:%d:protid:%s:partial"
-speciesCDSList       = "species:taxid:%d:CDS"
+# TODO - unify with list from data_helpers.py
+cdsSeqWith3UTRIdKey   = "CDS:taxid:%d:protid:%s:cds-3utr-seq-id"
+seqLengthKey          = "CDS:taxid:%d:protid:%s:length-nt"
+proteinIdKey          = "CDS:taxid:%d:protid:%s:protein-id"  # Used to store the protein-id for species in which a different main identifier is used
+shuffledSeqIdsKey     = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-v2"
+cdsSeqChecksumKey     = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
+cdsOnlyLengthKey      = "CDS:taxid:%d:protid:%s:cds-length-nt"
+flanking3utrLengthKey = "CDS:taxid:%d:protid:%s:3utr-flank-length-nt"
+nextCdsOnOppositeStrandKey = "CDS:taxid:%d:protid:%s:next-cds-opp-strand"
+#genomicCoordStartKey  = "CDS:taxid:%d:protid:%s:genomic-start"
+#genomicCoordEndKey    = "CDS:taxid:%d:protid:%s:genomic-end"
+#partialCDSKey        = "CDS:taxid:%d:protid:%s:partial"
+speciesCDSList        = "species:taxid:%d:CDS"
 regexLocusId = re.compile("([^.]+[.][^.]+)[.].*")
 
 
@@ -49,10 +55,13 @@ r = redis.StrictRedis(host=config.host, port=config.port, db=config.db, password
 session = db.Session()
 
 
-def storeSeqInDB(nucSeq:str, taxId:int, proteinId:str, seqSourceTag:int, dryRun:bool=False, stopCodonPos:int=-1, genomeCoords:tuple=() ):
+translateAmbiguousNucleotides        = str.maketrans("RrYyKkMmSsWwBbDdHhVv",     "nnnnnnnnnnnnnnnnnnnn")
+
+def storeSeqInDB(nucSeq, taxId:int, proteinId:str, seqSourceTag:int, stopCodonPos:int=-1, genomeCoords:tuple=(), nextCDSonOppositeStrand:bool=None, cdsLengthNt:int=None, flankingRegionLengthNt:int=None ) -> None:
 
     # Compress the CDS sequence
-    encodedCds = nucleic_compress.encode(nucSeq)
+    encodedCds = nucleic_compress.encode( str(nucSeq).translate( translateAmbiguousNucleotides ))  # convert all ambiguity codes to 'n' before compression
+    # throws KeyError if encountering non-nucleic (acgtn) symbols 
 
 
     # Store the shuffled CDS sequence
@@ -62,7 +71,7 @@ def storeSeqInDB(nucSeq:str, taxId:int, proteinId:str, seqSourceTag:int, dryRun:
 
     newSequenceId = s1.id
 
-    if( seqSourceTag == db.Sources.CDSwith3primeFlankingRegion):
+    if( seqSourceTag == db.Sources.CDSwith3primeFlankingRegion_DontExcludeNextORF ):
         #
         # Add Native CDS with 3' flanking region
         #
@@ -70,7 +79,7 @@ def storeSeqInDB(nucSeq:str, taxId:int, proteinId:str, seqSourceTag:int, dryRun:
         r.set(cdsSeqWith3UTRIdKey % (taxId, proteinId), newSequenceId )
         r.sadd(speciesCDSList % (taxId,), proteinId)
 
-        # Store the CDS length
+        # Store the full sequence length (e.g., CDS+flanking region+nextCDS)
         r.set(seqLengthKey % (taxId, proteinId), len(nucSeq) )
 
         # Store the canonical protein-id (in species where a different unique id is used)
@@ -81,12 +90,20 @@ def storeSeqInDB(nucSeq:str, taxId:int, proteinId:str, seqSourceTag:int, dryRun:
         crc1 = data_helpers.getCrc(nucSeq)
         r.set(cdsSeqChecksumKey % (taxId, proteinId), crc1)
 
-        if stopCodonPos >= 0:
-            r.set(stopCodonPositionKey % (taxId, proteinId), stopCodonPos)
+        # Length of the "main" CDS only
+        if not cdsLengthNt is None:
+            r.set(cdsOnlyLengthKey % (taxId, proteinId), cdsLengthNt )
 
-        if genomeCoords:
-            r.set(genomicCoordStartKey % (taxId, proteinId), genomeCoords[0])
-            r.set(genomicCoordEndKey   % (taxId, proteinId), genomeCoords[1])
+        # Length of the "gap" or "flanking region" in the 3'UTR
+        if not flankingRegionLengthNt is None:
+            r.set(flanking3utrLengthKey % (taxId, proteinId), flankingRegionLengthNt )
+
+        if not nextCDSonOppositeStrand is None:
+            r.set(nextCdsOnOppositeStrandKey % (taxId, proteinId), "1" if nextCDSonOppositeStrand else "0")
+            
+        #if genomeCoords:
+        #    r.set(genomicCoordStartKey % (taxId, proteinId), genomeCoords[0])
+        #    r.set(genomicCoordEndKey   % (taxId, proteinId), genomeCoords[1])
                         
     else:
         assert(False)

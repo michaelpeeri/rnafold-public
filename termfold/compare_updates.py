@@ -416,7 +416,7 @@ for series in allUpdatesSeriesSource():
                     continue
 
                 cds = CDSHelper(recordId[0], recordId[1] )
-                cdsLength = cds.length()
+                cdsLength = cds.CDSlength()
 
                 newPositions = [x[0] for x in enumerate(profile1) if not x[1] is None]
 

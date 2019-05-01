@@ -202,7 +202,7 @@ class CalculateSlidingWindowRandomizedComparisonSeries(object):
 
         elif reference == "stop3utr":
             seqLength = cds.length()
-            stopCodonPos = cds.stopCodonPos()
+            stopCodonPos = cds.CDSlength()
             
             isRequired = [1 if abs(pos-stopCodonPos)<((lastWindowStart//2)*windowStep) else 0 for pos in range(0, seqLength - self._windowWidth, windowStep)]
             requestedWindowStarts = frozenset( compress( range(seqLength), isRequired ) )
@@ -427,7 +427,7 @@ class CalculateSlidingWindowRandomizedComparisonSeries(object):
             record["MeanMFE"] = stats.mean()
             
             if reference == "stop3utr":
-                record["stop-codon-pos"] = cds.stopCodonPos()
+                record["stop-codon-pos"] = cds.CDSlength()
                 
             result = json.dumps(record)
 

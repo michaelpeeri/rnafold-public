@@ -33,16 +33,18 @@ from genome_model import getGenomeModelFromCache
 
 
 # Configuration
-queueItemsKey        = "queue:tag:awaiting-%s:members"
-seqLengthKey_CDSOnly = "CDS:taxid:%d:protid:%s:cds-length-nt"  # not stored currently
-seqLengthKey_Total   = "CDS:taxid:%d:protid:%s:length-nt"
-stopCodonPosKey      = "CDS:taxid:%d:protid:%s:stop-codon-pos"
-cdsSeqIdKey          = "CDS:taxid:%d:protid:%s:seq-id"
-cdsSeqWith3UTRIdKey  = "CDS:taxid:%d:protid:%s:cds-3utr-seq-id"
-cdsSeqChecksumKey    = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
-shuffledSeqIdsKey    = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-%s"
-workerKeepAliveKey  = "status:worker-keep-alive"
-jobStatusKey        = "status:job:%s:progress"
+queueItemsKey         = "queue:tag:awaiting-%s:members"
+seqLengthKey_CDSOnly  = "CDS:taxid:%d:protid:%s:cds-length-nt"  # not stored currently
+seqLengthKey_Total    = "CDS:taxid:%d:protid:%s:length-nt"
+flanking3utrLengthKey = "CDS:taxid:%d:protid:%s:3utr-flank-length-nt"
+nextCdsOnOppositeStrandKey = "CDS:taxid:%d:protid:%s:next-cds-opp-strand"
+cdsSeqIdKey           = "CDS:taxid:%d:protid:%s:seq-id"
+cdsSeqWith3UTRIdKey   = "CDS:taxid:%d:protid:%s:cds-3utr-seq-id"
+cdsSeqChecksumKey     = "CDS:taxid:%d:protid:%s:cds-seq-checksum"
+shuffledSeqIdsKey     = "CDS:taxid:%d:protid:%s:shuffled-seq-ids-%s"
+cdsPropertyValueKey   = "CDS:taxid:%d:protid:%s:prop:%s"
+workerKeepAliveKey    = "status:worker-keep-alive"
+jobStatusKey          = "status:job:%s:progress"
 speciesCDSList             = "species:taxid:%d:CDS"
 speciesNameKey             = "species:taxid:%d:name"
 taxGroupKey                = "species:taxid:%d:tax-group"
@@ -51,7 +53,10 @@ speciesPropertyValueKey    = "species:taxid:%d:properties:%s"
 speciesPropertySourceKey   = "species:taxid:%d:properties:%s:source"
 speciesTaxIdKey            = "species:name:%s:taxid"
 
-allowedShuffleTypes = frozenset((db.Sources.ShuffleCDSv2_python, db.Sources.ShuffleCDS_vertical_permutation_1nt, db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation))
+allowedShuffleTypes = frozenset(( db.Sources.ShuffleCDSv2_python,
+                                  db.Sources.ShuffleCDS_vertical_permutation_1nt,
+                                  db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation,
+                                  db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation_Including_Next_CDS ))
 
 def getShuffleTypeIdentifier(shuffleType = db.Sources.ShuffleCDSv2_python):
     assert( shuffleType in allowedShuffleTypes )
@@ -279,6 +284,15 @@ class RegionsOfInterset(object):
     CDSonly    = 100
     CDSand3UTR = 101
 
+def strToBool(val:bytes) -> bool:
+    strVal = str(val, encoding='ascii')
+    if strVal=="1":
+        return True
+    elif strVal=="0":
+        return False
+    else:
+        raise ValueError("Unknown value to be converted to bool: '{}'".format(val))
+    
 """
 Wrapper for common CDS-related operations
 """
@@ -290,13 +304,16 @@ class CDSHelper(object):
         self.updatescount = 0
         self.regionOfInterest = regionOfInterest
 
-    def _getScalarRedisProperty(self, cacheTag, redisKey, convertFunc = None):
+    def _getScalarRedisProperty(self, cacheTag:str, redisKey:str, convertFunc = None, mandatory:bool = False):
         cachedVal = self._cache.get(cacheTag)
-        if( cachedVal != None ):
+        if( not cachedVal is None ):
             return cachedVal
 
         newVal = r.get( redisKey )
-        if( convertFunc != None ):
+        if mandatory and newVal is None:
+            raise Exception("Missing required property '{}' (key: '{}')".format( cacheTag, redisKey ))
+        
+        if( not convertFunc is None ):
             newVal = convertFunc(newVal)
 
         self._cache[cacheTag] = newVal
@@ -304,11 +321,11 @@ class CDSHelper(object):
 
     def _getListRedisProperty(self, cacheTag, redisKey, convertFunc=None):
         cachedVal = self._cache.get(cacheTag)
-        if( cachedVal != None ):
+        if( not cachedVal is None ):
             return cachedVal
 
         newVal = r.lrange( redisKey, 0, -1 )
-        if( convertFunc != None ):
+        if( not convertFunc is None ):
             newVal = convertFunc(newVal)
 
         self._cache[cacheTag] = newVal
@@ -321,7 +338,7 @@ class CDSHelper(object):
         newVal = r.lindex( redisKey, index )
         if( newVal is None ):
             raise Exception("CDS %s does not have an item in position %d (key=%s)" % (self._protId, index, redisKey))
-        if( convertFunc != None ):
+        if( not convertFunc is None ):
             newVal = convertFunc(newVal)
 
         return newVal
@@ -342,7 +359,7 @@ class CDSHelper(object):
         for sid in seqIds:
             cacheTag = "%d:seq" % sid
             cachedVal = self._cache.get(cacheTag)
-            if( cachedVal != None ):
+            if( not cachedVal is None ):
                 ret[sid] = cachedVal
             else:
                 notFoundInCache.add(sid)
@@ -401,22 +418,21 @@ class CDSHelper(object):
             assert(False)
 
     def CDSlength(self):
-        return self._getScalarRedisProperty( "cds-length-nt", seqLengthKey_CDSOnly % (self._taxId, self._protId), int)
+        return self._getScalarRedisProperty( "cds-length-nt", seqLengthKey_CDSOnly % (self._taxId, self._protId), int, mandatory=True)
 
     def totalLength(self):
-        return self._getScalarRedisProperty( "length-nt", seqLengthKey_Total % (self._taxId, self._protId), int)
-        
+        return self._getScalarRedisProperty( "length-nt", seqLengthKey_Total % (self._taxId, self._protId), int, mandatory=True)
             
     def crc(self):
         return self._getScalarRedisProperty( "cds-crc", cdsSeqChecksumKey % (self._taxId, self._protId), int)
 
-    def stopCodonPos(self):
-        if self.regionOfInterest == RegionsOfInterset.CDSonly:
-            return self.CDSLength()-3
-        
-        elif self.regionOfInterest == RegionsOfInterset.CDSand3UTR:
-            return self._getScalarRedisProperty( "stop-codon-pos", stopCodonPosKey % (self._taxId, self._protId), int)
-        
+    def flankingRegion3UtrLength(self):
+        assert( self.regionOfInterest == RegionsOfInterset.CDSand3UTR )
+        return self._getScalarRedisProperty( "3'-flank-length", flanking3utrLengthKey % (self._taxId, self._protId), int, mandatory=True)
+
+    def nextCDSOnOppositeStrand(self):
+        assert( self.regionOfInterest == RegionsOfInterset.CDSand3UTR )
+        return self._getScalarRedisProperty( "next-cds-opp-strand", nextCdsOnOppositeStrandKey % (self._taxId, self._protId), strToBool, mandatory=True)
     
     def seqId(self):
         
@@ -1122,6 +1138,7 @@ def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
 
     return True
 
+
 def getSpeciesProperty(taxId, propName):
     propVal    = str( r.get(speciesPropertyValueKey  % (taxId, propName)), encoding="utf-8" )
     propSource = str( r.get(speciesPropertySourceKey % (taxId, propName)), encoding="utf-8" )
@@ -1195,6 +1212,29 @@ def getSpeciesGenomeAnnotationsVariant(taxId):
         return propVal
     else:
         return None
+
+
+def setCDSProperty(taxId, protId, propName, propVal, overwrite=True):
+    if( propName.find(":") != -1 ):
+        raise Exception("Invalid property name '%s'" % propName)
+
+    assert( r.sismember(speciesCDSList % (taxId,),  protId))
+
+    key = cdsPropertyValueKey % (taxId, protId, propName)
+    if (not overwrite) and r.exists(key):
+        return False
+    
+    r.set(key, propVal)
+
+    return True
+
+def getCDSProperty(taxId, protId, propName):
+    val = r.get( cdsPropertyValueKey % (taxId, protId, propName) )
+    if val is None:
+        return None
+    else:
+        return str( val, encoding="utf-8" )
+
     
     
 def getAllComputedSeqsForSpecies(calculationIds, taxId, maxShuffleId=100, shuffleType=db.Sources.ShuffleCDSv2_python):

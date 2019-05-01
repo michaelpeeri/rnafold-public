@@ -77,7 +77,8 @@ shuffleTypesMapping = {""                   :db.Sources.ShuffleCDSv2_python,
                        "12"                 :db.Sources.ShuffleCDS_vertical_permutation_1nt,
                        "ShuffleCDS_vertical_permutation_1nt"
                                             :db.Sources.ShuffleCDS_vertical_permutation_1nt,
-                       "20"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation
+                       "20"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation,
+                       "21"                 :db.Sources.ShuffleCDS_synon_perm_and_3UTR_nucleotide_permutation_Including_Next_CDS
 }
 shuffleType=shuffleTypesMapping[args.shuffle_type]
 
@@ -159,7 +160,7 @@ for taxIdForProcessing in species:
         cds = CDSHelper(taxIdForProcessing, protId)
 
         seqLength    = cds.length()
-        stopCodonPos = cds.stopCodonPos()
+        stopCodonPos = cds.CDSlength()
         
         if seqLength is None:
             print("Warning: Could not find CDS length entry for taxid=%d, protid=%s" % (taxIdForProcessing, protId) )
