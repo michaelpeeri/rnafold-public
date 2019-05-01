@@ -88,6 +88,77 @@ def plotMFEProfileWithGC(taxId, profileId, data, computationTag=None, yRange=(-1
     plt.close(fig)
 
 
+def plot2WayMFEComparison(taxId, profileId, data1, data2, computationTag=None, yRange=(-12,0), comment=None):
+    #fig, (ax1,ax2) = plt.subplots(2, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+    fig, ax1 = plt.subplots()
+
+    #data1[['native', 'shuffled']].plot(ax=ax1, zorder=10, style='--')
+    #data2[['native', 'shuffled']].plot(ax=ax1, zorder=10)
+    #data['native'].plot(ax=ax1)
+    #data['shuffled'].plot(ax=ax1)
+    #data[['shuffled75', 'shuffled25']].plot(ax=ax1, style='--', zorder=10)
+    ax1.plot( data1.index, data1['native'],   zorder=10, label=u"Native",   linestyle='dashed', c='#e24a33' )
+    ax1.plot( data1.index, data1['shuffled'], zorder=10, label=u"Shuffled", linestyle='dashed', c='#348abd' )
+    ax1.plot( data2.index, data2['native'],   zorder=10, label=u"Native",   linestyle='solid',  c='#e24a33' )
+    ax1.plot( data2.index, data2['shuffled'], zorder=10, label=u"Shuffled", linestyle='solid',  c='#348abd' )
+    
+    minY = min(yRange[0], np.min(np.min(data1[['native', 'shuffled']])))
+    maxY = max(yRange[1], np.max(np.max(data1[['native', 'shuffled']])))
+
+
+    windowWidth = None
+    if not computationTag is None:
+        windowWidth = getWindowWidthForComputationTag( computationTag )
+
+    smfe1 = data1['native']-data1['shuffled']
+    ax1.plot( data1.index, smfe1, zorder=10, label=u"\u0394LFE", linestyle='dashed', c='#fbc15e'  )
+    smfe2 = data2['native']-data2['shuffled']
+    ax1.plot( data2.index, smfe2, zorder=10, label=u"\u0394LFE", linestyle='solid',  c='#fbc15e'  )
+    
+    speciesName = getSpeciesName(taxId)
+
+    plt.title(speciesName)
+
+    plt.xlabel('Position (nt, window start, from stop codon)')
+
+    ax1.set_title("Mean LFE for %s" % speciesName)
+    #ax1.set_ylabel(u"\u0394LFE")
+    ax1.set_ylabel(u"LFE (kcal/mol/window)")
+    ax1.legend(fontsize=8, loc="lower left", bbox_to_anchor=(-0.4,0.0) )
+    ax1.grid(True)
+
+
+    #data['gc'].plot(ax=ax2)
+    #ax2.set_title("GC%")
+    #ax2.set_ylabel('GC% (in window)')
+    #ax2.grid(True)
+
+
+    if not computationTag is None:
+        baseName = "mfe_v2_40nt_cds_{}_{}_series{}_comparison".format(profileId, getSpeciesFileName(taxId), computationTag)
+    else:
+        baseName = "mfe_v2_40nt_cds_{}_{}_comparison".format(profileId, getSpeciesFileName(taxId))
+        
+    #profileId = "tbd" # str(args.profile.ProfileId).replace(':', '-')
+
+    ax1.set_aspect(15.0)
+    plt.axvline( x=0.0, color="black", linewidth=0.5, alpha=1.0, zorder=1 )
+
+    if not windowWidth is None:
+        ax1.annotate( "{}nt".format(windowWidth),    xy=(180, minY), xytext=(180+windowWidth, minY), fontSize=10, color="black", zorder=50 )
+        ax1.annotate( "".format(windowWidth),    xy=(180, minY), xytext=(180+windowWidth, minY), fontSize=6, arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.0, color="black"), color="black", zorder=50 )
+
+    if comment:
+        ax1.annotate( comment, xy=(-100, minY), xytext=(-100, minY), fontSize=10, color="black", zorder=50 )
+        
+
+    plt.ylim( (minY-0.2, maxY+0.2) )
+    
+    plt.savefig("{}.pdf".format( baseName ), bbox_inches="tight", metadata={"CreationDate":datetime.utcnow().isoformat(' ')})
+    plt.savefig("{}.svg".format( baseName ))
+    plt.close(fig)
+    
+
 def plotMFEProfileV3(taxid, profileId, df, dLFEData, wilcoxon, transitionPeak, transitionPeakPos, edgeWilcoxon, ProfilesCount):
     # TODO - RE-IMPL THIS
     pass
@@ -290,12 +361,15 @@ def plotXY(taxId, profileId, data, xvar, yvar, title, computationTag=None):
     plt.close(fig)
     
     
-def scatterPlot(taxId, profileId, data, xvar, yvar, title):
+def scatterPlot(taxId, profileId, data, xvar, yvar, title, colorvar=None):
     data = data.copy()
     data.dropna(subset=(xvar, yvar), inplace=True)
 
     fig, ax1 = plt.subplots()
-    data.plot(x=xvar, y=yvar, ax=ax1, kind='scatter')
+    if colorvar is None:
+        data.plot(x=xvar, y=yvar, ax=ax1, kind='scatter')
+    else:
+        data.plot(x=xvar, y=yvar, c=colorvar, s=3.0, ax=ax1, kind='scatter')
 
 
 
@@ -335,6 +409,8 @@ def scatterPlot(taxId, profileId, data, xvar, yvar, title):
     
 
     #plt.annotate(s="n= %d"  % len(data),                                                 xy=(0.3, 4),  fontsize=6 )
+
+    plt.xlim([-200,1000])
         
 
     #plt.xlim([.25,.75])
@@ -887,10 +963,18 @@ def loadProfileData(files):
                 df = store[key]
                 df = df.iloc[:-1]  # remove the last value (which is missing)
 
-                deltas_df = store["/deltas_"+key[4:]]
-                genes_df = store["/deltas_"+key[4:]]
-                summary_df = store["/statistics_"+key[4:]]
-                
+                deltas_df = None
+                if "/deltas_"+key[4:] in store:
+                    deltas_df = store["/deltas_"+key[4:]]
+
+                genes_df = None
+                if "/deltas_"+key[4:] in store:
+                    genes_df = store["/deltas_"+key[4:]]
+
+                summary_df = None
+                if "/statistics_"+key[4:] in store:
+                    summary_df = store["/statistics_"+key[4:]]
+
                 profileCorrelations_df = None
                 if "/profiles_spearman_rho_"+key[4:] in store:
                     profileCorrelations_df = store["/profiles_spearman_rho_"+key[4:]]
@@ -905,18 +989,21 @@ def loadProfileData(files):
                 meanDeltaLFE = np.mean(dfMFEbias)
 
                 cdsCount = int(summary_df.iloc[0]['cds_count'])
-                assert(cdsCount >= 100)
+                print(taxId)
+                #assert(cdsCount >= 100)
+                if cdsCount<100:
+                    print("Warning: only {} results for species {}".format(cdsCount, taxId))
                 #print("--------")
-                firstPos = (deltas_df['pos'].min())
-                lastPos = (deltas_df['pos'].min())
-                numSamplesIncludedInProfile = min( pd.isnull(deltas_df[deltas_df['pos']==firstPos]['delta']).sum(),
-                                                   pd.isnull(deltas_df[deltas_df['pos']==lastPos ]['delta']).sum() )
+                # firstPos = (deltas_df['pos'].min())
+                # lastPos = (deltas_df['pos'].min())
+                # numSamplesIncludedInProfile = min( pd.isnull(deltas_df[deltas_df['pos']==firstPos]['delta']).sum(),
+                #                                    pd.isnull(deltas_df[deltas_df['pos']==lastPos ]['delta']).sum() )
 
-                #print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
-                if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
-                    print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
-                    print("Skipping {} (taxId={}): not enough data is available".format(longTaxName, taxId))
-                    #continue  # Skip sequences with very limited data available
+                # #print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                # if float(numSamplesIncludedInProfile) / cdsCount < 0.5:
+                #     print( "{:.2}".format(float(numSamplesIncludedInProfile) / cdsCount ))
+                #     print("Warning: {} (taxId={}): not enough data is available".format(longTaxName, taxId))
+                #     #continue  # Skip sequences with very limited data available
                 
                 #meanGC = species_selection_data.findByTaxid(taxId).iloc[0]['GC% (genome)']
                 #meanGC = getGenomicGCContent(taxId)  # this is actually the genomic GC% (not CDS only)
@@ -988,9 +1075,9 @@ def loadProfileData(files):
                 #meanE = np.mean(df.native - df.shuffled)
                 #ydata.append(meanE)
 
-                dirpval = calcWilcoxonPvalue_method2(deltas_df)
-                #print(dirpval)s
-                ydata.append(dirpval)
+                if not deltas_df is None:
+                    dirpval = calcWilcoxonPvalue_method2(deltas_df)
+                    ydata.append(dirpval)
 
                 #print(df.head())
 
