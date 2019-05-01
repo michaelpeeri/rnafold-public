@@ -20,6 +20,8 @@ measurement_files = ("ribo_MG1655_MOPS_rep1.mat", "ribo_MG1655_MOPS_rep2.mat", "
 metadata_file = "escCol.mat"
 id_conversion_file = "/tamir1/mich1/termfold/data/Ensembl/Ecoli/identifiers.tsv"
 taxId = 511145
+readthroughMeasurementWidth = 50
+readthroughThreshold = 0.5
 
 def readReadthroughData(data):
     numGenes = data["RP_ORF"].shape[0]
@@ -30,15 +32,17 @@ def readReadthroughData(data):
     sumsForUTRs = []
 
     for gene in range(numGenes):
-        dataForORFs = data["RP_ORF"][gene][0]
+        dataForORFs = data["RP_ORF"][gene][0][-readthroughMeasurementWidth:]
         #print(dataForORFs.shape)
-        dataFor3UTRs = data["RP_UTR3"][gene][0]
+        dataFor3UTRs = data["RP_UTR3"][gene][0][:readthroughMeasurementWidth]
         #print(dataFor3UTRs.shape)
         allDataForORFs.extend(dataForORFs.flat)
         allDataForUTRs.extend(dataFor3UTRs.flat)
 
-        sumsForORFs.append( np.mean( dataForORFs[dataForORFs   > 0.0].flat ) )
-        sumsForUTRs.append( np.mean( dataFor3UTRs[dataFor3UTRs > 0.0].flat ) )
+        print( data["RP_UTR3"][gene][0].shape )
+
+        sumsForORFs.append( np.mean( dataForORFs ) )
+        sumsForUTRs.append( np.mean( dataFor3UTRs ) )
 
     #print(len(allDataForORFs))
     #print(len(allDataForUTRs))
@@ -91,12 +95,16 @@ def plotDatafileStatistics(data, identifier):
 def plotStatistics():
 
     metadata = io.loadmat("{}{}".format(data_path, metadata_file))
+    sourceIdentifiersTable = metadata["gene_id"]
 
-    print(metadata["gene_id"].shape)
-    print(metadata["gene_id"][1])
-    print(metadata["gene_id"][100])
-    print(metadata["gene_id"][1000])
-    print(metadata["gene_id"][1020])
+    def getSourceGeneId(idx:int) -> str:
+        return sourceIdentifiersTable[idx][0][0]
+
+    #print(metadata["gene_id"].shape)
+    #print(metadata["gene_id"][1])
+    #print(metadata["gene_id"][100])
+    #print(metadata["gene_id"][1000])
+    #print(metadata["gene_id"][1020])
 
     idTable = getIdentifiersMapping()
 
@@ -136,39 +144,75 @@ def plotStatistics():
     #print(qs)
     #print(qs2)
     #print(qs3)
-    for t in (0.1, 0.2, 0.3, 0.8, 0.9, 0.99, 0.999):
-        print( np.quantile( RPratios_, t, axis=1 ) )
+    #for t in (0.1, 0.2, 0.3, 0.8, 0.9, 0.99, 0.999):
+    #    print( np.quantile( RPratios_, t, axis=1 ) )
 
-    tt1 = np.quantile( RPratios_, 0.985, axis=1 )
+    #tt1 = np.quantile( RPratios_, 0.985, axis=1 )
 
-    selectedPos = np.any( (RPratios_.T >  tt1), axis=1 )
-    selectedNeg = np.all( (RPratios_.T <= tt1), axis=1 ) & np.any(ORFreads > 0.0, axis=0)
-    print( selectedPos )
-    print("++")
-    print( sum(selectedPos+0.0) )
-    print("--")
-    print( sum(selectedNeg+0.0) )
-
-    selectPosIndices = np.argwhere( selectedPos )
-    good = 0
-    bad = 0
-    out = []
-    for pos in selectPosIndices.flat:
-        sourceIds = metadata["gene_id"][pos]
-        x = sourceIds[0][0]
-        print(x)
-        if x in idTable:
-            good += 1
-            out.append(idTable[x])
-        else:
-            bad += 1
-    print("good={} bad={}".format(good, bad))
-    positiveSet = frozenset(out)
+    #selectedPos = np.any( (RPratios_.T >  tt1), axis=1 )
+    #selectedNeg = np.all( (RPratios_.T <= tt1), axis=1 ) & np.any(ORFreads > 0.0, axis=0)
 
     from data_helpers import SpeciesCDSSource, setCDSProperty
+
+    for i, fn in enumerate( measurement_files ):
+        
+        selectedPos = frozenset( np.nonzero(RPratios[i, np.isfinite(RPratios[i,:])]  > readthroughThreshold )[0] )
+        selectedNeg = frozenset( np.nonzero(RPratios[i, np.isfinite(RPratios[i,:])] <= readthroughThreshold )[0] )
+        print("///////////////////////")
+        print(i)
+        # print("++")
+        # print( len(selectedPos) )
+        # print("--")
+        # print( len(selectedNeg) )
+
+        positiveIdentifiersSourceFmt = frozenset([getSourceGeneId(x) for x in selectedPos])
+        negativeIdentifiersSourceFmt = frozenset([getSourceGeneId(x) for x in selectedNeg])
+        assert( not positiveIdentifiersSourceFmt.intersection( negativeIdentifiersSourceFmt ) )
+
+        positiveIdentifiersNativeFmt = [idTable.get(x,None) for x in positiveIdentifiersSourceFmt]
+        negativeIdentifiersNativeFmt = [idTable.get(x,None) for x in negativeIdentifiersSourceFmt]
+
+
+        # good = 0
+        # bad = 0
+        # out = []
+        # for pos in selectPosIndices:
+        #     sourceIds = metadata["gene_id"][pos]
+        #     x = sourceIds[0][0]
+        #     print(x)
+        #     if x in idTable:
+        #         good += 1
+        #         out.append(idTable[x])
+        #     else:
+        #         bad += 1
+        # print("good={} bad={}".format(good, bad))
+
+
+        countMarkedPositive = 0
+        countMarkedNegative = 0
+
+        for protId in SpeciesCDSSource(taxId):
+            valForProt = None
+            
+            if protId in positiveIdentifiersNativeFmt:
+                valForProt = "1"
+                countMarkedPositive += 1
+                
+            elif protId in negativeIdentifiersNativeFmt:
+                valForProt = "0"
+                countMarkedNegative += 1
+
+            if not valForProt is None:
+                setCDSProperty(taxId, protId, "readthrough-v2.ex{}".format(i), valForProt, overwrite=True)
+
+        print( countMarkedPositive )
+        print( countMarkedNegative )
+        
+
     #def setSpeciesProperty(taxId, propName, propVal, source, overwrite=True):
-    for protId in SpeciesCDSSource(taxId):
-        setCDSProperty(taxId, protId, "readthrough-v1", "1" if protId in positiveSet else "0", overwrite=True)
+    #for protId in SpeciesCDSSource(taxId):
+    #    pass
+    #    #setCDSProperty(taxId, protId, "readthrough-v1", "1" if protId in positiveSet else "0", overwrite=True)
 
 
             
