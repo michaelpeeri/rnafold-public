@@ -1,0 +1,11 @@
+Bootstrap: docker
+
+From: r-base
+
+%files
+install_packages.r
+
+%post
+apt-get update
+apt-get install -y libcurl4-openssl-dev libssl-dev libmagick++-dev libudunits2-dev libgdal20 libgdal-dev libgslcblas0 libgsl23 gsl-bin libgsl-dev
+R --vanilla -f install_packages.r
