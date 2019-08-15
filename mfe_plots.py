@@ -1084,7 +1084,7 @@ def estimateModeUsingKDE(xs):
     
 
 class LayerConfig(object):
-    _defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False, showTickMarks=False, debug=False )
+    _defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False, showTickMarks=False, showDemo=False, debug=False )
 
     def __init__(self, **kw):
         self._kw = LayerConfig._defaults.copy()
@@ -1254,6 +1254,7 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
         imw = scaleXY*0.100*profileScale
         imh = scaleXY*0.012*profileScale
         imofy = profilesYOffsetWorkaround # 0.0 # 0.45 # TODO - FIX THIS
+        isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
 
         # Legend position
         #tlx = min(X_reduced[:,D1]) - imw*0.5
@@ -1313,6 +1314,49 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                     if True:
                         ax4.imshow( np.array( biasProfiles[taxId] ).reshape(1,-1), cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2000 )
 
+        if layerConfig.showDemo:
+
+            for currVector in (0,):
+
+                #assert(layerConfig.showDemo in (1,2))
+
+                #for i, c in enumerate(addLoadingVectors):
+                #    print("c = {}".format(c))
+                c = addLoadingVectors[currVector]
+                if isEndReferenced:
+                    assert(c <= 0)
+                    cIdx = X.shape[1] + c - 1
+                    #print("--> {} (N={})".format(cIdx, X.shape))
+                else:
+                    cIdx = c
+
+
+                minx=pca.components_[D1,cIdx]*loadingVectorsScale*-1
+                miny=pca.components_[D0,cIdx]*loadingVectorsScale*-1
+                maxx=pca.components_[D1,cIdx]*loadingVectorsScale
+                maxy=pca.components_[D0,cIdx]*loadingVectorsScale
+
+                for x,y,scale in zip( np.linspace(minx, maxx, 7), np.linspace(miny, maxy, 7), np.linspace(-1,1,7) ):
+                    #ax4.imshow( pca.components_[currVector,:].reshape(1,-1)*scale, cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2000 )
+                    pass
+
+                #cIdx = 25-1
+                cIdx = 0
+                componentRangeInOriginalSpace_min = np.min(X[:,cIdx])
+                componentRangeInOriginalSpace_max = np.max(X[:,cIdx])
+                
+                for u in np.linspace(componentRangeInOriginalSpace_max, componentRangeInOriginalSpace_min, 7):
+                    #vec = np.zeros((1,30))*1.0
+                    vec = np.mean(X, axis=0).reshape(1,-1)
+                    vec[0,0:1] = u
+                    #vec[0,15:] = u
+                    #vec[0,cIdx+0] = u
+                    vec2 = pca.transform( vec )
+                    y = vec2[0,0]
+                    x = vec2[0,1]
+                    ax4.imshow( vec, cmap='bwr', norm=cmapNormalizer, extent=(x-imw, x+imw, -y-imh+imofy, -y+imh+imofy ), interpolation='bilinear', zorder=2000 )
+                    
+            
 
         # Paint the highlights
         if layerConfig.showHighlights:
@@ -1338,8 +1382,6 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
             # right: tlx - imw*(1.0-0.9)
             
             # Indicate loading vectors
-            isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
-
             for i, c in enumerate(addLoadingVectors):
                 print("c = {}".format(c))
                 if isEndReferenced:
@@ -1483,8 +1525,11 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
         plt.savefig("{}.svg".format(layerConfig.output))
         plt.close(fig)
 
-
+        
     #_defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False )
+    plotPCALayer(LayerConfig(output="pca_profiles_demo",   showTrait=False, showProfiles=False, showAxes=True, showDemo=True, showLoadingVectors=True ) )
+    overlayImages( ["pca_profiles_demo.png"], "pca_profiles_demo_combined.png" )
+    
     plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=False,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
     plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True, showAxes=True ) )
     overlayImages( ["pca_profiles_density.png", "pca_profiles.png"], "pca_profiles_combined.png" )
