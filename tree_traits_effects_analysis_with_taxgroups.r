@@ -4949,9 +4949,28 @@ figure_ContrasingProfileBoxplotsForHighLowGC <- function(minimal=FALSE)
     grid.arrange( ggplotGrob( dd0a ), ggplotGrob( dd0e ),
                   ggplotGrob( dd0a ), ggplotGrob( dd0e ),
                   ggplotGrob( dd0a ), ggplotGrob( dd0e ),
-                  ggplotGrob( dd0a ), ggplotGrob( dd0e ),
-                  ncol=2, widths=c(unit(0.5, "npc"), unit(0.5, "npc")), heights=c(unit(0.32, "npc"), unit(0.227, "npc"), unit(0.226, "npc"), unit(0.227, "npc") ) )
+                  ncol=2, widths=c(unit(0.5, "npc"), unit(0.5, "npc")), heights=c(unit(0.45, "npc"), unit(0.227, "npc"), unit(0.226, "npc") ) )
 }
+
+figure_ContrasingProfileBoxplotsForHighLowCUB <- function()
+{
+    yrangeForKDEs = c(-1.3, 2)
+    
+    dd0a <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_all_1", "Is_high_ENc_prime" ), c(FALSE, TRUE ), as.integer(c(1,31)), profileId=1, yrange=yrangeForKDEs ),
+        getFilteredProfileValues( traits, c( "Member_all_1", "Is_high_ENc_prime" ), c(FALSE, FALSE), as.integer(c(1,31)), profileId=1, yrange=yrangeForKDEs ),
+       c("ENc<=56.6", "ENc>56.5"), ylimits=c(-1.3,2), as.integer(c(1,31)), profileId=1  )
+
+    dd0e <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_all_1", "Is_high_ENc_prime" ), c(FALSE, TRUE ), as.integer(c(1,32)), profileId=2, yrange=yrangeForKDEs ),
+        getFilteredProfileValues( traits, c( "Member_all_1", "Is_high_ENc_prime" ), c(FALSE, FALSE), as.integer(c(1,32)), profileId=2, yrange=yrangeForKDEs ),    c("ENc<=56.5", "ENc>56.5"), ylimits=c(-1.3,2), as.integer(c(1,32)), profileId=2 )
+
+    grid.arrange( ggplotGrob( dd0a ), ggplotGrob( dd0e ),
+                  ggplotGrob( dd0a ), ggplotGrob( dd0e ),
+                  ggplotGrob( dd0a ), ggplotGrob( dd0e ),
+                  ncol=2, widths=c(unit(0.5, "npc"), unit(0.5, "npc")), heights=c(unit(0.45, "npc"), unit(0.227, "npc"), unit(0.226, "npc") ) )
+}
+
 
 
 figure_ContrasingProfileBoxplotsForHighLowTemp <- function()
@@ -6183,25 +6202,29 @@ plotInflueceComparison <- function( results, title="" )
     results$significant2 <- results$pvalue < 0.001
     print(results)
 
-    s <- 0.4
+    s <- 0.3
 
-    p <- ggplot( results, aes(y=trait, x=R2) ) +
-        geom_vline( xintercept=0 )
-    if( nrow(results[results$method=="gls",]) > 0 )
-    {
-        p <- p + geom_segment( data=results[results$method=="gls",], aes(y=trait, yend=trait, x=0, xend=R2, color=trait), size=2*s, alpha=1.0 )
-    }
-    print(s)
-    print(4*s)
+    # if( nrow(results[results$method=="gls",]) > 0 )
+#    {
+#        #p <- p + geom_segment( data=results[results$method=="gls",], aes(y=trait, yend=trait, x=0, xend=R2, color=trait), size=2*s, alpha=1.0 )
+#        p <- p + geom_bar( data=results[results$method=="gls",], aes(y=trait), stat="identity", position=position_nudge(x=0.1) )
+#    }
 
-    p <- p +
-        geom_point( aes(color=trait, shape=method), size=4*s ) +
-        geom_text( aes(alpha=factor(significant1) ), label="*",  color="black", size=round(fontScale*s*0.8), nudge_y=0.05  ) +
-        geom_text( aes(alpha=factor(significant2) ), label="**", color="black", size=round(fontScale*s), nudge_y=0.05  ) +
+    print(results)
+    print(names(results))
+
+    p <- ggplot( results, aes(x=trait, y=R2) ) +
+        geom_hline( yintercept=0 ) +
+                                        #   p <- p +
+                                        #        geom_point( aes(color=trait, shape=method), size=4*s ) +
+        geom_bar( aes( color=method ), stat="identity", width=0.50, position=position_dodge(width=1.30) ) +
+        coord_flip() +
+        geom_text( aes( alpha=factor(significant1), color=method ), label="*",  size=round(fontScale*s*0.8), nudge_y=0.1  ) +
+        geom_text( aes( alpha=factor(significant2), color=method ), label="**", size=round(fontScale*s),     nudge_y=0.1  ) +
         scale_alpha_manual( values=c( 0.0, 1.0) ) +
-        scale_x_continuous( limits=c(-0.8, 0.8) ) +
-        scale_colour_manual( values=c("GenomicGC"="Blue", "GenomicENc.prime"="Purple", "LogGrowthTime"="Red", "LogGenomeSize"="Orange", "OptimumTemp"="Yellow") ) +
-        labs(title=title, y="", x="") +
+        scale_y_continuous( limits=c(-0.8, 0.8), breaks=c(-0.5,0.5) ) +
+        scale_x_discrete() +
+        labs(title="", y="", x="") +
         guides( shape=FALSE, color=FALSE, alpha=FALSE ) +
         theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
 #              panel.grid.major.y = element_line(color="grey", size=0.50),
@@ -6212,8 +6235,8 @@ plotInflueceComparison <- function( results, title="" )
               axis.text.y = element_text( size=0 ),
               axis.text.x = element_text( size=round(fontScale*s*1.2) ),
               aspect.ratio = 0.12
+#              margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")
               )
-#        margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")
 
 
     print(p)
@@ -6265,11 +6288,17 @@ figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC <- function()
     print("--------------------------------------------------------------------")
 }
 
+figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS <- function()
+{
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "OptimumTemp",  as.integer(c( 11, 31)), profileId=1, plotRegression=TRUE, caption="Begin+100-300nt", plot.yrange=c(-0.75,0.07) )
+}
+
 ############################################################
 
 #report_taxonRobustnessForTrait( "GenomicGC",          rangeSpec=c(1,31), profileId=1 )
 #report_taxonRobustnessForTrait( "GenomicENc.prime",   rangeSpec=c(1,31), profileId=1 )
 #report_taxonRobustnessForTrait( "OptimumTemp",        rangeSpec=c(1,31), profileId=1 )
+
 
 
 #figure_PartialDeterminationAnalysis_GC_and_ENc.prime()
@@ -6279,12 +6308,13 @@ figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC <- function()
 #figure_PartialDeterminationAnalysis_NormalizedProfiles()
 #figure_PositiveStretchLengths()
 #figure_DLFEInteractingTraits_RegressionRangeAnalysisByTaxGroup()
-figure_DLFETraitsInfluencesComparisonForMidCDS()
+#figure_DLFETraitsInfluencesComparisonForMidCDS()
 #figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC()
 #figure_CorrelationBetweenModelRegions()
 #figure_contrastingKDEsForHighLowGC()
 #figure_contrastingBoxplotsHighLowTemp()
-#figure_ContrasingProfileBoxplotsForHighLowGC()
+figure_ContrasingProfileBoxplotsForHighLowGC()
+figure_ContrasingProfileBoxplotsForHighLowCUB()
 #figure_ContrasingProfileBoxplotsForHighLowGC(minimal=TRUE)
 #figure_ContrasingProfileBoxplotsForHighLowTemp()
 #figure_ContrasingProfileBoxplotsForIntracellulars()
@@ -6294,6 +6324,7 @@ figure_DLFETraitsInfluencesComparisonForMidCDS()
 #report_testRegressionForWeakModelComponents()
 #report_testCompoundClassification()
 #TestCorrelationBetweenScalarTraits()
+figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS()
 
 
 ############################################################
