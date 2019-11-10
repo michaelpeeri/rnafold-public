@@ -1184,7 +1184,7 @@ def saveHistogram(data, filename):
     
     
     
-def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0):
+def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0, profileReference=None, traitColorMap='plasma_r'):
     filteredProfiles = {}
     for key, profile in biasProfiles.items():
         if (not np.any(np.isnan(profile))) and (key in traitValues):
@@ -1254,7 +1254,20 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
         imw = scaleXY*0.100*profileScale
         imh = scaleXY*0.012*profileScale
         imofy = profilesYOffsetWorkaround # 0.0 # 0.45 # TODO - FIX THIS
-        isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
+        if profileReference is None:
+            if addLoadingVectors:
+                isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
+            else:
+                raise Exception("Can't automatically determine profile reference, use --profile-reference")
+        else:
+            if profileReference=="begin":
+                isEndReferenced = False
+            elif profileReference=="end":
+                isEndReferenced = True
+            else:
+                assert(False)
+                
+            
 
         # Legend position
         #tlx = min(X_reduced[:,D1]) - imw*0.5
@@ -1399,7 +1412,7 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 #              arrowprops=dict(arrowstyle='<-', alpha=1.0, linewidth=1.5, color=lvColors[1]), color=lvColors[1], zorder=50 )
 
         if layerConfig.showLoadingVectors:
-            isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
+            #isEndReferenced = any([x<0 for x in addLoadingVectors])  # if any of the indices is negative, we tread them referenced to the end of the profile
 
             for i, c in enumerate(addLoadingVectors):
                 print("c = {}".format(c))
@@ -1459,7 +1472,8 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 cs.append( traitValues.get(taxId, None) )
                 
             #traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale*3, alpha=0.3, edgecolors='none', cmap="plasma_r",                zorder=19  )
-            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale,   alpha=1.0, edgecolors='none', cmap="plasma_r", label="Trait", zorder=20  )
+                
+            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale,   alpha=1.0, edgecolors='none', cmap=traitColorMap, label="Trait", zorder=20  )
             fig.colorbar(traitPlot, shrink=0.5)
             
 
@@ -1527,22 +1541,23 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
 
         
     #_defaults = dict(showAxes=False, showDensity=False, showDists=False, showProfiles=False, showHighlights=False, showComponents=False, showLoadingVectors=False )
-    plotPCALayer(LayerConfig(output="pca_profiles_demo",   showTrait=False, showProfiles=False, showAxes=True, showDemo=True, showLoadingVectors=True ) )
-    overlayImages( ["pca_profiles_demo.png"], "pca_profiles_demo_combined.png" )
+    if addLoadingVectors:
+        plotPCALayer(LayerConfig(output="pca_profiles_demo",   showTrait=False, showProfiles=False, showAxes=True, showDemo=True, showLoadingVectors=True ) )
+        overlayImages( ["pca_profiles_demo.png"], "pca_profiles_demo_combined.png" )
     
-    plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=False,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles",         showAxes=False,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=False, showLoadingVectors=False ) )
     plotPCALayer(LayerConfig(output="pca_profiles_density", showDensity=True, showAxes=True ) )
     overlayImages( ["pca_profiles_density.png", "pca_profiles.png"], "pca_profiles_combined.png" )
 
-    plotPCALayer(LayerConfig(output="pca_profiles_x",         showAxes=True,  showDensity=True, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
+    #plotPCALayer(LayerConfig(output="pca_profiles_x",         showAxes=True,  showDensity=True, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True ) )
     
 
-    plotPCALayer(LayerConfig(output="pca_profiles_d",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=True, showLoadingVectors=True, debug=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_d",         showAxes=True,  showDensity=False, showDists=True, showProfiles=True, showHighlights=False, showComponents=False, showLoadingVectors=False, debug=True ) )
     plotPCALayer(LayerConfig(output="pca_profiles_density_d", showDensity=True, debug=True ) )
     overlayImages( ["pca_profiles_density_d.png", "pca_profiles_d.png"], "pca_profiles_combined_d.png" )
     
 
-    plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showAxes=True, showLoadingVectors=True ) )
+    plotPCALayer(LayerConfig(output="pca_profiles_trait",   showTrait=True, showAxes=True, showLoadingVectors=False ) )
     overlayImages( ["pca_profiles_trait.png"], "pca_profiles_trait_combined.png" )
 
     
@@ -1556,6 +1571,10 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     print(a[:3])
     print("bottom:")
     print(a[-3:])
+
+    print("==="*20)
+    print("Nprofiles = {} Ntraits = {}".format( len(biasProfiles), len([x for x in traitValues.values() if not x is None]) ) )
+    print("==="*20)
     return a
 
 

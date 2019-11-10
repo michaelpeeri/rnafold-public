@@ -526,6 +526,8 @@ class ProfileDataCollection(object):
     def getTaxIds(self, profilesGroup=0):
         return self.biasProfiles[profilesGroup].keys()
         
+    def getProfile(self, taxid, profilesGroup=0):
+        return self.biasProfiles[profilesGroup].get(taxid, None)
 
 """
 Plot "statistical" tree, with species names and counts 
@@ -920,8 +922,27 @@ def plotCollapsedTaxonomicTree(profileDataCollection, ownXserver=False):
 
     return 0
 
+def getSpeciesCompositeModel( taxId ):
+    
+    genomicGC = getSpeciesProperty(taxId, 'gc-content')[0]
+    if not genomicGC is None:
+        genomicGC = float(genomicGC)
 
-def createTraitMapping(trait):
+    genomicENc_prime = getSpeciesProperty(taxId, 'ENc-prime')[0]
+    if not genomicENc_prime is None:
+        genomicENc_prime = float(genomicENc_prime)
+
+    optimumTemp = getSpeciesProperty(taxId, 'optimum-temperature')[0]
+    if not optimumTemp is None:
+        optimumTemp = float(optimumTemp)
+
+    endosymbiont = isEndosymbiont( taxId )
+
+    return ((optimumTemp > 58.0) or (genomicENc_prime > 56.5) or (genomicGC < 38) or (endosymbiont == True))
+    
+
+
+def createTraitMapping(trait, profilesCollection):
     ret = {}
     for taxId in allSpeciesSource():
 
@@ -929,6 +950,11 @@ def createTraitMapping(trait):
             genomicGC = getSpeciesProperty(taxId, 'gc-content')[0]
             if not genomicGC is None:
                 ret[taxId] = float(genomicGC)
+            
+        elif trait=="ENc_prime": 
+            genomicENc_prime = getSpeciesProperty(taxId, 'ENc-prime')[0]
+            if not genomicENc_prime is None:
+                ret[taxId] = float(genomicENc_prime)
                 
         elif trait=="Temp":
             optimumTemp = getSpeciesProperty(taxId, 'optimum-temperature')[0]
@@ -936,13 +962,21 @@ def createTraitMapping(trait):
                 ret[taxId] = float(optimumTemp)
                 
         elif trait=="Endosymbiont":
-            endsymbiont = isEndosymbiont( taxId )
-            if not endsymbiont is None:
-                ret[taxId] = endsymbiont
+            endosymbiont = isEndosymbiont( taxId )
+            if not endosymbiont is None:
+                ret[taxId] = endosymbiont
 
-        #if trait=="ENc":
-        #if trait=="dLFEScale-g0":
-        #if trait=="WeakProfileComposite":
+        elif trait=="dLFEScale-g0":
+            dLFE = profilesCollection.getProfile( taxId )
+            if not dLFE is None:
+                ret[taxId] = np.std( dLFE ) # use std-dev as a measure of scale
+            else:
+                print("Warning: couldn't find profile for taxid={}".format( taxId ))
+        
+        elif trait=="WeakProfileComposite":
+            prediction = getSpeciesCompositeModel( taxId )
+            if not prediction is None:
+                ret[taxId] = prediction
 
         else:
             raise Exception("Unknown trait {}".format(trait))
@@ -1023,12 +1057,17 @@ def standalone():
     argsParser.add_argument("--zoom", type=float, default=1.0)
     argsParser.add_argument("--symbol-scale", type=float, default=8.0)
     argsParser.add_argument("--trait-to-plot", type=str, default="GC")
+    argsParser.add_argument("--profile-reference", type=str, default=None)
+    argsParser.add_argument("--trait-color-map", type=str, default='plasma_r')
     args = argsParser.parse_args()
 
 
     global yScale
     if not args.use_Y_range is None:
         yScale = [-args.use_Y_range, args.use_Y_range]
+
+    if not args.profile_reference is None:
+        assert(args.profile_reference=="begin" or args.profile_reference=="end")
 
     phylosignalProfiles = None
     if( args.use_phylosignal_data ):
@@ -1083,7 +1122,7 @@ def standalone():
         tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
 
         print("Fetching trait values for plotting...")
-        traitValues = createTraitMapping( args.trait_to_plot )
+        traitValues = createTraitMapping( args.trait_to_plot, tileGenerator )
 
         if not args.limit_taxonomy is None:
             filtered = findDescendentsOfAncestor(tileGenerator.getTaxIds(), args.limit_taxonomy)
@@ -1091,7 +1130,7 @@ def standalone():
         else:
             biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0)
 
-        return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale )
+        return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale, profileReference=args.profile_reference, traitColorMap = args.trait_color_map )
 
     elif( args.use_tree=="taxonomic" ):
         files = []
