@@ -9,7 +9,7 @@
     [
         {
             "label": "A",
-            "fileName": "/home/michael/rnafold/figures/Eukaryotes/GenomicGC_Eukaryotes.png",
+            "fileName": "/home/michael/rnafold.work/figures/Eukaryotes/GenomicGC_Eukaryotes_2.png",
             "x": 0.00,
             "y": 0.06,
             "w": 0.45,
@@ -17,7 +17,7 @@
         },
         {
             "label": "",
-            "fileName": "/home/michael/rnafold/figures/Eukaryotes/pca_profiles_trait_combined.cropped.png",
+            "fileName": "/home/michael/rnafold.work/figures/Eukaryotes/pca_profiles_trait_combined.cropped.png",
             "x": 0.77,
             "y": 0.18,
             "w": 0.30,
@@ -25,7 +25,7 @@
         },
         {
             "label": "B",
-            "fileName": "/home/michael/rnafold/figures/Eukaryotes/pca_profiles_combined.cropped.png",
+            "fileName": "/home/michael/rnafold.work/figures/Eukaryotes/pca_profiles_combined.cropped.png",
             "x": 0.47,
             "y": 0.06,
             "w": 0.30,
