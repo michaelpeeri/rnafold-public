@@ -21,7 +21,7 @@ library("kde1d")
 library("minerva")
 library("lmtest") # for Breush-Pagan test (homoskedasticity)
 library("Metrics")
-
+sink(stdout(), type="message")
 #---------------------------------------------------------------
 # Configuration
 
@@ -234,7 +234,6 @@ readDeltaLFEProfile <- function( taxId, h5filename, profileSpec )
         if( length(deltas)==length(poss))
         {
             data <- data.frame(delta=deltas, pos=poss)
-            print("--")
             p0 <- min(poss)
             p1 <- max(poss)
             N <- sort(unique(poss))
@@ -775,11 +774,13 @@ protectFromNAs <- function(x) { replace(x, is.na(x), 0) }
 #Is_endosymbiont GenomicGC GenomicENc.prime OptimumTemp Response precision    recall
 #              1     37.99            56.51       58.01     0.14  0.659292 0.8186813
 traits$Is_high_ENc_prime   <- as.factor( (traits$GenomicENc.prime > 56.5) + 0 )
-print(traits$Is_low_GC)
-print(sum(na.omit(traits$Is_low_GC == 1)))
-print(sum(na.omit(traits$Is_high_ENc_prime == 1)))
-print(sum(na.omit(traits$Is_endosymbiont==1)))
+#print(traits$Is_low_GC)
+#print(sum(na.omit(traits$Is_low_GC == 1)))
+#print(sum(na.omit(traits$Is_high_ENc_prime == 1)))
+#print(sum(na.omit(traits$Is_endosymbiont==1)))
 traits$Compound   <- as.factor((protectFromNAs(traits$Is_low_GC == 1) | protectFromNAs(traits$Is_high_ENc_prime==1) | protectFromNAs(traits$Is_endosymbiont==1) | protectFromNAs(traits$Is_high_temp==1)) + 0)
+traits$Is_high_temp_all <- as.integer(protectFromNAs(traits$Is_high_temp))
+traits$Is_endosymbiont_all<- as.integer(protectFromNAs(traits$Is_endosymbiont))
 #print(traits$Compound)
 #print(traits[order(traits$Profile_1.26),c("Profile_1.26", "Compound", "Is_endosymbiont", "OptimumTemp", "Is_high_temp", "GenomicENc.prime",  "Is_high_ENc_prime", "GenomicGC", "Is_low_GC")])
 
@@ -970,9 +971,11 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
         ## #}
         ## # TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY ####  TESTING ONLY #
 
+        
         normYtrait <- paste0(Ytrait, ".norm")
         traits[,normYtrait] <- traits[,Ytrait] - mean(traits[,Ytrait])
         Ytrait <- normYtrait   # proceed in analysis using the normalized trait
+        
 
     }
 
@@ -993,7 +996,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
     predictiveFormula <- NA    
     if( any(class(traits[,Xtrait])==c("factor")) )
     {
-        predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait, " + 0") )  # model without intercept term
+       predictiveFormula <- as.formula( paste(Ytrait, " ~ ", Xtrait, " + 0") )  # model without intercept term
     }
     else
     {
@@ -1025,7 +1028,9 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
                 na.action=na.omit,
                 method="REML"); #print( summary(gls1))
     co2 <- coef(gls1)
-    #print(summary(gls1))
+    print("//////////////////////////////")
+    print( predictiveFormula )
+    print(summary(gls1))
     #print(anova(gls1))
 
     gls0 <- gls( interceptFormula,
@@ -1033,7 +1038,7 @@ performGLSregression <- function( traits, tree, Xtrait, Ytrait, plotRegression=T
                  correlation=bmcorr,
                  na.action=na.omit,
                  method="REML")
-    #print(bmcorr)
+                                        #print(bmcorr)
 
     gls.nocorr <- gls( predictiveFormula,
                       traits,
@@ -1510,7 +1515,6 @@ performGLSregression_profileRangeMean <- function( traits, tree, Xtrait, profile
         traits.full$RangeMean <- rowMeans( traits.full[variables] )
     }
     
-
     # Perform the regression (for the mean values)
     return( performGLSregression( traits, tree, Xtrait, "RangeMean", plotRegression=plotRegression, caption=caption, extras=extras, traits.full=traits.full, plot.yrange=plot.yrange ) )
 }
@@ -2495,22 +2499,84 @@ report_testRegressionForWeakModelComponents <- function()
 {
 ##print(performGLSregression( traits, tree, "GenomicGC",   "Profile_1.15", extras="", plotRegression=FALSE ))
 
-    print(performGLSregression_profileRangeMean( traits, tree, "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
-    print(performOLSregression_profileRangeMean( traits,       "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    r.all <- data.frame()
 
-    print(performGLSregression_profileRangeMean( traits, tree, "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
-    print(performOLSregression_profileRangeMean( traits,       "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_all_1", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
 
-    print(performGLSregression_profileRangeMean( traits, tree, "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
-    print(performOLSregression_profileRangeMean( traits,       "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_all_1", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_all_1", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
 
-    print(performGLSregression_profileRangeMean( traits, tree, "Compound", c(16,31), profileId=1, plotRegression=TRUE ))
-    print(performOLSregression_profileRangeMean( traits,       "Compound", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_all_1", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_all_1", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_all_1", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_all_1", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+                                        # -----------------------------
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Bacteria_2", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Bacteria_2", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
 
-    print(performGLSregression_profileRangeMean( traits, tree, "Compound", c(2,16), profileId=2, plotRegression=TRUE ))
-    print(performOLSregression_profileRangeMean( traits,       "Compound", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Bacteria_2", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Bacteria_2", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Bacteria_2", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Bacteria_2", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Bacteria_2", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Bacteria_2", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+                                        # -----------------------------
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Proteobacteria_1224", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Proteobacteria_1224", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Proteobacteria_1224", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Proteobacteria_1224", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+
+                                            # -----------------------------
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=FALSE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=FALSE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=FALSE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=FALSE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=FALSE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=FALSE ))
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=FALSE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Gammaproteobacteria_1236", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=FALSE ))
 
 
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(1,2), profileId=1, plotRegression=TRUE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(16,31), profileId=1, plotRegression=TRUE ))
+
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(2,16), profileId=2, plotRegression=TRUE ))
+    
+    r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+    r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Terrabacteria_group_1783272", "Is_endosymbiont", c(30,32), profileId=2, plotRegression=TRUE ))
+    
+    ## r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Proteobacteria_1224", "Compound", c(16,31), profileId=1, plotRegression=TRUE ))
+    ## r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Compound", c(16,31), profileId=1, plotRegression=TRUE ))
+
+    ## r.all <- rbind( r.all, performGLSregression_profileRangeMean_withFilter( traits, tree,  "Member_Proteobacteria_1224", "Compound", c(2,16), profileId=2, plotRegression=TRUE ))
+    ## r.all <- rbind( r.all, performOLSregression_profileRangeMean_withFilter( traits,        "Member_Proteobacteria_1224", "Compound", c(2,16), profileId=2, plotRegression=TRUE ))
+
+    print(r.all)
+    write.csv(r.all, file="weak_traits.csv" )
+
+
+    return(NA)
 
     #traits.fb <- na.exclude(traits[traits$Compound==0,"Profile_1.26"])
     #print(traits.fb)
@@ -2717,6 +2783,40 @@ performGLSregressionWithFilter <- function( traits, tree, filterTrait, Xtrait, Y
     #N <- nTips(tree.filtered)
     
     return( performGLSregression( traits.filtered, tree.filtered, Xtrait, Ytrait, plotRegression=plotRegression, caption=sprintf("%s effect on %s (%s)", Xtrait, profileMode, filterTrait, traits), orig.traits, extras="" ) )
+}
+
+performGLSregression_profileRangeMean_withFilter <- function( traits, tree, filterTrait, studyTrait,  profileRange, profileId=1, plotRegression=TRUE , caption="", plot.yrange=NA, extras="")
+{
+    # Filter tree by trait
+    ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
+    if( isTRUE(is.na(ret[[1]])) ) { print("xxxxxxxxx"); return( NA ) }
+    traits.filtered <- ret[[1]]
+    tree.filtered   <- ret[[2]]
+    stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
+        
+    if( is.null(tree.filtered) || nTips(tree.filtered) < minimalTaxonSize )
+    {
+        print("Not enough species remaining...")
+        return( NA )
+    }
+
+    if( any(class(traits.filtered[,studyTrait])==c("factor")) && nlevels(as.factor(as.numeric(traits.filtered[,studyTrait]))) < 2 )
+    {
+        print("Only one level remaining...")
+        return( NA )
+    }
+    
+###return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits) ), profileId=profileId ) )
+    return( performGLSregression_profileRangeMean( traits.filtered, tree.filtered, studyTrait,  profileRange, profileId=profileId, plotRegression=plotRegression, caption=sprintf("%s - %s; %s (N=%d)", filterTrait, caption, studyTrait, nrow(traits.filtered) ), traits.full=traits, plot.yrange=plot.yrange, extras=extras ) )
+}
+
+
+performOLSregression_profileRangeMean_withFilter <- function( traits, filterTrait, studyTrait,  profileRange, profileId=1, plotRegression=TRUE , caption="", colorTrait="Member_all_1" )
+{
+    # Filter species by trait
+    traits.filtered <- traits[as.logical(traits[,filterTrait]),]
+    
+    return( performOLSregression_profileRangeMean( traits.filtered, studyTrait,  profileRange, profileId=profileId, plotRegression=plotRegression, caption=sprintf("%s - %s; %s (N=%d)", filterTrait, caption, studyTrait, nrow(traits.filtered) ), colorTrait=colorTrait ) )
 }
 
 glsRangeAnalysisWithFilter <- function( traits, tree, filterTrait, studyTrait, pyramidSpec, profileId=1, plotCaption="", extras="" )
@@ -3618,6 +3718,203 @@ figure_PartialDeterminationAnalysis_GC_and_ENc.prime <- function()
 }
 
 
+calculatePartialR2sForProgressiveRegression <- function(factors, profileId=1, pyramidSpec=c(1,31), xrange=c(16,31), filter="Member_all_1" )
+{
+    d.all <- data.frame()
+    yrange <- c(0.00,0.80)
+    #xrange <- c(16,31)
+    #xrange <- c(1,2)
+
+    #prevR2 <- rep( 0, length(seq(pyramidSpec[1], pyramidSpec[2])) )
+    prevR2 <- 0.0
+    
+    for( n in 1:length(factors) )
+    {
+        prevFactors <- factors[1:n-1]
+        currFactor <- factors[n]
+        caption <- paste( factors[1:n], collapse="+" )
+
+        #d.t1 <- performGLSregression_profileRangeMean( traits, tree, currFactor,  xrange, profileId=profileId, plotRegression=TRUE, caption=caption, extras=paste( prevFactors, collapse=" + ") )
+        #d.t1 <- performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_Bacteria_2", currFactor,  xrange, profileId=profileId, plotRegression=TRUE, caption=caption, extras=paste( prevFactors, collapse=" + ") )
+        d.t1 <- performGLSregression_profileRangeMean_withFilter( traits, tree, filter, currFactor,  xrange, profileId=profileId, plotRegression=TRUE, caption=caption, extras=paste( prevFactors, collapse=" + ") )
+        #d.t1   <- glsRangeAnalysisWithFilterd.t1( traits, tree, "Member_all_1",          currFactor,       pyramidSpec, plotCaption=currFactor, profileId=profileId, extras=paste( prevFactors, collapse=" + ") )
+        print(d.t1)
+        print(class(d.t1))
+        print(names(d.t1))
+        if( !any(class(d.t1) == "data.frame") )
+        {
+            traceback()
+            print("n")
+            print(n)
+            print("factors")
+            print(factors)
+            print("profileId")
+            print(profileId)
+            print("pyramid")
+            print(pyramidSpec)
+            print("xrange")
+            print(xrange)
+            print("filter")
+            print(filter)
+            #print(sprintf("n=%d factors=%s profileId=%d pyramid=%s xrange=%s", n, paste(factors, sep=','), profileId, paste(pyramidSpec, sep=','), paste(xrange, sep=',')))
+            print("GLS returned invalid results")
+        }
+        
+
+        d.t1$Group <- filter
+        d.t1$R2 <- abs(d.t1$R2)
+        d.t1$T <- caption
+        d.t1$significant <- d.t1$pvalue<significanceLevel
+        d.t1$significant.group <- make.group( d.t1$significant )
+        #d.t1$MIC.significant <- d.t1$MIC.pvalue<significanceLevel
+                                            #d.t1$MIC.significant.group <- make.group( d.t1$MIC.significant )
+        d.t1$TotalR2 <- d.t1$R2 + prevR2
+        prevR2 <- d.t1$TotalR2
+        d.all <- rbind( d.all, d.t1)
+    }
+    return(d.all)
+}
+
+
+
+figure_PartialDeterminationAnalysis_FourTraits <- function(profileId=1, pyramidSpec=c(1,31), filter="Member_all_1" )
+{
+    d.all <- data.frame()
+    yrange <- c(0.00,0.90)
+
+    d.all1 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all" ), profileId=1, xrange=c(1,3), filter=filter )
+    d.all2 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all" ), profileId=1, xrange=c(16,31), filter=filter )
+    d.all3 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all" ), profileId=2, xrange=c(2,16), filter=filter )
+    d.all4 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all" ), profileId=2, xrange=c(30,32), filter=filter )
+    #d.all5 <- calculatePartialR2sForProgressiveRegression( c("Is_endosymbiont_all", "GenomicGC", "GenomicENc.prime" ), profileId=1, xrange=c(16,31), filter=filter )
+    #d.all6 <- calculatePartialR2sForProgressiveRegression( c("Is_endosymbiont_all", "GenomicGC", "GenomicENc.prime" ), profileId=1, xrange=c(1,3), filter=filter )
+    d.all <- rbind( d.all1, d.all2, d.all3, d.all4 )
+    print(d.all)
+    
+    return(d.all)
+    ## d.all2 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all", "Is_high_temp_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all3 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "Is_endosymbiont_all", "GenomicENc.prime", "Is_high_temp_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all4 <- calculatePartialR2sForProgressiveRegression( c("Is_endosymbiont_all", "GenomicENc.prime", "GenomicGC", "Is_high_temp_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all5 <- calculatePartialR2sForProgressiveRegression( c("Is_high_temp_all", "GenomicGC", "GenomicENc.prime", "Is_endosymbiont_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all6 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "GenomicENc.prime", "Is_high_temp_all", "Is_endosymbiont_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all1 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "GenomicENc.prime", "Is_endosymbiont_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all2 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_endosymbiont_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all3 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "GenomicENc.prime", "Is_high_temp_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all4 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_high_temp_all" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all5 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "GenomicENc.prime", "GenomicGC" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    ## d.all6 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "GenomicGC" ), profileId=profileId, pyramidSpec=pyramidSpec )
+
+    #d.all2 <- calculatePartialR2sForProgressiveRegression( c("GenomicENc.prime", "GenomicGC", "Is_high_temp_all", "Is_endosymbiont_all" ),  profileId=profileId, pyramidSpec=pyramidSpec )
+    #d.all3 <- calculatePartialR2sForProgressiveRegression( c("GenomicGC", "Is_high_temp_all", "Is_endosymbiont_all", "GenomicENc.prime" ),  profileId=profileId, pyramidSpec=pyramidSpec )
+    #d.all2 <- calculatePartialR2sForProgressiveRegression( c("Is_endosymbiont_all", "Is_high_temp_all", "GenomicGC", "GenomicENc.prime" ), profileId=profileId, pyramidSpec=pyramidSpec )
+    #d.all <- rbind( d.all1, d.all2, d.all3, d.all4, d.all5, d.all6 )
+    
+    d.all <- data.frame()
+    d.t1   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "GenomicGC",       pyramidSpec, plotCaption="GenomicGC", profileId=profileId, extras="" )
+    d.t1$Buse.R2 <- abs(d.t1$Buse.R2)
+    d.t1$T <- "GC"
+    d.t1$significant <- d.t1$Pvalue<significanceLevel
+    d.t1$significant.group <- make.group( d.t1$significant )
+    #d.t1$MIC.significant <- d.t1$MIC.pvalue<significanceLevel
+                                        #d.t1$MIC.significant.group <- make.group( d.t1$MIC.significant )
+    d.t1$TotalR2 <- d.t1$Buse.R2
+    d.all <- rbind( d.all, d.t1)
+
+    d.t2   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "GenomicENc.prime",       pyramidSpec, plotCaption="GenomicENc.prime", profileId=profileId, extras=" GenomicGC " )
+    d.t2$Buse.R2 <- abs(d.t2$Buse.R2)
+    d.t2$T <- "GC+ENc"
+    d.t2$significant <- d.t2$Pvalue<significanceLevel
+    d.t2$significant.group <- make.group( d.t2$significant )
+    #d.t2$MIC.significant <- d.t2$MIC.pvalue<significanceLevel
+    #d.t2$MIC.significant.group <- make.group( d.t2$MIC.significant )
+    d.t2$TotalR2 <- d.t2$Buse.R2 + d.t1$TotalR2
+    d.all <- rbind( d.all, d.t2)
+
+    ## #traits$Compound   <- as.factor((protectFromNAs(traits$Is_low_GC == 1) | protectFromNAs(traits$Is_high_ENc_prime==1) | protectFromNAs(traits$Is_endosymbiont==1) | protectFromNAs(traits$Is_high_temp==1)) + 0)
+
+    d.t3   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "Is_endosymbiont_all",       pyramidSpec, plotCaption=" GenomicGC + GenomicENc.prime + Is_endosymbiont_all", profileId=profileId, extras=" GenomicGC + GenomicENc.prime " )
+    d.t3$Buse.R2 <- abs(d.t3$Buse.R2)
+    d.t3$T <- "GC+ENc+Endo"
+    d.t3$significant <- d.t3$Pvalue<significanceLevel
+    d.t3$significant.group <- make.group( d.t3$significant )
+    #d.t3$MIC.significant <- d.t3$MIC.pvalue<significanceLevel
+    #d.t3$MIC.significant.group <- make.group( d.t3$MIC.significant )
+    d.t3$TotalR2 <- d.t3$Buse.R2 + d.t2$TotalR2
+    d.all <- rbind( d.all, d.t3)
+
+    ## d.t4   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "Is_high_temp_all",       pyramidSpec, plotCaption=" GenomicGC + Is_endosymbiont_all", profileId=profileId, extras=" GenomicGC + GenomicENc.prime + Is_endosymbiont_all " )
+    ## d.t4$Buse.R2 <- abs(d.t4$Buse.R2)
+    ## d.t4$T <- "GC+ENc+Endo+HighTemp"
+    ## d.t4$significant <- d.t4$Pvalue<significanceLevel
+    ## d.t4$significant.group <- make.group( d.t4$significant )
+    ## #d.t4$MIC.significant <- d.t4$MIC.pvalue<significanceLevel
+    ## #d.t4$MIC.significant.group <- make.group( d.t4$MIC.significant )
+    ## d.t4$TotalR2 <- d.t4$Buse.R2 + d.t3$TotalR2
+    ## d.all <- rbind( d.all, d.t4)
+
+    ## d.t5   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "GenomicENc.prime",       pyramidSpec, plotCaption=" GenomicGC + Is_endosymbiont", profileId=profileId, extras=" GenomicGC + Is_endosymbiont + Is_high_temp_all " )
+    ## d.t5$Buse.R2 <- abs(d.t5$Buse.R2)
+    ## d.t5$T <- "GC+Endo+HighTemp+ENc"
+    ## d.t5$significant <- d.t5$Pvalue<significanceLevel
+    ## d.t5$significant.group <- make.group( d.t5$significant )
+    ## #d.t5$MIC.significant <- d.t5$MIC.pvalue<significanceLevel
+    ## #d.t5$MIC.significant.group <- make.group( d.t5$MIC.significant )
+    ## d.t5$TotalR2 <- 0.0 # d.t4$Buse.R2 + d.t3$TotalR2  # FIX THIS !! FIX THIS !!
+    ## d.all <- rbind( d.all, d.t5)
+
+    ## d.t6   <- glsRangeAnalysisWithFilter( traits, tree, filter,          "GenomicGC",       pyramidSpec, plotCaption=" GenomicGC + Is_endosymbiont", profileId=profileId, extras=" GenomicENc.prime + Is_endosymbiont + Is_high_temp_all " )
+    ## d.t6$Buse.R2 <- abs(d.t6$Buse.R2)
+    ## d.t6$T <- "ENc+Endo+HighTemp+GC"
+    ## d.t6$significant <- d.t6$Pvalue<significanceLevel
+    ## d.t6$significant.group <- make.group( d.t6$significant )
+    ## #d.t6$MIC.significant <- d.t6$MIC.pvalue<significanceLevel
+    ## #d.t6$MIC.significant.group <- make.group( d.t6$MIC.significant )
+    ## d.t6$TotalR2 <- 0.0 # d.t4$Buse.R2 + d.t3$TotalR2  # FIX THIS !! FIX THIS !!
+    ## d.all <- rbind( d.all, d.t6)
+
+    #print(d.all)
+    #return()
+
+    p <- ggplot(d.all, aes(x=Var1) ) + 
+        geom_line( aes(y=Buse.R2, color=T), alpha=0.7 ) +
+        geom_line( data=d.all[d.all$T=="GC",],                  aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="GC+ENc",],           aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="GC+ENc+Endo",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        geom_line( data=d.all[d.all$T=="GC+ENc+Endo+HighTemp",],                       aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        #scale_alpha_manual( values=c(0.0, 1.0) ) +
+        #scale_colour_manual( values=c("GenomicGC"="blue", "GenomicENc.prime"="#208020", "GenomicGC+GenomicENc.prime"="red", "Test"="grey" ) ) +
+        #scale_size_manual(   values=c("GenomicGC"=1.0,    "GenomicENc.prime"=1.0,   "GenomicGC+GenomicENc.prime"=1.6,     "Test"=0.6    ) ) +
+        scale_y_continuous( limits=yrange, breaks=c( 0.0, 0.20, 0.40, 0.60, 0.80 ), labels=c( "0.0", "0.2", "0.4", "0.6", "0.8" ) ) +
+        labs(x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
+        theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+              panel.grid.major.y = element_line(color="grey", size=0.50),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor = element_blank(),
+              panel.background = element_blank(),
+              aspect.ratio = 0.34
+              )
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    if( profileId==1 )
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(0,100,200,300),
+                                labels=c(0,100,200,300), expand=expand_scale( mult=c(0,0) ) )
+    }
+    else
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(-300,-200,-100,0),
+                                labels=c(-300,-200,-100,0), expand=expand_scale( mult=c(0,0) ) )
+    }
+    print(p)
+    
+    
+    
+    print(d.all)
+    
+}
+
 figure_PartialDeterminationAnalysis_NormalizedProfiles <- function()
 {
     stopifnot( profileMode == "dLFE" )
@@ -4315,38 +4612,6 @@ correlogramData <- NA
 
 
 
-performGLSregression_profileRangeMean_withFilter <- function( traits, tree, filterTrait, studyTrait,  profileRange, profileId=1, plotRegression=TRUE , caption="", plot.yrange=NA)
-{
-    # Filter tree by trait
-    ret <- prepareFilteredTreeForGLS( traits, tree, filterTrait, studyTrait )
-    if( isTRUE(is.na(ret[[1]])) ) { return( NA ) }
-    traits.filtered <- ret[[1]]
-    tree.filtered   <- ret[[2]]
-    stopifnot( nTips(tree.filtered) == nrow(traits.filtered) ) # after filtering, the tree must still match the traits array
-        
-    if( is.null(tree.filtered) || nTips(tree.filtered) < minimalTaxonSize )
-    {
-        return( NA )
-    }
-
-    if( any(class(traits.filtered[,studyTrait])==c("factor")) && nlevels(as.factor(as.numeric(traits.filtered[,studyTrait]))) < 2 )
-    {
-        print("Only one level remaining...")
-        return( NA )
-    }
-    
-    ###return( glsRegressionRangeAnalysis( traits.filtered, tree.filtered, studyTrait, pyramidSpec, sprintf("%s\n(N=%d)", filterTrait, nrow(traits) ), profileId=profileId ) )
-    return( performGLSregression_profileRangeMean( traits.filtered, tree.filtered, studyTrait,  profileRange, profileId=profileId, plotRegression=plotRegression, caption=sprintf("%s - %s; %s (N=%d)", filterTrait, caption, studyTrait, nrow(traits.filtered) ), traits.full=traits, plot.yrange=plot.yrange ) )
-}
-
-
-performOLSregression_profileRangeMean_withFilter <- function( traits, filterTrait, studyTrait,  profileRange, profileId=1, plotRegression=TRUE , caption="", colorTrait="Member_all_1" )
-{
-    # Filter species by trait
-    traits.filtered <- traits[as.logical(traits[,filterTrait]),]
-    
-    return( performOLSregression_profileRangeMean( traits.filtered, studyTrait,  profileRange, profileId=profileId, plotRegression=plotRegression, caption=sprintf("%s - %s; %s (N=%d)", filterTrait, caption, studyTrait, nrow(traits.filtered) ), colorTrait=colorTrait ) )
-}
 
 regressionResultsByTaxGroup <- data.frame( ExplanatoryVar=character(), Range=integer(), MaxRangeStart=integer(), MaxRangeEnd=integer(), TaxGroup=integer(), TaxGroupName=character(), EffectSize=double(), Pvalue=double(), NumSpecies=integer() )
 
@@ -4951,6 +5216,59 @@ figure_ContrasingProfileBoxplotsForHighLowGC <- function(minimal=FALSE)
                   ggplotGrob( dd0a ), ggplotGrob( dd0e ),
                   ncol=2, widths=c(unit(0.5, "npc"), unit(0.5, "npc")), heights=c(unit(0.45, "npc"), unit(0.227, "npc"), unit(0.226, "npc") ) )
 }
+
+figure_ContrasingProfileBoxplotsForDomains <- function(minimal=FALSE)
+{
+    yrangeForKDEs = c(-1.3, 2)
+
+    ## dd0a <- plotContrastingProfilesAsSideBySideBoxplots(
+    ##     getFilteredProfileValues( traits, c( "Member_all_1" ), c(FALSE ), as.integer(c(1,31)), profileId=1, yrange=yrangeForKDEs ),
+    ##     data.frame(),
+    ##     c("All"), ylimits=c(-1.3,3), as.integer(c(1,31)), profileId=1 )
+
+    ## dd0e <- plotContrastingProfilesAsSideBySideBoxplots(
+    ##     getFilteredProfileValues( traits, c( "Member_all_1" ), c(FALSE ), as.integer(c(1,32)), profileId=2, yrange=yrangeForKDEs ),
+    ##     data.frame(),
+    ##     c("All"), ylimits=c(-1.3,3), as.integer(c(1,32)), profileId=2 )
+
+    dd1a <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Bacteria_2" ), c(FALSE ), as.integer(c(1,31)), profileId=1, yrange=c(-1.5,3) ),
+        data.frame(),
+        c("Bacteria"), ylimits=c(-1.5,3), as.integer(c(1,31)), profileId=1 )
+
+    dd1e <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Bacteria_2" ), c(FALSE ), as.integer(c(1,32)), profileId=2, yrange=c(-1.5,3) ),
+        data.frame(),
+        c("Bacteria"), ylimits=c(-1.5,3), as.integer(c(1,32)), profileId=2 )
+
+    dd2a <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Archaea_2157" ), c(FALSE ), as.integer(c(1,31)), profileId=1, yrange=c(-1.0,2) ),
+        data.frame(),
+        c("Archaea"), ylimits=c(-1.0,2), as.integer(c(1,31)), profileId=1 )
+
+    dd2e <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Archaea_2157" ), c(FALSE ), as.integer(c(1,32)), profileId=2, yrange=c(-1.0,2) ),
+        data.frame(),
+        c("Archaea"), ylimits=c(-1.0,2), as.integer(c(1,32)), profileId=2 )
+    
+    dd3a <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Eukaryota_2759" ), c(FALSE ), as.integer(c(1,31)), profileId=1, yrange=c(-2.5,2) ),
+        data.frame(),
+        c("Eukaryota"), ylimits=c(-2.5,2), as.integer(c(1,31)), profileId=1 )
+
+    dd3e <- plotContrastingProfilesAsSideBySideBoxplots(
+        getFilteredProfileValues( traits, c( "Member_Eukaryota_2759" ), c(FALSE ), as.integer(c(1,32)), profileId=2, yrange=c(-2.5,2) ),
+        data.frame(),
+        c("Eukaryota"), ylimits=c(-2.5,2), as.integer(c(1,32)), profileId=2 )
+
+    grid.arrange( #ggplotGrob( dd0a ), ggplotGrob( dd0e ),
+                  ggplotGrob( dd1a ), ggplotGrob( dd1e ),
+                  ggplotGrob( dd2a ), ggplotGrob( dd2e ),
+                  ggplotGrob( dd3a ), ggplotGrob( dd3e ),
+                  ncol=2, widths=c(unit(0.5, "npc"), unit(0.5, "npc")), heights=c(unit(0.34, "npc"), unit(0.33, "npc"), unit(0.33, "npc") ) )
+    
+}
+
 
 figure_ContrasingProfileBoxplotsForHighLowCUB <- function()
 {
@@ -6303,9 +6621,31 @@ figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS <- function()
 
 #figure_PartialDeterminationAnalysis_GC_and_ENc.prime()
 #figure_PartialDeterminationAnalysis(profileId=1, pyramidSpec=c(1,31) )
-#igure_PartialDeterminationAnalysis(profileId=2, pyramidSpec=c(2,32) )
+#figure_PartialDeterminationAnalysis(profileId=2, pyramidSpec=c(2,32) )
 #figure_PartialDeterminationAnalysis2()
-#figure_PartialDeterminationAnalysis_NormalizedProfiles()
+                                        #figure_PartialDeterminationAnalysis_NormalizedProfiles()
+##aa <- data.frame()
+##aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31) ) )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32) ) )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Bacteria_2" ) )
+##aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Bacteria_2" ) )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Proteobacteria_1224" ) )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Gammaproteobacteria_1236" ) )
+##aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Proteobacteria_1224" ) )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Terrabacteria_group_1783272") )
+#aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Eukaryo") )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Terrabacteria_group_1783272" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_FCB_group_1783270" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_FCB_group_1783270" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Actinobacteria_201174") )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Actinobacteria_201174" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Firmicutes_1239" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Firmicutes_1239" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=1, pyramidSpec=c(1,31), filter="Member_Tenericutes_544448" ) )
+## #aa <- rbind( aa, figure_PartialDeterminationAnalysis_FourTraits(profileId=2, pyramidSpec=c(2,32), filter="Member_Tenericutes_544448" ) )
+## ##write.csv(aa, file="four.csv" )
+## print(aa)
+
 #figure_PositiveStretchLengths()
 #figure_DLFEInteractingTraits_RegressionRangeAnalysisByTaxGroup()
 #figure_DLFETraitsInfluencesComparisonForMidCDS()
@@ -6313,18 +6653,19 @@ figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS <- function()
 #figure_CorrelationBetweenModelRegions()
 #figure_contrastingKDEsForHighLowGC()
 #figure_contrastingBoxplotsHighLowTemp()
-figure_ContrasingProfileBoxplotsForHighLowGC()
-figure_ContrasingProfileBoxplotsForHighLowCUB()
+#figure_ContrasingProfileBoxplotsForHighLowGC()
+#figure_ContrasingProfileBoxplotsForHighLowCUB()
 #figure_ContrasingProfileBoxplotsForHighLowGC(minimal=TRUE)
+#figure_ContrasingProfileBoxplotsForDomains(minimal=TRUE)
 #figure_ContrasingProfileBoxplotsForHighLowTemp()
 #figure_ContrasingProfileBoxplotsForIntracellulars()
 #figure_CorrelationBetweenRanges()
 #writeWeakDLFEBinaryModelGridSearchResults()
 #figure_GLS_GC_vs_endosymbionts()
-#report_testRegressionForWeakModelComponents()
+report_testRegressionForWeakModelComponents()
 #report_testCompoundClassification()
 #TestCorrelationBetweenScalarTraits()
-figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS()
+#figure_Temp_vs_dLFE_in_mid_CDS_OLS_vs_GLS()
 
 
 ############################################################
