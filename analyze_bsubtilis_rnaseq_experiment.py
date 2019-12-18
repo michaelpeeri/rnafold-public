@@ -776,7 +776,13 @@ def processGenome(args, taxId):
                 df.loc[geneId, ref_n] = ref[geneId][n]
 
 
-    CDSseqs = getAllCDSSeqs( taxId, tuple(df.ProtId), args )
+    if not args.Ecoli_workaround:
+        CDSseqs = getAllCDSSeqs( taxId, tuple(df.ProtId), args )
+    else:
+        locusTags = [x[1] for x in protName2GeneName.values()]
+        converted  = [additionalIdentifiers.get(y, [None])[0] for y in locusTags]
+        converted  = [x for x in converted if not x is None]
+        CDSseqs = getAllCDSSeqs( taxId, tuple(converted), args )
     assert(bool(CDSseqs))
     codonwDf = calcCodonwMeasures( CDSseqs )
 
@@ -906,6 +912,7 @@ if __name__=="__main__":
     argsParser.add_argument( "--num-shuffles",    type=int,                default=20 )
     argsParser.add_argument( "--limit-CAI",       type=int,                default=0 )
     argsParser.add_argument( "--PA-simple-mapping",  default=False, action="store_true" )
+    argsParser.add_argument( "--Ecoli-workaround",   default=False, action="store_true" )
     args = argsParser.parse_args()
 
     for taxId in args.taxid:
