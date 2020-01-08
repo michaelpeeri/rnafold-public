@@ -525,14 +525,36 @@ class ProfileDataCollection(object):
 
     def getTaxIds(self, profilesGroup=0):
         return self.biasProfiles[profilesGroup].keys()
-        
+
+
+def readExternalTraitCSV(fn):
+    from csv import reader
+    
+    ret = {}
+    with open(fn) as csvfile:
+        for row in reader( csvfile, delimiter=',' ):
+            ret[ int(row[0]) ] = int(row[1])
+    return ret
+
 
 """
 Plot "statistical" tree, with species names and counts 
 This tree should illustrate the included species
 """
-def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile="", hideLegend=False, hideEnvironmentalVars=False, ownXserver=False, treeScale=100, highlightSpecies=frozenset(), numProfileGroups=1, limitTaxonomy=None ):
+def plotSpeciesOnTaxonomicTree(tileFunc=None, tree=None, phylosignalFile="", hideLegend=False, hideEnvironmentalVars=False, ownXserver=False, treeScale=100, highlightSpecies=frozenset(), numProfileGroups=1, limitTaxonomy=None, externalTrait=None ):
+
+
+    externalTraitData = None
+    if externalTrait:
+        externalTraitData = readExternalTraitCSV( externalTrait )
+        
+    #######################3
+    # Build taxonomic tree
     taxa = getSpeciesToInclude()
+
+    if externalTrait:
+        taxa = [x for x in taxa if x in externalTraitData.keys() ]
+        
 
     if tree is None:
         # Get the smallest "taxonomic" (i.e., n-ary) tree that includes all specified species
@@ -939,6 +961,11 @@ def createTraitMapping(trait):
             endsymbiont = isEndosymbiont( taxId )
             if not endsymbiont is None:
                 ret[taxId] = endsymbiont
+
+        elif trait=="ENc_prime":
+            encPrime = getSpeciesProperty(taxId, 'ENc-prime')[0]
+            if not encPrime is None:
+                ret[taxId] = float(encPrime)
                 
         else:
             raise Exception("Unknown trait {}".format(trait))
@@ -1019,6 +1046,10 @@ def standalone():
     argsParser.add_argument("--zoom", type=float, default=1.0)
     argsParser.add_argument("--symbol-scale", type=float, default=8.0)
     argsParser.add_argument("--trait-to-plot", type=str, default="GC")
+    argsParser.add_argument("--plot-external-trait", type=str, default=None)
+    argsParser.add_argument("--trait-cmap", type=str, default="viridis")
+    
+    
     args = argsParser.parse_args()
 
 
@@ -1087,7 +1118,7 @@ def standalone():
         else:
             biasProfiles = tileGenerator.getBiasProfiles(profilesGroup=0)
 
-        return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale )
+        return PCAForProfiles( biasProfiles, tileGenerator.getYRange(), profilesYOffsetWorkaround=args.profiles_Y_offset_workaround, profileScale=args.profile_scale, fontSize=args.font_size, overlapAction="hide", highlightSpecies=args.highlight_species, addLoadingVectors=args.add_PCA_loading_vectors, loadingVectorsScale=args.PCA_loading_vectors_scale, zoom=args.zoom, legendXpos=args.PCA_legend_x_pos, traitValues=traitValues, symbolScale=args.symbol_scale, traitCmap=args.trait_cmap )
 
     elif( args.use_tree=="taxonomic" ):
         files = []
@@ -1103,7 +1134,7 @@ def standalone():
         tileGenerator = ProfileDataCollection(files, phylosignalProfiles, externalYrange = args.use_Y_range)
 
         #return plotSpeciesOnTaxonomicTree()
-        ret = plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, ownXserver=args.X_server, treeScale=7, highlightSpecies=frozenset(args.highlight_species), numProfileGroups=tileGenerator.getNumProfileGroups(), limitTaxonomy=args.limit_taxonomy )
+        ret = plotSpeciesOnTaxonomicTree(tileFunc=tileGenerator.getProfileTileFunc(), hideLegend=args.hide_legend, hideEnvironmentalVars=args.hide_environmental_vars, ownXserver=args.X_server, treeScale=7, highlightSpecies=frozenset(args.highlight_species), numProfileGroups=tileGenerator.getNumProfileGroups(), limitTaxonomy=args.limit_taxonomy, externalTrait=args.plot_external_trait )
 
         print( "--"*20 )
         print( "Y scale used: {} (external: {})".format(tileGenerator.getYRange(), bool(not args.use_Y_range is None) ) )
