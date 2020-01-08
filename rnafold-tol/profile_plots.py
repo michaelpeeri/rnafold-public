@@ -72,6 +72,17 @@ class ProfilePlot(object):
                     rank = float(row[2])
                     assert(rank >= 0.0 and rank <= 1.0 )
                     pa[row[0]] = rank
+
+        externalProperty = {}
+        externalPropertyMedian = None
+        if( args.external_property ):
+            with open(args.external_property, "rb") as csvfile:
+                reader = csv.reader(csvfile, delimiter=',')
+                for row in reader:
+                    if row[0][0]=="#": continue
+                    value = float(row[1])
+                    externalProperty[row[0]] = value
+            externalPropertyMedian = np.median( externalProperty.values() )
                     
 
     def performPlots(self):
@@ -111,6 +122,13 @@ class ProfilePlot(object):
                 nativeMeanProfile_HighPAOnly = MeanProfile( profileLength(args.profile) )
                 nativeMeanProfile_MediumPAOnly = MeanProfile( profileLength(args.profile) )
                 nativeMeanProfile_LowPAOnly = MeanProfile( profileLength(args.profile) )
+
+            meanProfile_HighExtPropOnly = None
+            meanProfile_LowExtPropOnly  = None
+            if( args.external_property ):
+                meanProfile_HighExtPropOnly = MeanProfile( profileLength(args.profile) )
+                meanProfile_LowExtPropOnly  = MeanProfile( profileLength(args.profile) )
+            
 
             GCProfile = MeanProfile( profileLength(args.profile) )
 
@@ -205,6 +223,15 @@ class ProfilePlot(object):
                         nativeMeanProfile_LowPAOnly.add( profileData[0,None] )
                     elif( not paval is None ):
                         nativeMeanProfile_MediumPAOnly.add( profileData[0,None] )
+
+                if( args.external_property ):
+                    extPropValue = externalProperty.get( xxxxxx, None )
+                    if extPropValue >= externalPropertyMedian:
+                        meanProfile_HighExtPropOnly.add( profileData[0,None] )
+                    else:
+                        meanProfile_LowExtPropOnly.add( profileData[0,None] )
+                        
+
 
                 cds_length_nt = len(fullCDS)
                 cdsLengths.append(cds_length_nt)
@@ -712,6 +739,7 @@ if __name__=="__main__":
     argsParser.add_argument("--num-shuffles", type=int, default=20)
     argsParser.add_argument("--pax-db", type=str, required=False)
     argsParser.add_argument("--codonw", type=bool, default=False)
+    argsParser.add_argument("--external-property", type=str, default=None)
     argsParser.add_argument("--distributed", action="store_true", default=False)
     args = argsParser.parse_args()
 
