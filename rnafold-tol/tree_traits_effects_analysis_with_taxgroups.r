@@ -30,7 +30,7 @@ library("Metrics")
 inputTree <- "nmicro_s6_pruned_with_taxids.nw"
 
 #redis <- redux::hiredis(host="power5", password="rnafold")
-redisConnect(host="compute-0-224", password="rnafold")
+redisConnect(host="compute-0-81", password="rnafold")
 
 #profileStart <- 0
 #profileStop <- 1000
@@ -587,11 +587,26 @@ getGenomicDCBS <- function(taxId)
     }
 }
 
+getGenomicI_TE <- function(taxId)
+{
+    val <- redisGet(sprintf("species:taxid:%s:properties:I_TE", taxId))
+    
+    if( !is.null(val)) {
+        val <- as.double(val)
+        stopifnot( val > 0.0 && val < 1.0 )
+        return( val )
+    }
+    else
+    {
+        return( NA )  # convert NULL to NA
+    }
+}
+
 
 readAllProfiles <- function( taxIds, profileSpecifications )
 {
 
-    args <- list( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), GenomeSizeMb=double(), LogGenomeSize=double(), ProteinCount=integer(), GrowthTimeHours=double(), LogGrowthTime=double(), GenomicENc=double(), GenomicENc.prime=double(), GenomicCAI=double(), GenomicCBI=double(), GenomicFop=double(), GenomicNc=double(), GenomicDCBS=double(), row.names=integer() )
+    args <- list( GenomicGC=double(), OptimumTemp=double(), TemperatureRange=ordered(c(), temperatureLevels), PairedFraction=double(), Salinity=ordered(c(), salinityLevels), Habitat=factor(c(), habitatLevels), OxygenReq=factor(c(), oxygenLevels), GenomeSizeMb=double(), LogGenomeSize=double(), ProteinCount=integer(), GrowthTimeHours=double(), LogGrowthTime=double(), GenomicENc=double(), GenomicENc.prime=double(), GenomicCAI=double(), GenomicCBI=double(), GenomicFop=double(), GenomicNc=double(), GenomicDCBS=double(), GenomicI_TE=double(), row.names=integer() )
     for (i in 1:length(profileSpecifications) )
     {
         newargs <- lapply(1:profileSpecifications[[i]]$len, function (i) numeric(0) )
@@ -647,9 +662,10 @@ readAllProfiles <- function( taxIds, profileSpecifications )
 
         genomicDCBS <- getGenomicDCBS( taxId )
         
+        genomicI_TE <- getGenomicI_TE( taxId )
 
         #args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Profile=t(profile), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, row.names=c(taxId) )
-        args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, GenomeSizeMb=genomeSizeMb, LogGenomeSize=log(genomeSizeMb), ProteinCount=proteinCount, GrowthTimeHours=c(growthTimeHours), LogGrowthTime=log(growthTimeHours), GenomicENc=c(genomicENc), GenomicENc.prime=c(genomicENc.prime), GenomicCAI=c(genomicCAI), GenomicCBI=c(genomicCBI), GenomicFop=c(genomicFop), GenomicNc=c(genomicNc), GenomicDCBS=c(genomicDCBS), row.names=c(taxId) )
+        args <- list( GenomicGC=c(gcContent), OptimumTemp=c(optimumTemperature), TemperatureRange=temperatureRange, PairedFraction=c(pairedFraction), Salinity=salinity, Habitat=habitat, OxygenReq=oxygenReq, GenomeSizeMb=genomeSizeMb, LogGenomeSize=log(genomeSizeMb), ProteinCount=proteinCount, GrowthTimeHours=c(growthTimeHours), LogGrowthTime=log(growthTimeHours), GenomicENc=c(genomicENc), GenomicENc.prime=c(genomicENc.prime), GenomicCAI=c(genomicCAI), GenomicCBI=c(genomicCBI), GenomicFop=c(genomicFop), GenomicNc=c(genomicNc), GenomicDCBS=c(genomicDCBS), GenomicI_TE=c(genomicI_TE), row.names=c(taxId) )
         for (i in 1:length(profileSpecifications) )
         {
             #print("--//--//--")
@@ -2004,7 +2020,7 @@ olsRegressionRangeAnalysis <- function( traits, Xtrait, profileRange, plotCaptio
     stopifnot(nrow(subranges) == length(range)*(length(range)+1)/2 ) # arithmetic series sum
 
     out <- data.frame( Var1=integer(), Var2=integer(), Pvalue=double(), Buse.R2=double(), Logpval=double(), NumSpecies=integer(), DirectionsIndicator=character() )
-
+    profilePositions <- getProfilePositions( profileId )
     handleSubrange <- function(v)   # Perform regression on each subrange
     {
         out <- get('out', parent.frame())
@@ -2019,8 +2035,8 @@ olsRegressionRangeAnalysis <- function( traits, Xtrait, profileRange, plotCaptio
             v$Pvalue    <- regressionResults$pvalue
             v$Buse.R2   <- regressionResults$R2
             v$Logpval <- log10( v$Pvalue )
-            v$Var1 <- (v$Var1 - 1) * profileStep
-            v$Var2 <- (v$Var2 - 1) * profileStep
+            v$Var1 <- profilePositions[v$Var1] # (v$Var1 - 1) * profileStep
+            v$Var2 <- profilePositions[v$Var2] # (v$Var2 - 1) * profileStep
             v$NumSpecies <- regressionResults$N
             v$DirectionsIndicator <- regressionResults$directionsIndicator
             v$MIC <- regressionResults$MIC
@@ -2190,7 +2206,12 @@ TestCorrelationBetweenScalarTraits <- function()
     print(cor( traits$GenomicGC,  traits$GenomicENc,  use="complete.obs"  ) )
     print(cor( traits$GenomicGC,  traits$GenomicENc.prime,  use="complete.obs"  ) )
     #print(cor( traits.normalized$GenomicENc.prime, traits.normalized$Profile_1.sd, use="complete.obs"  ) )
-    #print(cor( traits.normalized$GenomicENc.prime, traits.normalized$Profile_2.sd, use="complete.obs"  ) )
+                                        #print(cor( traits.normalized$GenomicENc.prime, traits.normalized$Profile_2.sd, use="complete.obs"  ) )
+    
+    print(cor( traits$GenomicCAI,  traits$GenomicENc.prime,  use="complete.obs"  ) )
+    print(cor( traits$GenomicI_TE, traits$GenomicCAI,        use="complete.obs"  ) )
+    print(cor( traits$GenomicI_TE, traits$GenomicENc.prime,  use="complete.obs"  ) )
+    print(cor( traits$GenomicGC,   traits$GenomicCAI,        use="complete.obs"  ) )
 
 }
 
@@ -6111,11 +6132,112 @@ figure_GC_vs_dLFE_in_Eukaryotes_GLS_MIC <- function()
     print("--------------------------------------------------------------------")
 }
 
+figure_Regression_I_TE_1 <- function()
+{
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicI_TE",  as.integer(c(1,2)), profileId=1, plotRegression=TRUE, caption="Start-referenced (0-10nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicI_TE",  as.integer(c(1,2)), profileId=1, plotRegression=TRUE, caption="Start-referenced (0-10nt)" )
+    
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicI_TE",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicI_TE",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )
+
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicCAI",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicCAI",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )
+
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicDCBS",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicDCBS",  as.integer(c(11,31)), profileId=1, plotRegression=TRUE, caption="Start-referenced (100-300nt)" )    
+
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicI_TE",  as.integer(c(1,21)), profileId=2, plotRegression=TRUE, caption="End-referenced (-300 - -100nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicI_TE",  as.integer(c(1,21)), profileId=2, plotRegression=TRUE, caption="End-referenced (-300 - -100nt)" )
+
+    performGLSregression_profileRangeMean_withFilter( traits, tree, "Member_all_1", "GenomicI_TE",  as.integer(c(30,31)), profileId=2, plotRegression=TRUE, caption="End-referenced (-300 - -100nt)" )
+
+    performOLSregression_profileRangeMean_withFilter( traits,       "Member_all_1", "GenomicI_TE",  as.integer(c(30,31)), profileId=2, plotRegression=TRUE, caption="End-referenced (-300 - -100nt)" )
+    
+    #results.t1       <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          trait, pyramidSpec, plotCaption="", profileId=profileId, extras=extras)
+
+}
+figure_Regression_I_TE_2 <- function(rangeSpec, profileId, yrange )
+{
+    results.all  <- data.frame()
+    #
+    results.t1   <- glsRangeAnalysisWithFilter( traits, tree, "Member_all_1",          "GenomicI_TE", rangeSpec, plotCaption="", profileId=profileId )
+    iteLabel     <- sprintf("I_TE (N=%d)", results.t1$NumSpecies[1])
+    results.t1$T <- iteLabel
+    results.all  <- rbind( results.all, results.t1)
+    #
+    ## results.t2   <- olsRangeAnalysisWithFilter( traits,       "Member_all_1",          "GenomicI_TE", rangeSpec, plotCaption="", profileId=profileId )
+    ## olsLabel     <- sprintf("I_TE; OLS (N=%d)", results.t2$NumSpecies[1] )
+    ## results.t2$T <- olsLabel
+    ## results.all  <- rbind( results.all, results.t2)
+
+    results.t3   <- glsRangeAnalysisWithFilter( traits, tree,  "Member_all_1",          "GenomicCAI", rangeSpec, plotCaption="", profileId=profileId )
+    caiLabel     <- sprintf("CAI (N=%d)", results.t3$NumSpecies[1] )
+    results.t3$T <- caiLabel
+    results.all  <- rbind( results.all, results.t3)
+
+    results.t4   <- glsRangeAnalysisWithFilter( traits, tree,  "Member_all_1",          "GenomicDCBS", rangeSpec, plotCaption="", profileId=profileId )
+    dcbsLabel    <- sprintf("DCBS (N=%d)", results.t4$NumSpecies[1] )
+    results.t4$T <- dcbsLabel
+    results.all  <- rbind( results.all, results.t4)
+
+    results.t5   <- glsRangeAnalysisWithFilter( traits, tree,  "Member_all_1",          "GenomicENc.prime", rangeSpec, plotCaption="", profileId=profileId )
+    enc.primeLabel    <- sprintf("ENc' (N=%d)", results.t5$NumSpecies[1] )
+    results.t5$T <- enc.primeLabel
+    results.all  <- rbind( results.all, results.t5)
+    
+    colorScale        <- c("#26c49f", "#c61a48", "#ffff00", "#2577c9"       )
+    names(colorScale) <- c(iteLabel,  caiLabel,  dcbsLabel, enc.primeLabel  )
+    
+
+    p <- ggplot(results.all, aes(x=Var1) ) + 
+        geom_hline( yintercept=0, color="black") +
+        geom_line( aes(y=Buse.R2, color=T), alpha=0.7, size=1.3 ) +
+        #geom_line( data=d.all[d.all$T=="GenomicGC",],                  aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        #geom_line( data=d.all[d.all$T=="GenomicENc.prime",],           aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        #geom_line( data=d.all[d.all$T=="GenomicGC+GenomicENc.prime",], aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        #geom_line( data=d.all[d.all$T=="Test",],                       aes(x=Var1, y=Buse.R2, alpha=factor(significant), group=significant.group), size=0.35, color="white", linetype="dotted" ) +
+        #scale_alpha_manual( values=c(0.0, 1.0) ) +
+        #scale_colour_manual( values=c("GenomicGC"="blue", "GenomicENc.prime"="#208020", "GenomicGC+GenomicENc.prime"="red", "Test"="grey" ) ) +
+        scale_color_manual( values=colorScale ) +
+        #scale_size_manual(   values=c("GenomicGC"=1.0,    "GenomicENc.prime"=1.0,   "GenomicGC+GenomicENc.prime"=1.6,     "Test"=0.6    ) ) +
+        #scale_y_continuous( limits=yrange, breaks=c( 0.0, 0.20, 0.40, 0.60 ), labels=c( "0.0", "0.2", "0.4", "0.6" ) ) +
+        scale_y_continuous( limits=yrange, breaks=c(-0.4,-0.3,-0.2,-0.1,0.0,0.1,0.2,0.3,0.4 ) ) +
+        labs(x=sprintf("CDS position (relative to %s) (nt)", getProfileReference(profileId)), y="R^2") +
+        theme( plot.background = element_blank(),   # Hide unnecessary theme elements (background panels, etc.)
+              panel.grid.major.y = element_line(color="grey", size=0.50),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor = element_blank(),
+              panel.background = element_blank(),
+              aspect.ratio = 0.7
+              )
+        guides( alpha=FALSE )     # Hide the legend (will be plotted separately)
+
+    if( profileId==1 )
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(0,100,200,300),
+                                labels=c(0,100,200,300), expand=expand_scale( mult=c(0,0) ) )
+    }
+    else
+    {
+        p <- p +
+            scale_x_continuous( breaks=c(-300,-200,-100,0),
+                                labels=c(-300,-200,-100,0), expand=expand_scale( mult=c(0,0) ) )
+    }
+    print(p)
+
+}
+
 ############################################################
 
-report_taxonRobustnessForTrait( "GenomicGC",          rangeSpec=c(1,31), profileId=1 )
-report_taxonRobustnessForTrait( "GenomicENc.prime",   rangeSpec=c(1,31), profileId=1 )
-report_taxonRobustnessForTrait( "OptimumTemp",        rangeSpec=c(1,31), profileId=1 )
+#report_taxonRobustnessForTrait( "GenomicGC",          rangeSpec=c(1,31), profileId=1 )
+#report_taxonRobustnessForTrait( "GenomicENc.prime",   rangeSpec=c(1,31), profileId=1 )
+#report_taxonRobustnessForTrait( "OptimumTemp",        rangeSpec=c(1,31), profileId=1 )
 
 
 #figure_PartialDeterminationAnalysis_GC_and_ENc.prime()
@@ -6136,9 +6258,10 @@ report_taxonRobustnessForTrait( "OptimumTemp",        rangeSpec=c(1,31), profile
 #figure_GLS_GC_vs_endosymbionts()
 #report_testRegressionForWeakModelComponents()
 #report_testCompoundClassification()
-#TestCorrelationBetweenScalarTraits()
-
-
+TestCorrelationBetweenScalarTraits()
+figure_Regression_I_TE_1()
+figure_Regression_I_TE_2( c(1,31), profileId=1, yrange=c(-0.5, 0.5) ) # c(-0.15, 0.49) )
+figure_Regression_I_TE_2( c(2,32), profileId=2, yrange=c(-0.5, 0.5) )
 ############################################################
 
 print("----------------------------------------------------------------")
