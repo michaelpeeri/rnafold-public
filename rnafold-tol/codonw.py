@@ -72,7 +72,27 @@ def readCodonw(fastaPath):
     df['L_aa'] = df['L_aa'].astype(np.int)
     
     return df
+
+
+def calcCAI( allSeqsFastaPath, highlyExpressedFastPath, geneticCode=11 ):
+    # conda run -n py3 CAI -s aaa -r fsdafsd -g 11
+    # singularity exec -B /tamir1/mich1 -B /tmp/ cai-python.simg CAI
+    #out = subprocess.check_output(('/tamir1/mich1/anaconda3/bin/python3', '/tamir1/mich1/anaconda3/bin/CAI', '-s', allSeqsFastaPath, '-r', highlyExpressedFastPath), shell=False)
+    #out = subprocess.check_output(('conda','run', '-p', '/tamir1/mich1/anaconda3/', 'CAI', '-s', allSeqsFastaPath, '-r', highlyExpressedFastPath, '-g', 11), shell=False)
+    out = subprocess.check_output(('singularity', 'exec', '-B', '/tamir1/mich1', 'cai-python.simg', 'python', 'py3CAI.py', '-s', allSeqsFastaPath, '-r', highlyExpressedFastPath, '-g', str(geneticCode) ), shell=False)
+
+    ret = {}
+
+    for line in out.split('\n'):
+        if not line: continue
+
+        geneId, CAIval = line.split('\t')
+        CAIval = float(CAIval)
+        ret[geneId] = CAIval
+
+    return ret
         
+
 """
 Run codonw to get a profile of CUB metrics (averaged over all genes, for each window)
 Most metrics cannot be computed for a single-gene window, but we can compute  them over that window on the entire genome

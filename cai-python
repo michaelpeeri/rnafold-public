@@ -1,0 +1,14 @@
+Bootstrap: docker
+
+From: continuumio/miniconda3
+
+
+%files
+
+
+%post
+#apt-get update
+#mkdir -p /usr/share/man/man1/ # workaround for missing directory 
+#apt-get install -y bowtie2 trimmomatic python3-htseq fastqc samtools
+/opt/conda/bin/pip install CAI
+#conda install -c bioconda htseq 
