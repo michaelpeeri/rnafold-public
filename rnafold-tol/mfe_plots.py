@@ -14,8 +14,8 @@ plt.style.use('ggplot') # Use the ggplot style
 from data_helpers import getSpeciesName, getSpeciesFileName, getGenomicGCContent, getSpeciesProperty, getSpeciesShortestUniqueNamesMapping
 from sklearn import decomposition
 from sklearn.neighbors import KernelDensity
-from sklearn.grid_search import GridSearchCV
-from sklearn.cross_validation import KFold
+#from sklearn.grid_search import GridSearchCV
+#from sklearn.cross_validation import KFold
 import seaborn as sns
 import cairo
 from pyqtree import Index
@@ -28,6 +28,11 @@ def plotMFEProfileWithGC(taxId, profileId, data):
 
     data[['native', 'shuffled']].plot(ax=ax1)
     data[['shuffled75', 'shuffled25']].plot(ax=ax1, style='--')
+
+    smfe = data['native']-data['shuffled']
+    ax1.plot([min(data.index), max(data.index)], [0,0], c='black')
+    ax1.plot( data.index, smfe, zorder=10, label=u"\u0394MFE" )
+    
 
     speciesName = getSpeciesName(taxId)
 
@@ -1047,34 +1052,36 @@ def overlayImages(images, outputFile):
 
 
 def estimateModeUsingKDE(xs):
-    xs = np.expand_dims(xs, 1)
-    assert(xs.ndim==2)
+    raise Exception("Not impl")
 
-    bandwidths = 10 ** np.linspace(-2.0, 1, 500)
-    
-    cv = KFold(len(xs), n_folds=10)
-    #cv = LeaveOneOut(len(x1))
-    
-    grid = GridSearchCV(KernelDensity(kernel='gaussian'),
-                        {'bandwidth': bandwidths},
-                        cv=cv )
-    grid.fit(xs)
-    bw = grid.best_params_['bandwidth']
-    
-    kde = KernelDensity(bandwidth=bw, kernel='gaussian')
-    kde.fit(xs)  # calculate the KDE
-    print(xs.shape)
+    # xs = np.expand_dims(xs, 1)
+    # assert(xs.ndim==2)
 
-    x_d = np.linspace( min(xs), max(xs), 500 )  # This must cover the range of values.. TODO - fix this...
-    print( np.expand_dims(x_d, 1).shape)
+    # bandwidths = 10 ** np.linspace(-2.0, 1, 500)
     
-    logprob = kde.score_samples( np.expand_dims(x_d, 1) )  # score the KDE over a range of values
+    # cv = KFold(len(xs), n_folds=10)
+    # #cv = LeaveOneOut(len(x1))
+    
+    # grid = GridSearchCV(KernelDensity(kernel='gaussian'),
+    #                     {'bandwidth': bandwidths},
+    #                     cv=cv )
+    # grid.fit(xs)
+    # bw = grid.best_params_['bandwidth']
+    
+    # kde = KernelDensity(bandwidth=bw, kernel='gaussian')
+    # kde.fit(xs)  # calculate the KDE
+    # print(xs.shape)
 
-    pos = np.argmax(logprob)
-    peak = x_d[pos]
-    peakVal = logprob[pos]
-    assert(all(logprob <= peakVal))
-    return (peak, peakVal)
+    # x_d = np.linspace( min(xs), max(xs), 500 )  # This must cover the range of values.. TODO - fix this...
+    # print( np.expand_dims(x_d, 1).shape)
+    
+    # logprob = kde.score_samples( np.expand_dims(x_d, 1) )  # score the KDE over a range of values
+
+    # pos = np.argmax(logprob)
+    # peak = x_d[pos]
+    # peakVal = logprob[pos]
+    # assert(all(logprob <= peakVal))
+    # return (peak, peakVal)
     
 
 class LayerConfig(object):
@@ -1178,7 +1185,7 @@ def saveHistogram(data, filename):
     
     
     
-def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0):
+def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0.0, profileScale=1.0, fontSize=7, overlapAction="ignore", showDensity=True, highlightSpecies=None, addLoadingVectors=[], debug=False, loadingVectorsScale=5.4, zoom=1.0, legendXpos=0.0, traitValues={}, symbolScale=8.0, traitCmap="viridis"):
     filteredProfiles = {}
     for key, profile in biasProfiles.items():
         if (not np.any(np.isnan(profile))) and (key in traitValues):
@@ -1212,10 +1219,10 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     D1 = 1 # D1 - component to show on X scale
     assert(D0!=D1)
 
-    D0_peak = estimateModeUsingKDE( X_reduced[:,D0] )
-    D1_peak = estimateModeUsingKDE( X_reduced[:,D1] )
-    distPlotsScales = (exp(D1_peak[1])*1.12, exp(D0_peak[1])*1.12)
-    print("Peaks: {} {}".format(exp(D1_peak[1]), exp(D0_peak[1])))
+    D0_peak = np.median( X_reduced[:,D0] ) #estimateModeUsingKDE( X_reduced[:,D0] )
+    D1_peak = np.median( X_reduced[:,D1] ) #estimateModeUsingKDE( X_reduced[:,D1] )
+    distPlotsScales = (exp(D1_peak)*1.12, exp(D0_peak)*1.12)
+    print("Peaks: {} {}".format(exp(D1_peak), exp(D0_peak)))
     
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
@@ -1377,13 +1384,31 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
                 ys.append( X_reduced[i,D0] )
                 cs.append( traitValues.get(taxId, None) )
                 
-            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale, alpha=1.0, edgecolors='none', cmap="viridis", label="Trait"  )
+            traitPlot = ax4.scatter(xs, ys, c=cs, s=symbolScale, alpha=1.0, edgecolors='none', cmap=traitCmap, label="Trait"  )
             fig.colorbar(traitPlot, shrink=0.5)
+
+            if highlightSpecies:
+                xs = []
+                ys = []
+                cs = []
+                for i, taxId in enumerate(biasProfiles.keys()):
+                    if taxId in highlightSpecies:
+                        # Determine the location for this profile
+                        x = X_reduced[i,D1]
+                        y = X_reduced[i,D0]
+                        xs.append( x )
+                        ys.append( y )
+                        cs.append( traitValues.get(taxId, None) )
+                        
+                        ax4.annotate(shortNames[taxId], (x - scaleX*0.03, y + scaleY*0.012), fontsize=fontSize, zorder=100)
+
+                    highlights = ax4.scatter(xs, ys, c=cs, s=symbolScale*3, alpha=1.0, edgecolors='black', cmap=traitCmap  )
             
 
         if layerConfig.debug:
-            ax4.scatter(debugSymbols[0], debugSymbols[1], s=50, alpha=0.8, c="green", marker="+", zorder=300 )
-            ax4.annotate( "*", xy=(D1_peak[0], D0_peak[0]), alpha=0.5, color='red', zorder=250 )
+            #ax4.scatter(debugSymbols[0], debugSymbols[1], s=50, alpha=0.8, c="green", marker="+", zorder=300 )
+            #ax4.annotate( "*", xy=(D1_peak[0], D0_peak[0]), alpha=0.5, color='red', zorder=250 )
+            pass
 
         ax4.set_ylabel('PCV1')
         ax4.set_xlabel('PCV2')
