@@ -232,6 +232,23 @@ Get the nuclear translation table used for this genome
 def getSpeciesTranslationTable(taxId):
     return int(r.get(speciesTranslationTableKey % taxId))
 
+
+def getSpeciesGenomeAnnotationsFile(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "genome-annot-path")
+    
+    if not propVal is None:
+        return propVal
+    else:
+        return None
+
+def getSpeciesGenomeAnnotationsVariant(taxId):
+    (propVal, _)    = getSpeciesProperty(taxId, "genome-annot-variant")
+    
+    if not propVal is None:
+        return propVal
+    else:
+        return None
+
 """
 Return True if all specied taxIds are valid.
 """
@@ -288,6 +305,9 @@ class CDSHelper(object):
             return cachedVal
 
         newVal = r.get( redisKey )
+        if newVal is None:
+            raise Exception("Property {} not found".format(redisKey))
+        
         if( convertFunc != None ):
             newVal = convertFunc(newVal)
 
@@ -404,6 +424,12 @@ class CDSHelper(object):
 
     def getTranslationTable(self):
         return getSpeciesTranslationTable(self._taxId)
+
+    def exists(self):
+        try:
+            return bool(self.seqId())
+        except Exception as e:
+            return False
 
     def sequence(self):
         # Get the sequence-id for the CDS sequence
