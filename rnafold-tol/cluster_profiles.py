@@ -1,3 +1,18 @@
+# RNAFold - Analyze mRNA folding bias (Local Folding Energy) based on randomizations.
+# Copyright (C) 2016-2020 Michael Peeri
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # Cluster profiles to find a small number of "representative profiles" (this is only meant for plotting, not downstream analysis)
 # We'd like to make sure each returned centroid is similar to all members of its cluster (and is not a simply the average of a number of sub-groups).
 # Outliers are not "noise" and should be represented by a cluster of their own.
