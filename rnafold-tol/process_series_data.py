@@ -154,10 +154,20 @@ def sampleProfilesFixedIntervals(results, startPosition=0, endPosition=5000, int
             #print("lastPosition: {}".format(lastPosition))
             #firstPosition = (lastPosition - startPosition) % interval
             #print("firstPosition: {}".format(firstPosition))
-            firstPosition = lastPosition - endPosition
+            firstPosition = max( lastPosition - endPosition, lastPosition % interval ) # if (lastPosition - endPosition) < 0, start from the first element
             #print("firstPosition: {}".format(firstPosition))
             #print("startPosition: {}".format(startPosition))
-            result["profile-data"] = fullProfile[:, firstPosition:(lastPosition+interval):interval]  # replace the full profile with the sampled profile
+
+            sampled = fullProfile[:, firstPosition:(lastPosition+interval):interval]  # replace the full profile with the sampled profile
+
+            # Pad with initial 0s if needed
+            expectedLen = (endPosition/interval)+1
+            actualLen   = sampled.shape[1]
+            if actualLen < expectedLen:
+                sampled = np.hstack( (np.full((1, expectedLen-actualLen), np.nan) ,  sampled ))
+            
+            result["profile-data"] = sampled
+            
             #print(result["profile-data"].shape)
         else:
             assert(False)

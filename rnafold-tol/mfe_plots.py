@@ -1497,6 +1497,29 @@ def PCAForProfiles(biasProfiles, profileValuesRange, profilesYOffsetWorkaround=0
     return a
 
 
+def plotProfilesBoxplots(df, positions):
+
+    
+    df = pd.melt( df.reset_index(), id_vars=['index', 'domain', 'Domain', 'Species'] )
+    df = df.assign( position=lambda x: x.variable )
+    #df[["position","value"]] = df[["position","value"]].apply(pd.to_numeric)
+    df["value"] = df["value"].apply(pd.to_numeric)
+    df = df[df.position.isin( positions )]
+
+    #    index domain variable      value
+    #0  564608    All     -310  -0.381416
+
+    f, ax = plt.subplots()
+    sns.boxplot( x='position', y='value', hue='domain', data=df )
+    
+    # g = sns.jointplot( xvals, yvals, kind="scatter", dropna=False )
+    plt.xlabel("CDS distance from stop codon")
+    plt.ylabel("DLFE")
+    # plt.ylim((-1,1))
+    f.savefig("all_mfe_boxplots.pdf")
+    f.savefig("all_mfe_boxplots.svg")
+    
+
 #def drawPCAforTree( profilesAsMap, xdata ):
 #    arbitraryProfile =  profilesAsMap.values()[0]
 #    assert(arbitraryProfile.ndim == 1)

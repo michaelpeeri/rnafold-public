@@ -5,8 +5,9 @@ import re
 from pyvirtualdisplay.display import Display  # use Xvnc to provide a headless X session (required by ete for plotting)
 from ete3 import Tree, TreeStyle, NodeStyle, TextFace, StaticItemFace, faces, AttrFace, PhyloTree
 #from PyQt4 import QtCore, QtGui
-import numpy as np
-from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange, getNodeDiversityPlot
+import numpy  as np
+import pandas as pd
+from mfe_plots import getHeatmaplotProfilesValuesRange, getProfileHeatmapTile, getLegendHeatmapTile, loadProfileData, loadPhylosignalProfiles, PCAForProfiles, getHeatmaplotProfilesValuesRange, getNodeDiversityPlot, plotProfilesBoxplots
 from reference_trees import pruneReferenceTree_Nmicrobiol201648, pruneTreeByTaxonomy, extendTreeWithSpecies, getTaxidsFromTree
 from ncbi_taxa import ncbiTaxa
 from cluster_profiles import analyzeProfileClusters, calcDiversityMetrics, correlationMetric, plotDistancesDistribution
@@ -973,6 +974,68 @@ def createTraitMapping(trait):
     return ret
         
 
+def plotProfilesDistribution( args, profiles ):
+    for group in range(profiles.getNumProfileGroups()):
+        allProfiles = profiles.getBiasProfiles( profilesGroup=group )
+        dfProfiles                      = pd.DataFrame( columns=range(-300,1,10), index=pd.Index([]) )
+        dfProfilesDomainBacteria        = pd.DataFrame( columns=range(-300,1,10), index=pd.Index([]) )
+        dfProfilesDomainArchaea         = pd.DataFrame( columns=range(-300,1,10), index=pd.Index([]) )
+        dfProfilesDomainEukaryotes      = pd.DataFrame( columns=range(-300,1,10), index=pd.Index([]) )
+        
+        for taxId, currProfile in allProfiles.items():
+            lineage = frozenset(ncbiTaxa.get_lineage(taxId))
+            
+            if not args.limit_taxonomy is None:
+                if not args.limit_taxonomy in lineage:
+                    continue
+                
+            dfProfiles = dfProfiles.append( pd.DataFrame( dict(zip( currProfile.index.values, currProfile.values )), index=pd.Index([taxId]), columns=currProfile.index.values ) )  # convert series (column) into row
+
+            if 2 in lineage:
+                dfProfilesDomainBacteria = dfProfilesDomainBacteria.append( pd.DataFrame( dict(zip( currProfile.index.values, currProfile.values )), index=pd.Index([taxId]), columns=currProfile.index.values ) )  # convert series (column) into row
+            elif 2157 in lineage:
+                dfProfilesDomainArchaea = dfProfilesDomainArchaea.append( pd.DataFrame( dict(zip( currProfile.index.values, currProfile.values )), index=pd.Index([taxId]), columns=currProfile.index.values ) )  # convert series (column) into row
+            elif 2759 in lineage:
+                dfProfilesDomainEukaryotes = dfProfilesDomainEukaryotes.append( pd.DataFrame( dict(zip( currProfile.index.values, currProfile.values )), index=pd.Index([taxId]), columns=currProfile.index.values ) )  # convert series (column) into row
+
+    profilesByDomain = ((dfProfiles, "All"), (dfProfilesDomainBacteria, "Bacteria"), (dfProfilesDomainArchaea, "Archaea"), (dfProfilesDomainEukaryotes, "Eukaryotes"))
+    for df, label in profilesByDomain:
+        print(label)
+        print(df.loc[:,-30:0].shape)
+        print(df.loc[:,-30:0].mean())
+        print(df.loc[:,-30:0].std())
+
+        print(df.loc[:,-280:-240].shape)
+        print(df.loc[:,-280:-240].mean())
+        print(df.loc[:,-280:-240].std())
+
+    fix = lambda x: lambda _: x
+    dfProfilesDomainBacteria   = dfProfilesDomainBacteria.assign(   domain=fix( 'Bacteria (N={})'.format( dfProfilesDomainBacteria.shape[0] )) )
+    dfProfilesDomainArchaea    = dfProfilesDomainArchaea.assign(    domain=fix( 'Archaea (N={})'.format(  dfProfilesDomainArchaea.shape[0]  )) )
+    dfProfilesDomainEukaryotes = dfProfilesDomainEukaryotes.assign( domain=fix( 'Eukaryotes (N={})'.format( dfProfilesDomainEukaryotes.shape[0]  )) )
+    dfProfiles                 = dfProfiles.assign(                 domain=lambda x:'All (N={})'.format( dfProfiles.shape[0] ))
+    dfProfilesAll              = dfProfiles.append( dfProfilesDomainBacteria.append( dfProfilesDomainArchaea.append( dfProfilesDomainEukaryotes )))
+    print("####"*5)
+    print(dfProfilesAll.shape)
+
+    plotProfilesBoxplots( dfProfilesAll, positions=(-250, -10) )
+        
+    # plotProfilesDists( dfProfiles,
+    #                    highlightSpecies=(), # 511145,), #(511145,224308),
+    #                    boxplotTicks=range(-90,111,100),
+    #                    yrange=(-4.5, 1.4),
+    #                    xrange=(-100,100),
+    #                    boxplotWidth=0.04,
+    #                    colors=('#4080f2',),
+    #                    defaultLabel="All species (N={})".format(dfProfiles.shape[0]),
+    #                    showBoxplots=False,
+    #                    aspect=args.aspect)
+    
+            
+
+        
+        
+
 
 def savePrunedTree(tree):
     tree.write(format=1, outfile="nmicro_s6_pruned_with_names.nw")
@@ -1027,7 +1090,7 @@ def standalone():
 
     argsParser = argparse.ArgumentParser()
     argsParser.add_argument("--use-profile-data", type=parseList(str), default=())
-    argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed", "PCA"), default="taxonomic")
+    argsParser.add_argument("--use-tree", choices=("taxonomic", "hug", "taxonomic-collapsed", "PCA", "profile-dists"), default="taxonomic")
     argsParser.add_argument("--use-phylosignal-data", type=str, default="")
     argsParser.add_argument("--limit-taxonomy", type=int, default=None)
     argsParser.add_argument("--include-all-species", action="store_true", default=False)
@@ -1141,6 +1204,22 @@ def standalone():
         print( "--"*20 )
         
         return ret
+    
+    elif( args.use_tree=="profile-dists" ):
+        files = []
+
+        if args.use_profile_data:
+            files = [[x for x in glob(profilesGlob) if os.path.exists(x)] for profilesGlob in args.use_profile_data]
+
+        profiles = ProfileDataCollection(files)
+
+        ret = plotProfilesDistribution( args, profiles )
+        
+        return ret
+    
+    else:
+        assert(False)
+            
 
 
 if __name__=="__main__":
